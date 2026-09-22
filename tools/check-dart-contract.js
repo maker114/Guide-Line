@@ -52,6 +52,53 @@ const TOMBSTONE = {
 
 const problems = [];
 
+/**
+ * 跳过一段字符串字面量，返回结束后一位的下标。
+ *
+ * 两个坑都在真实代码里踩到过：
+ *   1. `${...}` 插值里可以再嵌字符串（甚至再嵌插值），否则
+ *      `'…${a.join('\\n')}…'` 会被误判为括号不闭合；
+ *   2. **原始字符串** `r'\'` 里的反斜杠不是转义符，若按转义处理会把闭合引号吞掉。
+ */
+function skipString(text, start, isRaw) {
+  const quote = text[start];
+  const triple = text.substr(start, 3) === quote.repeat(3);
+  const end = triple ? quote.repeat(3) : quote;
+  let i = start + end.length;
+  while (i < text.length) {
+    if (!isRaw && text[i] === '\\') {
+      i += 2;
+      continue;
+    }
+    if (!isRaw && !triple && text[i] === '$' && text[i + 1] === '{') {
+      i = skipInterpolation(text, i + 2);
+      continue;
+    }
+    if (text.substr(i, end.length) === end) {
+      return i + end.length;
+    }
+    i += 1;
+  }
+  return i;
+}
+
+/** 跳过 `${ ... }` 的内容（从 `{` 之后开始），返回 `}` 之后一位 */
+function skipInterpolation(text, start) {
+  let depth = 1;
+  let i = start;
+  while (i < text.length && depth > 0) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      i = skipString(text, i);
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') depth -= 1;
+    i += 1;
+  }
+  return i;
+}
+
 /** 剥离字符串与注释，返回可用于括号配对的文本 */
 function stripLiterals(text) {
   let out = '';
@@ -71,21 +118,11 @@ function stripLiterals(text) {
       continue;
     }
     if (ch === "'" || ch === '"') {
-      const quote = ch;
-      const triple = text.substr(i, 3) === quote.repeat(3);
-      const end = triple ? quote.repeat(3) : quote;
-      i += end.length;
-      while (i < text.length) {
-        if (text[i] === '\\') {
-          i += 2;
-          continue;
-        }
-        if (text.substr(i, end.length) === end) {
-          i += end.length;
-          break;
-        }
-        i += 1;
-      }
+      // 识别原始字符串前缀：r'...' —— 只有前缀位置上的 r/R 才算
+      const before = i > 0 ? text[i - 1] : '';
+      const before2 = i > 1 ? text[i - 2] : '';
+      const isRaw = (before === 'r' || before === 'R') && !/[A-Za-z0-9_$]/.test(before2);
+      i = skipString(text, i, isRaw);
       out += '""';
       continue;
     }
