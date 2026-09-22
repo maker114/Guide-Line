@@ -11,6 +11,7 @@
  *   node --test test/         # Node 18+ 的原生运行器（等价）
  */
 
+const fs = require('fs');
 const path = require('path');
 const Module = require('module');
 const assert = require('assert');
@@ -32,11 +33,20 @@ Module._load = function patchedLoad(request) {
   return originalLoad.apply(this, arguments);
 };
 
-require(path.join(__dirname, 'logic.test.js'));
+const testFiles = fs
+  .readdirSync(__dirname)
+  .filter((f) => f.endsWith('.test.js'))
+  .sort();
+
+for (const f of testFiles) {
+  require(path.join(__dirname, f));
+}
 
 (async function main() {
   let passed = 0;
   const failures = [];
+
+  console.log(`运行 ${testFiles.length} 个测试文件，共 ${cases.length} 个用例：\n`);
 
   for (const c of cases) {
     try {

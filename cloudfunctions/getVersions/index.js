@@ -5,16 +5,14 @@
  * 轮询（Windows 端 5 分钟）**只能**调用本函数，避免每次下载整包 payload。
  */
 
-const cloudbase = require('@cloudbase/node-sdk');
+const { bootstrap } = require('../common/runtime');
 const { createHandler, resolveSessionFromRuntime } = require('../common/handler');
 const { getVersionsLogic } = require('../common/logic');
-const { CloudBaseStore } = require('../common/stores');
 
-const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
-const store = new CloudBaseStore(app.database());
+const rt = bootstrap();
 
 exports.main = createHandler({
-  getStore: async () => store,
-  resolveSession: () => resolveSessionFromRuntime(app),
+  getStore: async () => rt.store,
+  resolveSession: () => resolveSessionFromRuntime(rt.app),
   logic: getVersionsLogic,
 });

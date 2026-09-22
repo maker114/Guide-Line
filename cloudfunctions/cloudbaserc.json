@@ -27,6 +27,46 @@
       "timeout": 10,
       "installDependency": false,
       "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "registerAccount",
+      "runtime": "Nodejs18.15",
+      "handler": "registerAccount/index.main",
+      "timeout": 10,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "createPairingCode",
+      "runtime": "Nodejs18.15",
+      "handler": "createPairingCode/index.main",
+      "timeout": 5,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "pair",
+      "runtime": "Nodejs18.15",
+      "handler": "pair/index.main",
+      "timeout": 10,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "issueTicket",
+      "runtime": "Nodejs18.15",
+      "handler": "issueTicket/index.main",
+      "timeout": 10,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "rotateRecoveryCode",
+      "runtime": "Nodejs18.15",
+      "handler": "rotateRecoveryCode/index.main",
+      "timeout": 5,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
     }
   ]
 }

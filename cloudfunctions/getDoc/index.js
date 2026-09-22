@@ -5,16 +5,14 @@
  * payload 原样返回，云函数不做任何解析。
  */
 
-const cloudbase = require('@cloudbase/node-sdk');
+const { bootstrap } = require('../common/runtime');
 const { createHandler, resolveSessionFromRuntime } = require('../common/handler');
 const { getDocLogic } = require('../common/logic');
-const { CloudBaseStore } = require('../common/stores');
 
-const app = cloudbase.init({ env: cloudbase.SYMBOL_CURRENT_ENV });
-const store = new CloudBaseStore(app.database());
+const rt = bootstrap();
 
 exports.main = createHandler({
-  getStore: async () => store,
-  resolveSession: () => resolveSessionFromRuntime(app),
+  getStore: async () => rt.store,
+  resolveSession: () => resolveSessionFromRuntime(rt.app),
   logic: getDocLogic,
 });
