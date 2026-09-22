@@ -54,6 +54,12 @@
   UUID v4 与恢复码生成
 - **Dart 静态契约闸门**（`tools/check-dart-contract.js`）：括号平衡 + 各实体 `toJson()` 字段顺序
   与《数据契约》§3 逐字段比对 + `knownKeys` 一致性（在无 SDK 时挡住"顺序错了编译器也不报"的风险）
+- **本地存储层**（`lib/core/store/`）：`AtomicFile`（写 `.tmp` → flush → rename，损坏文件隔离为
+  `.corrupt.<ts>` 而非静默重建）、`LocalPaths`（4 文档 + 元数据 + 草稿目录）、
+  `LocalStore`（启动加载报告 + 原子落盘 + 冲突草稿）、`SyncState`（**不存版本号**）、
+  `PendingTx`（跨文档事务重放凭据）、`UiPrefs`（折叠状态等，不参与同步）
+- **同步接口与假后端**（`lib/sync/`）：`SyncBackend` 五方法接口（payload 以原始 JSON 字符串穿过，
+  不含任何 CloudBase 类型）、`FakeSyncBackend`（忠实复刻 CAS / 事务原子性 / 幂等重放，并统计调用次数）
 
 ### Verified
 
