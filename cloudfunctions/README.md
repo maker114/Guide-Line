@@ -56,6 +56,11 @@ node --test test/         # Node 18+ 的原生运行器（等价）
 
 ## 集合与索引（部署后手工创建一次）
 
+> 🔴 **建环境时必须选「文档型数据库」**，不要选「PostgreSQL 数据库」（ADR-069）。
+> PG 模式是环境级选择、**创建后不可互转**，而本目录的云函数全部基于**文档型** node-sdk
+> （`collection().doc().get()/set()` + `runTransaction`）；PG 模式的 GRANT/RLS 直连模型
+> 也与「客户端不直连数据库」（ADR-064）相斥。
+
 | 集合 | `_id` | 关键字段 |
 |---|---|---|
 | `documents` | `"<accountId>:<docName>"` | `accountId`, `name`, `version`, `updated_at`, `last_tx_id`, `payload` |
@@ -96,7 +101,8 @@ foreach ($fn in @('commitTx','getVersions','getDoc','registerAccount','createPai
 **① 开通环境**
 1. 打开 <https://tcb.cloud.tencent.com/dev>（或腾讯云控制台搜「云开发 CloudBase」）
 2. 首次使用需**实名认证**
-3. 「新建环境」→ 计费方式选**按量计费**（个人用量极低；先确认当前免费额度政策）
+3. 「新建环境」→ **数据库类型选「文档型数据库」**（⚠️ 不要选 PostgreSQL，见上方红字；**创建后不可互转**）
+   → 计费方式选**按量计费**（个人用量极低；先确认当前免费额度政策）
    → 地域选 **上海** → 起个名字（如 `guideline-prod`）
 4. 建好后在**环境概览**记下 **环境 ID**（形如 `guideline-prod-1g2h3j4k5l6m7n`）
 
