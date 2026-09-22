@@ -59,6 +59,11 @@ class Document {
   /// 落盘文本：与 `test/contract/sample/*.json` 逐字节一致。
   String toCanonicalText() => Canonical.documentText(toJson());
 
+  /// 仅 `payload` 的 JSON 字符串（供同步接口传递；接口层只认字符串）。
+  String payloadJson() => Canonical.compact(<String, dynamic>{
+        'items': items.map((e) => e.toJson()).toList(growable: false),
+      });
+
   Document copyWith({
     int? version,
     Object? updatedAt = _unset,
@@ -95,6 +100,51 @@ class Document {
     final rawItems = payload == null
         ? null
         : Canonical.readArray(payload['items'], '${name.fileName}.payload.items', issues);
+
+    final items = <Entity>[];
+    if (rawItems != null) {
+      for (var i = 0; i < rawItems.length; i += 1) {
+        final raw = Canonical.readObject(rawItems[i], '${name.fileName}.items[$i]', issues);
+        if (raw == null) continue;
+        final parsed = parseItem(name, raw, i, issues);
+        if (parsed != null) items.add(parsed);
+      }
+    }
+
+    return Document(
+      name: name,
+      version: version,
+      updatedAt: updatedAt,
+      lastTxId: lastTxId,
+      items: items,
+    );
+  }
+
+  /// 从「云端返回的 payload JSON」构造文档（Pull 用）。
+  ///
+  /// 接口层只传 `payload` 字符串（形如 `{"items":[...]}`），这里负责把它变成实体列表，
+  /// 并带上服务端给的 `version` / `updatedAt` / `lastTxId`。
+  static Document fromPayloadJson({
+    required DocName name,
+    required int version,
+    required String payloadJson,
+    required DecodeIssues issues,
+    int? updatedAt,
+    String? lastTxId,
+  }) {
+    Object? payload;
+    try {
+      payload = Canonical.decode(payloadJson);
+    } catch (error) {
+      issues.error('${name.fileName} 的 payload 不是合法 JSON：$error');
+      return Document.empty(name)
+          .copyWith(version: version, updatedAt: updatedAt, lastTxId: lastTxId);
+    }
+
+    final map = Canonical.readObject(payload, '${name.fileName}.payload', issues);
+    final rawItems = map == null
+        ? null
+        : Canonical.readArray(map['items'], '${name.fileName}.payload.items', issues);
 
     final items = <Entity>[];
     if (rawItems != null) {
