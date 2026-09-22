@@ -1,0 +1,69 @@
+# ============================================================
+#  GuideLine — Git 属性
+# ============================================================
+
+# 默认：入库统一 LF，检出亦为 LF
+# （Flutter 双端工具链均接受 LF；Windows 平台脚本在下方单独覆盖为 CRLF）
+* text=auto eol=lf
+
+# ---------- 源码：统一 LF ----------
+*.dart   text eol=lf
+*.kt     text eol=lf
+*.java   text eol=lf
+*.swift  text eol=lf
+*.m      text eol=lf
+*.mm     text eol=lf
+*.c      text eol=lf
+*.cc     text eol=lf
+*.cpp    text eol=lf
+*.h      text eol=lf
+*.hpp    text eol=lf
+*.gradle text eol=lf
+*.sh     text eol=lf
+
+# ---------- Windows 平台源码：CRLF ----------
+*.ps1    text eol=crlf
+*.psm1   text eol=crlf
+*.psd1   text eol=crlf
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+*.rc     text eol=crlf
+
+# ---------- 文档：保持原样，统一 LF ----------
+*.md     text eol=lf
+*.txt    text eol=lf
+*.json   text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+
+# ---------- Git 自身配置：强制 LF ----------
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+.gitmessage    text eol=lf
+
+# ---------- 二进制：禁止任何转换 ----------
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.ttf    binary
+*.otf    binary
+*.woff   binary
+*.woff2  binary
+*.jar    binary
+*.zip    binary
+*.exe    binary
+*.dll    binary
+*.so     binary
+*.a      binary
+*.lib    binary
+
+# ---------- 语言与生成文件 ----------
+# 避免 GitHub/GitLab 把仓库判定为某种语言
+*.g.dart linguist-generated=true
+*.freezed.dart linguist-generated=true
+
+# 锁定文件：保留在版本控制中，合并时不使用 union（避免产生非法 YAML）
+pubspec.lock text eol=lf

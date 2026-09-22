@@ -1,0 +1,103 @@
+# ============================================================
+#  GuideLine — 忽略规则
+#  适用：Flutter 双端（Android / iOS / Windows）
+#  原则：只忽略可再生成的产物，绝不忽略源文件与配置
+# ============================================================
+
+# ---------- Dart / Flutter ----------
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.g.dart
+*.freezed.dart
+*.mocks.dart
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Flutter 版本管理（FVM）
+.fvm/
+
+# ---------- Android ----------
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/android/key.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+*.jks
+*.keystore
+
+# ---------- iOS / macOS ----------
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/App.framework
+**/ios/Flutter/ephemeral/
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Runner.xcworkspace/xcuserdata/
+**/ios/Runner.xcodeproj/xcuserdata/
+**/ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+**/macos/Pods/
+**/macos/Flutter/ephemeral/
+
+# ---------- Windows ----------
+**/windows/flutter/ephemeral/
+**/windows/flutter/generated_plugin_registrant.*
+**/windows/flutter/generated_plugins.cmake
+**/*.vcxproj.user
+**/*.suo
+**/*.user
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.iml
+*.ipr
+*.iws
+.atom/
+*.swp
+*.swo
+*~
+
+# ---------- 操作系统 ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---------- 证书 / 密钥（安全红线）----------
+*.pem
+*.p12
+*.pfx
+*.mobileprovision
+key.properties
+secrets.json
+.env
+.env.*
+!.env.example
+
+# ---------- 日志与临时文件 ----------
+*.log
+npm-debug.log*
+yarn-error.log*
+coverage/
+lcov.info
+*.tmp
+*.bak
+*.orig
+*.rej
