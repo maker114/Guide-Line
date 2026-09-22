@@ -1,4 +1,3 @@
-import '../models/entity.dart';
 import '../models/inspiration.dart';
 import '../models/task.dart';
 import '../tree/tree_index.dart';

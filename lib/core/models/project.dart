@@ -12,14 +12,14 @@ class Project implements EntityNode {
     required this.date,
     required this.status,
     required this.archived,
-    required this.parentProjectId,
+    required String? parentProjectId,
     required this.order,
     required this.completedAt,
     required this.createdAt,
     required this.updatedAt,
     required this.deleted,
     this.extra = const <String, dynamic>{},
-  });
+  }) : parentId = parentProjectId;
 
   static const Set<String> knownKeys = <String>{
     'id',

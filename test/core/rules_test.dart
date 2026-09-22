@@ -191,9 +191,14 @@ void main() {
         project('mid', parent: 'root', status: NodeStatus.done),
         project('leaf', parent: 'mid', status: NodeStatus.pending),
       ]);
+      // 子节点自己变成非终态 → 祖先链上所有已完成的都要退回
       expect(ancestorsToRevert(index, 'leaf'), <String>['mid', 'root']);
+      // 新挂一个非终态子节点 → 同样是祖先链
       expect(parentsToRevertAfterInsert(index, 'leaf'), <String>['mid', 'root']);
-      expect(parentsToRevertAfterInsert(index, 'mid'), <String>['root']);
+      // mid 自身变成非终态（而不是"插入 mid"）→ 只有 root 需要退回
+      expect(ancestorsToRevert(index, 'mid'), <String>['root']);
+      // 而 mid 本身是终态，作为"新插入的节点"不应触发任何退回
+      expect(parentsToRevertAfterInsert(index, 'mid'), isEmpty);
     });
 
     test('终态子节点插入不会引发退回', () {

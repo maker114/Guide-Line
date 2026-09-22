@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/core/json/document.dart';
 import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
-import 'package:guideline/core/models/inspiration.dart';
 import 'package:guideline/core/models/project.dart';
 
 /// 数据契约回归测试（《数据契约》§6）。

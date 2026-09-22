@@ -7,7 +7,7 @@ class Task implements EntityNode {
   const Task({
     required this.id,
     required this.eventId,
-    required this.parentTaskId,
+    required String? parentTaskId,
     required this.taskType,
     required this.title,
     required this.dueAt,
@@ -19,7 +19,7 @@ class Task implements EntityNode {
     required this.updatedAt,
     required this.deleted,
     this.extra = const <String, dynamic>{},
-  });
+  }) : parentId = parentTaskId;
 
   static const Set<String> knownKeys = <String>{
     'id',

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:guideline/core/json/document.dart';
+import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/atomic_file.dart';

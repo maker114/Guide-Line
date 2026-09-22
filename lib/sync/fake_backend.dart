@@ -40,7 +40,7 @@ class FakeSyncBackend implements SyncBackend {
 
   @override
   Future<Account> ensureAccount() async {
-    _tick();
+    await _tick();
     if (unauthenticated) {
       throw const BackendFailure(BackendErrorCode.unauthenticated, '会话已失效');
     }
@@ -49,7 +49,7 @@ class FakeSyncBackend implements SyncBackend {
 
   @override
   Future<Account> pairWithCode(String pairingCode) async {
-    _tick();
+    await _tick();
     if (unauthenticated) {
       throw const BackendFailure(BackendErrorCode.unauthenticated, '会话已失效');
     }
@@ -61,7 +61,7 @@ class FakeSyncBackend implements SyncBackend {
 
   @override
   Future<Map<DocName, DocMeta>> getVersions() async {
-    _tick();
+    await _tick();
     getVersionsCallCount += 1;
     final out = <DocName, DocMeta>{};
     for (final name in DocName.values) {
@@ -76,7 +76,7 @@ class FakeSyncBackend implements SyncBackend {
 
   @override
   Future<DocSnapshot> getDoc(DocName name) async {
-    _tick();
+    await _tick();
     getDocCallCount += 1;
     final doc = _docs[name];
     return DocSnapshot(
@@ -89,7 +89,7 @@ class FakeSyncBackend implements SyncBackend {
 
   @override
   Future<CommitOutcome> commitTx(TxRequest request) async {
-    _tick();
+    await _tick();
     commitTxCallCount += 1;
     if (forceConflict) {
       forceConflict = false;

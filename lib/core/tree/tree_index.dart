@@ -1,5 +1,5 @@
-import '../models/entity.dart';
 import '../ids.dart';
+import '../models/entity.dart';
 
 /// 树索引：把扁平记录列表变成父 → 子索引，供完成判定、级联、归档区共用。
 ///
