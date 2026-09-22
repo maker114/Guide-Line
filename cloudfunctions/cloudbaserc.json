@@ -1,72 +1,71 @@
 {
-  "_note": "CloudBase CLI 部署配置。⚠️ envId 与根目录/handler 写法需按你所用 CLI 版本核对一次（见 README『部署』）。",
+  "_note": "CloudBase CLI 声明式部署配置。先用 `node tools/pack.js` 生成 dist/cli/<函数名>/（自包含，含 common/），再执行 cloudbase functions:deploy。",
   "version": "2.0",
   "envId": "{{env.CLOUDBASE_ENV_ID}}",
-  "functionRoot": ".",
   "functions": [
     {
       "name": "commitTx",
-      "runtime": "Nodejs18.15",
-      "handler": "commitTx/index.main",
+      "dir": "dist/cli/commitTx",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 10,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "getVersions",
-      "runtime": "Nodejs18.15",
-      "handler": "getVersions/index.main",
+      "dir": "dist/cli/getVersions",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 5,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "getDoc",
-      "runtime": "Nodejs18.15",
-      "handler": "getDoc/index.main",
+      "dir": "dist/cli/getDoc",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 10,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "registerAccount",
-      "runtime": "Nodejs18.15",
-      "handler": "registerAccount/index.main",
+      "dir": "dist/cli/registerAccount",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 10,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "createPairingCode",
-      "runtime": "Nodejs18.15",
-      "handler": "createPairingCode/index.main",
+      "dir": "dist/cli/createPairingCode",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 5,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "pair",
-      "runtime": "Nodejs18.15",
-      "handler": "pair/index.main",
+      "dir": "dist/cli/pair",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 10,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "issueTicket",
-      "runtime": "Nodejs18.15",
-      "handler": "issueTicket/index.main",
+      "dir": "dist/cli/issueTicket",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 10,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     },
     {
       "name": "rotateRecoveryCode",
-      "runtime": "Nodejs18.15",
-      "handler": "rotateRecoveryCode/index.main",
+      "dir": "dist/cli/rotateRecoveryCode",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
       "timeout": 5,
-      "installDependency": false,
-      "ignore": ["test/**", "**/*.test.js"]
+      "installDependency": false
     }
   ]
 }

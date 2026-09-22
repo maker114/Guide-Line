@@ -106,6 +106,8 @@ lcov.info
 node_modules/
 .npm/
 functions_dist/
+# 云函数打包产物（由 cloudfunctions/tools/pack.js 生成，不入库）
+dist/
 
 # ---------- 本地工具链（不入库）----------
 # Flutter / Dart SDK 若安装在工作区内，放这里

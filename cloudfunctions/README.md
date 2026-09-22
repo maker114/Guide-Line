@@ -69,27 +69,85 @@ node --test test/         # Node 18+ 的原生运行器（等价）
 
 ## 部署
 
-```bash
-cd cloudfunctions
-cloudbase login
-cloudbase functions:deploy commitTx --force
-```
+### 为什么需要先打包
 
-`cloudbaserc.json` 采用「以 `cloudfunctions/` 为函数根、handler 写 `<函数名>/index.main`」的写法，
-这样 `common/` 只有一份。⚠️ 若你所用 CLI 版本要求入口文件位于上传根的第一层，
-用下面的兜底方案（复制 `common/` 进各函数目录后再逐个部署）：
+源码里各函数的 `index.js` 引用共享目录（`require('../common/xxx')`），而云函数的代码根
+只能是一份自包含代码。所以先打包，把 `../common/` 改写成 `./common/` 并把 `common/` 复制进去：
 
 ```powershell
-foreach ($f in @('commitTx','getVersions','getDoc','registerAccount','createPairingCode','pair','issueTicket','rotateRecoveryCode')) {
-  New-Item -ItemType Directory -Force "$f\common" | Out-Null
-  Copy-Item common\*.js "$f\common\" -Force
+cd cloudfunctions
+node tools/pack.js                       # 生成 dist/cli/<函数名>/ 与 dist/web/<函数名>/
+foreach ($fn in @('commitTx','getVersions','getDoc','registerAccount','createPairingCode','pair','issueTicket','rotateRecoveryCode')) {
+  Compress-Archive -Path "dist\web\$fn\*" -DestinationPath "dist\web\$fn.zip" -Force
 }
 ```
 
+产物（`dist/` 不入库）：
+
+| 目录 | 用途 |
+|---|---|
+| `dist/cli/<函数名>/` | CLI 声明式部署用（`cloudbaserc.json` 的 `dir` 指向它） |
+| `dist/web/<函数名>.zip` | **网页控制台**「上传 ZIP 包」用（ZIP 根就是 `index.js` + `common/`） |
+
+---
+
+### 路线 A：网页控制台（推荐先用这条，无需装 CLI）
+
+**① 开通环境**
+1. 打开 <https://tcb.cloud.tencent.com/dev>（或腾讯云控制台搜「云开发 CloudBase」）
+2. 首次使用需**实名认证**
+3. 「新建环境」→ 计费方式选**按量计费**（个人用量极低；先确认当前免费额度政策）
+   → 地域选 **上海** → 起个名字（如 `guideline-prod`）
+4. 建好后在**环境概览**记下 **环境 ID**（形如 `guideline-prod-1g2h3j4k5l6m7n`）
+
+**② 拿客户端要用的 Publishable Key**
+- 「环境 → API Key 配置」→ 生成 **Publishable Key**（可公开，给客户端做匿名访问公开资源）
+- ⚠️ **Secret Key 绝不能进 App**（安全红线，见设计文档 §7.4）
+
+**③ 建集合与索引**（「数据库 → 集合管理」）
+1. 新建 5 个集合：`documents`、`accounts`、`devices`、`pairing_codes`、`cooldowns`
+2. `documents` 建索引：`accountId`(升序) + `name`(升序)，**唯一**
+3. `pairing_codes` 建索引：`expiresAt`(升序)，**非唯一**
+4. 「数据库 → 权限设置」把每个集合设为**仅管理端可读写**（客户端不直连，ADR-064）
+
+**④ 部署 8 个云函数**
+对每个函数名重复（`commitTx` / `getVersions` / `getDoc` / `registerAccount` /
+`createPairingCode` / `pair` / `issueTicket` / `rotateRecoveryCode`）：
+1. 「云函数 → 新建云函数」→ 函数名称填该名字 → **运行环境选 `Nodejs20.19`**
+2. 代码上传方式选**本地上传 ZIP 包** → 选 `cloudfunctions/dist/web/<函数名>.zip`
+3. **函数入口填 `index.main`**（超时：`commitTx`/`getDoc`/`pair`/`issueTicket`/`registerAccount` 用 10 秒，其余 5 秒）
+4. 保存并等部署完成；`rotateRecoveryCode` 建议**不要对外暴露**（见下）
+
+**⑤ 开自定义登录（身份函数的最后一块拼图）**
+1. 「身份认证 → 登录方式 → 自定义登录」→ 开启 → **下载私钥文件**
+2. 私钥**不入库、不进聊天**：在云函数「函数配置 → 环境变量」里配置（建议键名 `CUSTOM_LOGIN_KEY`）
+3. ⚠️ 这一步对应代码里的待确认项：`ticket.js` 目前会**显式抛错**，等私钥就位后我改成用私钥签 JWT
+
+**⑥ 冒烟验证**
+- 「云函数 → commitTx → 测试」传 `{}` → 期望返回
+  `{"ok":false,"code":"UNAUTHENTICATED",...}`：说明函数已部署且鉴权生效
+- 对 `getVersions`、`getDoc` 同样各测一次
+
+---
+
+### 路线 B：CloudBase CLI（熟练后更快）
+
+```powershell
+npm.cmd install -g @cloudbase/cli      # 注意：PowerShell 默认禁止 npm.ps1，用 npm.cmd 绕过
+cloudbase login                        # 扫码登录，无法代做
+cd cloudfunctions
+node tools/pack.js                     # 先生成 dist/cli/<函数名>/
+cloudbase functions:deploy commitTx    # 逐个部署；或按 cloudbaserc.json 声明式部署
+```
+
+`cloudbaserc.json` 的 `envId` 目前是占位符 `{{env.CLOUDBASE_ENV_ID}}`，
+填入真实环境 ID（或设同名环境变量）后即可声明式部署。
+
 ## 待联调确认清单
 
-- [ ] **`ticket.js`**：CloudBase **自定义登录**的建票 API 名称与入参；`uid` 是否可直接设为我们的
-      `accountId`；ticket 有效期与单次性。（未核对前它会**显式抛错**，不会静默发假票。）
+- [ ] **`ticket.js`**：CloudBase **自定义登录**的建票方式（私钥签 JWT 的字段与有效期）；
+      `uid` 是否可直接设为我们的 `accountId`。
+      （未核对前它会**显式抛错**，不会静默发假票。）
 - [ ] **`runtime.js`**：`cloudbase.SYMBOL_CURRENT_ENV` 的初始化写法。
 - [ ] **`handler.js`**：`app.auth().getEndUserInfo()` 的调用形态与返回结构。
 - [ ] **`stores.js`**（4 处）：事务内 `set()` 入参形态、`collection().doc().get()` 返回数组还是单对象、
