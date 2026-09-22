@@ -26,6 +26,12 @@
 
 ### Added
 
+- **Flutter 工程骨架**：包名 `guideline`、版本 `1.0.0+1`（Flutter 3.47.5 / Dart 3.13.4），
+  `--platforms=windows` 生成 Windows runner；环境变量已把 `E:\flutter\bin`、`E:\nodejs` 加入用户 PATH
+- **架构边界测试**（`test/core/architecture_test.dart`）：扫描源码守护三条边界 ——
+  `lib/core` 不依赖 Flutter、三层不出现 CloudBase SDK、三层不出现平台判断、依赖方向单向
+- **电脑端外壳与入口**（`lib/main.dart` / `lib/ui/desktop/desktop_shell.dart`）：
+  侧栏导航（两板块 + 到期聚合 + 全部任务 + 归档区 + 设置）+ 常驻同步状态位（M6 接入真实数据）
 - **数据契约**（`docs/spec/数据契约.md`）：4 实体完整字段表（顺序即写出顺序）、文档外层结构、
   墓碑骨架、枚举与允许的父子组合、跨字段一致性、契约样本与回归测试规则、演进与容错规则
 - **同步与云函数契约**（`docs/spec/同步与云函数契约.md`）：`SyncBackend` 接口草案、
@@ -71,9 +77,23 @@
     账号不存在与恢复码错误返回同一错误（不泄漏存在性）、重置恢复码后旧码失效
 - 4 份契约样本通过格式闸门（共 20 条记录，含 2 个墓碑骨架）
 - 16 个 Dart 文件通过静态契约闸门（括号平衡、行尾、`toJson` 字段顺序、`knownKeys`）
+- **`flutter analyze`：No issues found**（含 `unawaited_futures: error` 等更严格的规则集）
+- **`flutter test`：62/62 全部通过** —— 契约样本逐字节回归、容错降级、树索引、
+  完成判定与反向传播、级联与移动校验、归档区四分区、存储原子写与崩溃隔离、
+  假后端 CAS/原子性/幂等、架构边界 6 例
+- **Windows release 构建成功**：`flutter build windows --release` →
+  `build\windows\x64\runner\Release\guideline.exe`（含 20.29 MB `flutter_windows.dll`）
+
+### Fixed
+
+- `FakeSyncBackend` 的 `_tick()` 忘记 `await`，导致离线/失效错误逃逸为未处理异步异常
+  （同时开启 `unawaited_futures: error` 防止复发）
+- `rules_test` 的反向传播用例混用了两个 API：把"节点自身变为非终态"用成了"插入新节点"
 
 ### Changed
 
+- `analysis_options.yaml`：在 `flutter_lints` 之上开启 `unawaited_futures: error`、
+  `prefer_single_quotes`、`always_declare_return_types`、`prefer_final_locals`、`directives_ordering`
 - 架构设计 §5.1 明确**版本号唯一存放于本地文档外层**，`sync_state.json` 只存同步元数据，
   避免版本号两处存放（与《数据契约》§2 对齐）
 

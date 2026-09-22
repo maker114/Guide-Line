@@ -1,0 +1,32 @@
+# GuideLine 静态分析配置。
+#
+# 分层边界（ADR-019 / ADR-024 / ADR-064）**不靠 lint**，而是靠
+# `test/core/architecture_test.dart` 扫描源码守护 —— 这样零额外依赖，
+# 且违反时给的是测试失败而不是一条可被忽略的提示。
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - windows/**
+    - .tools/**
+    - .dart_tool/**
+  errors:
+    # 未 await 的 Future 是真 bug 温床（本项目已因它出过异常逃逸）
+    unawaited_futures: error
+    # 契约里字段必须逐个写出，漏掉可空字段会导致逐字节比对失败
+    missing_required_param: error
+
+linter:
+  rules:
+    # 契约相关：所有 key 用单引号，保证与样本一致的书写风格
+    - prefer_single_quotes
+    # 异步安全：未 await 的 Future 必须显式 unawaited()
+    - unawaited_futures
+    # 明确性
+    - always_declare_return_types
+    - prefer_final_locals
+    - unnecessary_parenthesis
+    - avoid_relative_lib_imports
+    - directives_ordering
