@@ -31,6 +31,23 @@
 - **同步与云函数契约**（`docs/spec/同步与云函数契约.md`）：`SyncBackend` 接口草案、
   本地文件清单、云端集合、6 个云函数入出参、`pending_tx`、同步状态机与冲突流程、错误码表
 - **v1.0.0 电脑端计划**（`docs/plan/v1.0.0-电脑端计划.md`）：范围、验收标准、里程碑 M0~M7、依赖与风险
+- **契约黄金副本**（`test/contract/sample/*.json`）：4 份文档样本，覆盖可空字段、三层嵌套、
+  三种 status、三类任务、归档与墓碑骨架，作为序列化逐字节比对的基准
+- **云函数同步三件套**（`cloudfunctions/`）：`commitTx`（唯一写入口：CAS + 事务 + 幂等重放）、
+  `getVersions`（轮询只读元数据）、`getDoc`；逻辑与 CloudBase SDK 分离，
+  逻辑层可由假存储完整单测（14 个用例覆盖原子回滚、幂等、账号隔离、payload 不透明、入参校验、5 MB 上限）
+- **云函数部署配置**：`cloudbaserc.json` 与 `README.md`（含待联调确认清单）
+- **契约样本格式闸门**（`tools/check-contract-samples.js`）：不需要 Dart 即可校验 BOM / 换行 /
+  缩进 / key 顺序 / 转义 / 外层结构 / 墓碑骨架形态
+- **版本无关测试运行器**（`cloudfunctions/test/run.js`）：在只有 Node 14/16 的环境下
+  也能运行 `node:test` 风格用例，且不 spawn 子进程
+
+### Verified
+
+- 云函数同步逻辑实测 **13/13 通过**（Node v16.13.2）：首次创建、跨文档 +1、
+  原子性（一份冲突则全部不写）、幂等重放不重复 +1、真冲突返回远端版本、账号隔离、
+  payload 不透明、会话缺失、9 类非法入参、5 MB 上限、空文档语义
+- 4 份契约样本通过格式闸门（共 20 条记录，含 2 个墓碑骨架）
 
 ### Changed
 

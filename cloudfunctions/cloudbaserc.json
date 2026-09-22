@@ -1,0 +1,32 @@
+{
+  "_note": "CloudBase CLI 部署配置。⚠️ envId 与根目录/handler 写法需按你所用 CLI 版本核对一次（见 README『部署』）。",
+  "version": "2.0",
+  "envId": "{{env.CLOUDBASE_ENV_ID}}",
+  "functionRoot": ".",
+  "functions": [
+    {
+      "name": "commitTx",
+      "runtime": "Nodejs18.15",
+      "handler": "commitTx/index.main",
+      "timeout": 10,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "getVersions",
+      "runtime": "Nodejs18.15",
+      "handler": "getVersions/index.main",
+      "timeout": 5,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    },
+    {
+      "name": "getDoc",
+      "runtime": "Nodejs18.15",
+      "handler": "getDoc/index.main",
+      "timeout": 10,
+      "installDependency": false,
+      "ignore": ["test/**", "**/*.test.js"]
+    }
+  ]
+}

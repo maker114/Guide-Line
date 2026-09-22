@@ -101,3 +101,12 @@ lcov.info
 *.bak
 *.orig
 *.rej
+
+# ---------- Node / 云函数 ----------
+node_modules/
+.npm/
+functions_dist/
+
+# ---------- 本地工具链（不入库）----------
+# Flutter / Dart SDK 若安装在工作区内，放这里
+.tools/
