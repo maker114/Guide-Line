@@ -42,6 +42,8 @@
 - **更新日志**（`CHANGELOG.md`）：采用 Keep a Changelog 规范
 - **版本号规则**：确立 `主.次.修订` 三段式语义，并绑定提交类型
   （`refactor` → 主位，`feat` → 次位，`fix`/`to`/`style` → 修订位）
+- **架构设计文档**（`docs/architecture/双端软件架构设计.md`）：录入双端架构设计第 13 版，
+  含云端改用腾讯云开发 CloudBase、配对码身份方案、跨文档事务、归档区、主线任务结构等裁定
 
 ### Security
 
