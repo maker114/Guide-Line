@@ -909,6 +909,14 @@ class Workspace {
 
   // ------------------------------------------------------------ 同步层接口
 
+  /// 冲突（云同步或导入）：把**本地**未提交内容落草稿，随后可能被远端覆盖。
+  String saveConflictDraft(DocName name, int nowMillis) =>
+      _store.saveConflictDraft(name, documentOf(name).toCanonicalText(), nowMillis);
+
+  /// 冲突（导入）：把**导入包**内容落草稿，供用户事后比对。
+  String saveImportedDraft(DocName name, Document incoming, int nowMillis) =>
+      _store.saveConflictDraft(name, incoming.toCanonicalText(), nowMillis, kind: 'imported');
+
   /// 供同步引擎推送：该文档的 `payload` JSON（`{"items":[...]}`）。
   String payloadJsonOf(DocName name) => documentOf(name).payloadJson();
 

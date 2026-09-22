@@ -44,9 +44,10 @@ class LocalPaths {
         captureInbox,
       ];
 
-  /// 冲突草稿：`conflicts/conflict_<doc>_<ts>.json`
-  File conflictDraft(DocName name, int timestamp) =>
-      File(_join('$conflictsDir/conflict_${name.fileName}_$timestamp.json'));
+  /// 草稿文件：`conflicts/<kind>_<doc>_<ts>.json`
+  /// （`kind` 为 `conflict`（云同步冲突）或 `imported`（导入冲突），都**不参与同步**）
+  File conflictDraft(DocName name, int timestamp, {String kind = 'conflict'}) =>
+      File(_join('$conflictsDir/${kind}_${name.fileName}_$timestamp.json'));
 
   void ensureDirectories() {
     if (!directory.existsSync()) directory.createSync(recursive: true);

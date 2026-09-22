@@ -123,9 +123,9 @@ class LocalStore {
   }
 
   /// 冲突草稿：不参与同步、不进版本（设计文档 5.10）。
-  String saveConflictDraft(DocName name, String text, int timestamp) {
+  String saveConflictDraft(DocName name, String text, int timestamp, {String kind = 'conflict'}) {
     paths.ensureDirectories();
-    final file = paths.conflictDraft(name, timestamp);
+    final file = paths.conflictDraft(name, timestamp, kind: kind);
     AtomicFile(file).writeText(text);
     return file.path;
   }
