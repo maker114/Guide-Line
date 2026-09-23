@@ -62,6 +62,7 @@ class FakeSyncBackend implements SyncBackend {
   @override
   Future<Map<DocName, DocMeta>> getVersions() async {
     await _tick();
+    _assertAuthenticated();
     getVersionsCallCount += 1;
     final out = <DocName, DocMeta>{};
     for (final name in DocName.values) {
@@ -77,6 +78,7 @@ class FakeSyncBackend implements SyncBackend {
   @override
   Future<DocSnapshot> getDoc(DocName name) async {
     await _tick();
+    _assertAuthenticated();
     getDocCallCount += 1;
     final doc = _docs[name];
     return DocSnapshot(
@@ -90,6 +92,7 @@ class FakeSyncBackend implements SyncBackend {
   @override
   Future<CommitOutcome> commitTx(TxRequest request) async {
     await _tick();
+    _assertAuthenticated();
     commitTxCallCount += 1;
     if (forceConflict) {
       forceConflict = false;
@@ -149,6 +152,12 @@ class FakeSyncBackend implements SyncBackend {
     if (latency > Duration.zero) await Future<void>.delayed(latency);
     if (offline) {
       throw const BackendFailure(BackendErrorCode.network, '网络不可用');
+    }
+  }
+
+  void _assertAuthenticated() {
+    if (unauthenticated) {
+      throw const BackendFailure(BackendErrorCode.unauthenticated, '会话已失效');
     }
   }
 }
