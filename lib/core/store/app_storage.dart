@@ -58,7 +58,18 @@ class AppStorage {
     String? recoveredFrom;
 
     final file = paths.storeFile;
-    if (file.existsSync()) {
+    if (!file.existsSync()) {
+      // 主文件**不在**，并不等于「全新安装」。
+      // 上次有可能正好死在「删旧文件 → 改名」那一步（或文件被外部清理掉了）。
+      // 只要还有备份，就必须恢复 + 明确告警 —— 全新安装没有任何备份，走不到这里。
+      final recovery = _loadNewestBackup(issues);
+      if (recovery != null) {
+        store = recovery.store;
+        recoveredFrom = recovery.path;
+        issues.error('主数据文件不存在 —— 已从备份恢复：${recovery.path}');
+        _writeBackRecovered(store, stamp, issues);
+      }
+    } else {
       final text = file.readAsStringSync(encoding: utf8);
       final parsed = _tryParse(text, issues);
       if (parsed != null) {

@@ -47,8 +47,19 @@ class AtomicFile {
     _replace(tmp);
   }
 
-  /// 同目录 rename 在 Windows 与 POSIX 上都是原子替换。
+  /// 同目录 rename = 原子替换。这是单文件存储「全有或全无」的根基。
+  ///
+  /// POSIX（Android / Linux / macOS）上 `rename(2)` 会**直接覆盖**已存在的目标，一步到位；
+  /// 所以先试 rename。只有平台不允许覆盖时（某些文件系统 / Windows 的旧行为）才退化成
+  /// 「先删后改名」——那两步之间有一个窗口，此刻进程被杀就会**丢失主文件**，
+  /// 因此绝不能把它当首选路径。
   void _replace(File tmp) {
+    try {
+      tmp.renameSync(file.path);
+      return;
+    } catch (_) {
+      // 落到这里说明目标存在且平台不允许 rename 覆盖，退回两步法
+    }
     if (file.existsSync()) file.deleteSync();
     tmp.renameSync(file.path);
   }

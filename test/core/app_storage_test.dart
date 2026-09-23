@@ -184,6 +184,45 @@ void main() {
       );
     });
 
+    test('主文件不见了但有备份 → 从备份恢复并告警（不能当成全新安装）', () {
+      storage.save(storeWith('第一份'), nowMillis: day);
+      storage.save(storeWith('第二份'), nowMillis: day + 1);
+      // 模拟「死在 删旧文件 → 改名 那个窗口里」：主文件没了，备份还在。
+      // 这正是原子替换必须一步到位的原因 —— 两步法会留下这个可被观测到的空洞。
+      storage.paths.storeFile.deleteSync();
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue);
+
+      final report = storage.load(nowMillis: day + 2);
+
+      expect(report.recoveredFromBackup, isNotNull);
+      expect(report.quarantinedPaths, isEmpty, reason: '没有损坏文件需要隔离');
+      expect(
+        report.issues.errors.any((e) => e.contains('主数据文件不存在')),
+        isTrue,
+        reason: '「主文件凭空消失」是异常情况，必须是 error 而不只是 warning',
+      );
+      expect(
+        report.store.documentOf(DocName.projects).projectItems.single.title,
+        '第一份',
+        reason: 'backup.1 就是上一次保存前的状态',
+      );
+      expect(storage.paths.storeFile.existsSync(), isTrue, reason: '恢复后要写回主文件');
+
+      final again = storage.load(nowMillis: day + 3);
+      expect(again.recoveredFromBackup, isNull, reason: '主文件已重建，不该反复恢复');
+      expect(again.store.documentOf(DocName.projects).projectItems.single.title, '第一份');
+    });
+
+    test('主文件不见了且没有任何备份 → 空数据（全新安装就是这样，不该乱恢复）', () {
+      storage.paths.ensureDirectories();
+
+      final report = storage.load(nowMillis: day);
+
+      expect(report.recoveredFromBackup, isNull);
+      expect(report.store.documentOf(DocName.projects).items, isEmpty);
+      expect(report.issues.errors, isEmpty, reason: '全新安装不是错误，不该吓唬用户');
+    });
+
     test('主文件损坏且没有任何备份 → 隔离 + 空数据 + 明确告警（绝不静默）', () {
       storage.paths.ensureDirectories();
       storage.paths.storeFile.writeAsStringSync('not json');
