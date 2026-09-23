@@ -1,0 +1,28 @@
+# GuideLine 静态分析配置（Android 单机版）。
+#
+# 分层边界（ADR-024）**不靠 lint**，而是靠 `test/core/architecture_test.dart`
+# 扫描源码守护 —— 这样零额外依赖，且违反时给的是测试失败而不是一条可被忽略的提示。
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - .tools/**
+    - .dart_tool/**
+    # 归档的电脑端工程：它是独立的完整工程，不要用本工程的依赖去分析它
+    - archive/**
+  errors:
+    # 未 await 的 Future 是真 bug 温床（本项目出过异常逃逸的问题）
+    unawaited_futures: error
+
+linter:
+  rules:
+    - prefer_single_quotes
+    - unawaited_futures
+    - always_declare_return_types
+    - prefer_final_locals
+    - unnecessary_parenthesis
+    - avoid_relative_lib_imports
+    - directives_ordering

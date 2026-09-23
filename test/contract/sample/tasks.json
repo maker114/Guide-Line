@@ -1,0 +1,99 @@
+{
+  "items": [
+    {
+      "id": "e69cb4d0-17f9-452d-84ce-f97a86172844",
+      "event_id": "b36f81ad-e4c6-42fa-919b-c64753849511",
+      "parent_task_id": null,
+      "task_type": "standard",
+      "title": "写数据契约",
+      "due_at": "2026-09-30",
+      "status": "done",
+      "archived": false,
+      "order": 1000,
+      "completed_at": 1788400000000,
+      "created_at": 1788220800000,
+      "updated_at": 1788400000000,
+      "deleted": false
+    },
+    {
+      "id": "f7adc5e1-280a-463e-95df-0a8b97283955",
+      "event_id": "b36f81ad-e4c6-42fa-919b-c64753849511",
+      "parent_task_id": null,
+      "task_type": "standard",
+      "title": "实现同步层",
+      "due_at": null,
+      "status": "pending",
+      "archived": false,
+      "order": 2000,
+      "completed_at": null,
+      "created_at": 1788220800000,
+      "updated_at": 1788307200000,
+      "deleted": false
+    },
+    {
+      "id": "08bed6f2-391b-474f-a6e0-1b9ca8394a66",
+      "event_id": "b36f81ad-e4c6-42fa-919b-c64753849511",
+      "parent_task_id": "f7adc5e1-280a-463e-95df-0a8b97283955",
+      "task_type": "subtask",
+      "title": "实现 commitTx 事务",
+      "due_at": "2026-10-15",
+      "status": "pending",
+      "archived": false,
+      "order": 1000,
+      "completed_at": null,
+      "created_at": 1788220800000,
+      "updated_at": 1788307200000,
+      "deleted": false
+    },
+    {
+      "id": "19cfe703-4a2c-4850-b7f1-2cadb94a5b77",
+      "event_id": "b36f81ad-e4c6-42fa-919b-c64753849511",
+      "parent_task_id": "f7adc5e1-280a-463e-95df-0a8b97283955",
+      "task_type": "parallel",
+      "title": "两条路都可行：本地假后端 / 直连云函数",
+      "due_at": null,
+      "status": "ignored",
+      "archived": false,
+      "order": 2000,
+      "completed_at": null,
+      "created_at": 1788220800000,
+      "updated_at": 1788480000000,
+      "deleted": false
+    },
+    {
+      "id": "2ad0f814-5b3d-4961-c802-3dbec05b6c88",
+      "event_id": "b36f81ad-e4c6-42fa-919b-c64753849511",
+      "parent_task_id": "19cfe703-4a2c-4850-b7f1-2cadb94a5b77",
+      "task_type": "subtask",
+      "title": "并列任务也能有自己的子任务",
+      "due_at": "2026-11-01",
+      "status": "pending",
+      "archived": false,
+      "order": 1000,
+      "completed_at": null,
+      "created_at": 1788220800000,
+      "updated_at": 1788307200000,
+      "deleted": false
+    },
+    {
+      "id": "3be10925-6c4e-4a72-d913-4ecfd16c7d99",
+      "event_id": "c47a92be-f5d7-430b-a2ac-d75864950622",
+      "parent_task_id": null,
+      "task_type": "standard",
+      "title": "已归档事件下的任务（随事件级联归档）",
+      "due_at": null,
+      "status": "pending",
+      "archived": true,
+      "order": 1000,
+      "completed_at": null,
+      "created_at": 1788220800000,
+      "updated_at": 1788480000000,
+      "deleted": false
+    },
+    {
+      "id": "4cf21a36-7d5f-4b83-ea24-5fd0e27d8e00",
+      "deleted": true,
+      "purged_at": 1788566400000
+    }
+  ]
+}
