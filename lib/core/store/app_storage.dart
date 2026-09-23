@@ -204,13 +204,30 @@ class AppStorage {
       _pruneDaily();
     }
 
-    // 滚动：backup.(n) → backup.(n+1)，最后把主文件复制成 backup.1
+    // 滚动：backup.(n) → backup.(n+1)。
+    //
+    // 移位用**改名**而不是复制：复制的话每次保存都要把 9 份备份整份搬一遍，
+    // 代价是 9×文件大小（几 MB 的数据就是几十 MB 的无谓写入，还是每次保存都来一遍）。
+    // 改名只动目录项，代价与文件大小无关。
     for (var i = AppPaths.rollingBackupCount - 1; i >= 1; i -= 1) {
       final from = paths.rollingBackup(i);
       if (!from.existsSync()) continue;
-      _copyFile(from, paths.rollingBackup(i + 1));
+      _shiftFile(from, paths.rollingBackup(i + 1));
     }
+    // 最后一步必须是复制：主文件还要留着
     _copyFile(store, paths.rollingBackup(1));
+  }
+
+  /// 备份移位：优先改名（O(1)），不行再退回复制。
+  ///
+  /// 备份永远不该阻断主流程，所以两条路都失败也只是这一次少一份备份。
+  void _shiftFile(File from, File to) {
+    try {
+      if (to.existsSync()) to.deleteSync();
+      from.renameSync(to.path);
+    } catch (_) {
+      _copyFile(from, to);
+    }
   }
 
   void _pruneDaily() {

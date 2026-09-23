@@ -123,6 +123,40 @@ void main() {
       expect(titleOf(2), 'v1');
     });
 
+    test('滚动备份最多 10 份，最老的一份被挤掉（移位不能把旧数据留下）', () {
+      // 一次多存几版：移位现在走"改名"，所以要确认第 11 版进来时
+      // 第 1 版被真正丢弃，而不是因为改名失败在原地留了个副本
+      for (var i = 0; i < 13; i += 1) {
+        storage.save(storeWith('v$i'), nowMillis: day + i * 1000);
+      }
+
+      String? titleOf(int index) {
+        final file = storage.paths.rollingBackup(index);
+        if (!file.existsSync()) return null;
+        return StoreFile
+            .parse(file.readAsStringSync(encoding: utf8), DecodeIssues())
+            .documentOf(DocName.projects)
+            .projectItems
+            .single
+            .title;
+      }
+
+      // 存到第 13 版时，主文件是 v12，backup.1 是 v11，一路往前到 backup.10 是 v2
+      expect(titleOf(1), 'v11');
+      expect(titleOf(10), 'v2');
+      expect(
+        storage.paths.rollingBackup(AppPaths.rollingBackupCount + 1).existsSync(),
+        isFalse,
+        reason: '不该出现第 11 份滚动备份',
+      );
+      expect(titleOf(11), isNull);
+      expect(
+        storage.listBackups().where((b) => b.kind == BackupKind.rolling).length,
+        AppPaths.rollingBackupCount,
+      );
+      expect(titleOf(10), isNot('v1'), reason: 'v1 已经被挤出窗口');
+    });
+
     test('每天第一份保存留下日快照，且同一天不会重复生成', () {
       storage.save(storeWith('第一天'), nowMillis: day);
       storage.save(storeWith('第一天再改'), nowMillis: day + 3600 * 1000);
