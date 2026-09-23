@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
@@ -34,9 +37,19 @@ class InspirationTabState extends State<InspirationTab> {
     super.dispose();
   }
 
-  /// 供外壳的「速记」入口调用：聚焦输入框。
+  /// 供外壳的「速记」入口调用：聚焦输入框并把键盘唤起来。
   void focusCapture() {
     _focus.requestFocus();
+    unawaited(_ensureKeyboardShown());
+  }
+
+  /// 冷启动时窗口往往还没拿到焦点，部分 ROM（实测小米 HyperOS）会把这一轮
+  /// 「显示输入法」的请求丢掉 —— 表现是光标在闪但键盘不弹，用户还得再点一下输入框，
+  /// 「长按图标就能记一笔」这件事就不成立了。稍后显式再要一次键盘，代价极低。
+  Future<void> _ensureKeyboardShown() async {
+    await Future<void>.delayed(const Duration(milliseconds: 450));
+    if (!mounted || !_focus.hasFocus) return;
+    await SystemChannels.textInput.invokeMethod<void>('TextInput.show');
   }
 
   @override

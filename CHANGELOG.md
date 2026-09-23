@@ -108,6 +108,15 @@
 
 ### Fixed
 
+- **长按图标速记后键盘不弹出**（真机实测：小米 15 Pro / HyperOS / Android 16）
+  - 现象：冷启动时输入框拿到了焦点（光标在闪），但键盘始终不出现，
+    用户还得再点一下输入框 —— 「长按图标就能记一笔」等于没成立
+  - 原因：冷启动那一轮窗口还没拿到焦点，ROM 把这次的「显示输入法」请求丢掉了
+    （`dumpsys input_method` 里 `mInputShown=false`、`mInputMethodWindowVisibleHeight=0`）
+  - 修法：聚焦后延迟 450ms，确认输入框仍有焦点时**再显式请求一次键盘**
+    （`SystemChannels.textInput` 的 `TextInput.show`）
+  - 真机复验：`mInputShown` 由 `false` 变 `true`，键盘正常弹出；
+    模拟器（AOSP 输入法）本来就正常，所以这条只有真机才测得出来
 - **归档区的说明文案把 Markdown 记号显示了出来**：界面上真的出现了 `**归档根**` 这样四个星号。
   `**` 只在文档注释里是 Markdown，塞进 `Text` 就是原样显示。
   已改成「归档根」并把「不可撤销」等处写成普通文字；
