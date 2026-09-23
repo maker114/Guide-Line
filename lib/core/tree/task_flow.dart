@@ -227,6 +227,23 @@ class TaskFlow {
     return false;
   }
 
+  /// **假设**把 [taskId] 的后续边换成 [nextIds] 之后，整条线会不会出现环。
+  ///
+  /// 写入前用它做校验：`wouldCreateCycle` 只回答"一条边行不行"，
+  /// 而界面上可能是"一次设一组后续"，所以要按整张图判断。
+  static bool wouldCycleIfChanged(
+    Iterable<Task> allTasks, {
+    required String eventId,
+    required String taskId,
+    required List<String> nextIds,
+  }) {
+    final modified = <Task>[
+      for (final task in allTasks)
+        if (task.id == taskId) task.copyWith(nextIds: nextIds) else task,
+    ];
+    return TaskFlow.of(modified, eventId: eventId).hasCycle;
+  }
+
   static List<Task> _byOrder(Iterable<Task> tasks) {
     final out = tasks.toList(growable: false)
       ..sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));

@@ -12,6 +12,7 @@ import '../core/rules/cascade.dart';
 import '../core/rules/completion.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/ui_prefs.dart';
+import '../core/tree/task_flow.dart';
 import '../core/tree/tree_index.dart';
 
 /// 业务规则被违反（"用户不能这么做"），不是程序错误。
@@ -636,6 +637,7 @@ class Workspace {
     String? parentTaskId,
     TaskType type = TaskType.standard,
     String? dueAt,
+    String? linkAfterTaskId,
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('任务名不能为空');
@@ -658,6 +660,14 @@ class Workspace {
       }
     }
 
+    // 「接在某个任务之后」时，必须**先**把隐式链固化，再插入新任务：
+    // 这一步会写入显式边，而显式边一出现，整条线就改按显式边解释 ——
+    // 顺序反了的话，其余节点会瞬间失去顺序（这正是 materialize 要防的坑）。
+    // 也不能在插入新任务之后再固化：那时新任务已经在图里，会被错误地串进链尾。
+    if (parentTaskId == null && linkAfterTaskId != null) {
+      materializeTaskChain(eventId);
+    }
+
     final now = Ids.nowMillis();
     final task = Task(
       id: Ids.uuidV4(),
@@ -677,6 +687,30 @@ class Workspace {
     _upsert(DocName.tasks, task);
     _touch(<DocName>[DocName.tasks]);
 
+    // 主线新任务要接进走向里，否则它会变成"没有前驱的孤立入口"，看起来像凭空多一条线。
+    // （按 order 成链的模式不用管：顺序本来就由 order 决定。）
+    if (parentTaskId == null) {
+      final anchor = linkAfterTaskId == null ? null : findTask(linkAfterTaskId);
+      if (anchor != null && anchor.parentId == null && anchor.eventId == eventId) {
+        // 明确要求接在某个任务之后（"在这里分叉 / 接上一个新任务"）
+        _upsert(
+          DocName.tasks,
+          anchor.copyWith(nextIds: _dedupe(<String>[...anchor.nextIds, task.id]), updatedAt: now),
+        );
+      } else {
+        // 默认接在当前所有出口之后（链式模式下这一步等价于"排到最后"）
+        final flow = TaskFlow.of(allTasks, eventId: eventId);
+        if (flow.usesExplicitEdges) {
+          for (final tail in flow.sinks.where((each) => each.id != task.id)) {
+            _upsert(
+              DocName.tasks,
+              tail.copyWith(nextIds: _dedupe(<String>[...tail.nextIds, task.id]), updatedAt: now),
+            );
+          }
+        }
+      }
+    }
+
     // 新挂一个非终态子节点 → 已完成的祖先要退回（ADR-055）
     if (parentTaskId != null) {
       for (final target in parentsToRevertAfterInsert(taskTree, task.id)) {
@@ -690,8 +724,112 @@ class Workspace {
     return task;
   }
 
-  void updateTask(String id, {String? title, Object? dueAt = _unset, TaskType? taskType}) {
+  // ---------------------------------------------------------------- 任务走向（分叉 / 合流）
+
+  /// 把主线的「按 `order` 的隐式链」**固化成显式后续边**。
+  ///
+  /// 第一次做分叉 / 接回之前**必须**先调它：`TaskFlow` 的规则是"整条线只要有一个
+  /// 显式边，就全部按显式边解释"，所以直接加一条边会让其余节点瞬间失去隐式链、
+  /// 散成一堆孤立入口。这里先把现有链整段写下来，用户再加边就不会有这种副作用。
+  void materializeTaskChain(String eventId) {
+    final flow = TaskFlow.of(allTasks, eventId: eventId);
+    if (flow.isEmpty || flow.usesExplicitEdges || flow.hasCycle) return;
+
+    final now = Ids.nowMillis();
+    var changed = false;
+    for (final task in flow.all) {
+      final next = flow.successorsOf(task.id).map((each) => each.id).toList(growable: false);
+      if (_sameIds(task.nextIds, next)) continue;
+      _upsert(DocName.tasks, task.copyWith(nextIds: next, updatedAt: now));
+      changed = true;
+    }
+    if (changed) {
+      _touch(<DocName>[DocName.tasks]);
+      persist();
+    }
+  }
+
+  /// 设置某条主线任务的后续边（一次设一组）。
+  ///
+  /// 校验：必须是主线任务、目标同事件且也是主线、不能接自己、不能成环；
+  /// 重复项直接去掉。
+  void setTaskNext(String id, List<String> nextIds) {
     final task = findTask(id);
+    if (task == null || task.deleted) throw const RuleViolation('任务不存在');
+    if (task.parentId != null) throw const RuleViolation('只有主线任务能接后续');
+
+    // 先把隐式链固化，否则"加一条边"会让其它节点失去顺序
+    materializeTaskChain(task.eventId);
+
+    final unique = <String>[];
+    for (final nextId in nextIds) {
+      if (nextId == id) throw const RuleViolation('不能接到自己后面');
+      if (unique.contains(nextId)) continue;
+      final target = findTask(nextId);
+      if (target == null || target.deleted) throw const RuleViolation('要接的任务不存在');
+      if (target.eventId != task.eventId) throw const RuleViolation('不能接到其它事件的任务后面');
+      if (target.parentId != null) throw const RuleViolation('只能接到主线任务后面');
+      unique.add(nextId);
+    }
+
+    if (TaskFlow.wouldCycleIfChanged(
+      allTasks,
+      eventId: task.eventId,
+      taskId: id,
+      nextIds: unique,
+    )) {
+      throw const RuleViolation('这样接会绕成一个环');
+    }
+
+    _upsert(
+      DocName.tasks,
+      task.copyWith(nextIds: List<String>.unmodifiable(unique), updatedAt: Ids.nowMillis()),
+    );
+    _touch(<DocName>[DocName.tasks]);
+    persist();
+  }
+
+  /// 追加一条后续边：本来没有后续就是"接着做"，本来有后续就成了**分叉**。
+  void addTaskNext(String id, String nextId) =>
+      setTaskNext(id, <String>[..._nextIdsAfterMaterialize(id), nextId]);
+
+  /// 断开一条后续边（合流处断掉一条，就退回单线）。
+  void removeTaskNext(String id, String nextId) => setTaskNext(
+        id,
+        _nextIdsAfterMaterialize(id).where((each) => each != nextId).toList(growable: false),
+      );
+
+  /// 取"固化隐式链**之后**"的后续边。
+  ///
+  /// 增删一条边都是"在现有走向上加/减一项"，所以基准值必须是**固化后**的那一份。
+  /// 先读 `task.nextIds` 再进 `setTaskNext` 是错的：那时隐式链还没写下来（读到空表），
+  /// 固化出来的原有顺序会被这一次写入**整条覆盖掉** —— 表现就是"接一条新的，
+  /// 原来那条后续凭空消失"。这里踩过一次，`test/ui/task_link_next_test.dart` 就是为它加的。
+  List<String> _nextIdsAfterMaterialize(String id) {
+    final task = findTask(id);
+    if (task == null || task.deleted) throw const RuleViolation('任务不存在');
+    materializeTaskChain(task.eventId);
+    // 固化会改这一行，必须重新读，不能接着用上面那个旧对象
+    return findTask(id)?.nextIds ?? const <String>[];
+  }
+
+  static bool _sameIds(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i += 1) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  static List<String> _dedupe(List<String> ids) {
+    final out = <String>[];
+    for (final id in ids) {
+      if (!out.contains(id)) out.add(id);
+    }
+    return out;
+  }
+
+  void updateTask(String id, {String? title, Object? dueAt = _unset, TaskType? taskType}) {    final task = findTask(id);
     if (task == null) throw const RuleViolation('任务不存在');
     if (title != null && title.trim().isEmpty) throw const RuleViolation('任务名不能为空');
     if (taskType != null && taskType != task.taskType) {

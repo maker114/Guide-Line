@@ -37,6 +37,9 @@ class EventDetailPage extends StatefulWidget {
 }
 
 class _EventDetailPageState extends State<EventDetailPage> {
+  /// 「新建一个后续任务」在底部面板里的哨兵值（真实 id 是 UUID，不会撞）
+  static const String _newNextTask = '__new_next_task__';
+
   AppController get app => widget.app;
 
   String get eventId => widget.eventId;
@@ -95,6 +98,128 @@ class _EventDetailPageState extends State<EventDetailPage> {
         _parallelParentId = taskId;
         _subtaskParentId = null;
       });
+
+  /// 这条任务在走向上有几个后续（**含隐式链**：还没固化时 `nextIds` 是空的，
+  /// 但下一个任务已经接在那儿了，所以必须问 `TaskFlow` 而不是问字段）。
+  int successorCountOf(Task task) =>
+      TaskFlow.of(app.ws.allTasks, eventId: eventId).successorsOf(task.id).length;
+
+  /// 「接后续任务…」：挑一个已有任务，或者新建一个接上。
+  ///
+  /// 分叉与合流都是这一件事的结果：本来没有后续就是"接着做"，
+  /// 本来有后续再加一条就成了**分叉**；两条支路都指回同一个任务就是**合流**。
+  Future<void> beginLinkNext(Task task) async {
+    final ws = app.ws;
+    final flow = TaskFlow.of(ws.allTasks, eventId: eventId);
+    // 能接的候选：不是自己、还没接过、接上不会成环。
+    // "还没接过"要按**走向**判，不能按 `nextIds` 判：隐式链（还按 order 排）时
+    // `nextIds` 整条都是空的，可下一个任务明明已经接在那儿了 —— 列出来让用户点，
+    // 点了什么也不会发生，等于骗人。
+    final successors = flow.successorsOf(task.id).map((each) => each.id).toSet();
+    final candidates = flow.all
+        .where((candidate) =>
+            candidate.id != task.id &&
+            !successors.contains(candidate.id) &&
+            !flow.wouldCreateCycle(fromId: task.id, toId: candidate.id))
+        .toList(growable: false);
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                '接在「${task.title}」之后',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.add),
+              title: const Text('新建一个后续任务'),
+              subtitle: const Text('建好后直接改名'),
+              onTap: () => Navigator.of(sheetContext).pop(_newNextTask),
+            ),
+            if (candidates.isEmpty)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Text('没有能接的已有任务（接上会绕成环的都不列出来）'),
+              )
+            else
+              for (final candidate in candidates)
+                ListTile(
+                  leading: const Icon(Icons.subdirectory_arrow_right),
+                  title: Text(candidate.title),
+                  onTap: () => Navigator.of(sheetContext).pop(candidate.id),
+                ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    if (picked == _newNextTask) {
+      Task? created;
+      final error = app.run(() {
+        created = ws.createTask(
+          eventId: eventId,
+          title: '新任务',
+          linkAfterTaskId: task.id,
+        );
+      });
+      if (error != null) {
+        _toast(error, error: true);
+        return;
+      }
+      // 建完直接进入原地改名，省得用户还要再点一次
+      final newTask = created;
+      if (newTask != null) beginRename(newTask.id);
+      return;
+    }
+
+    final error = app.run(() => ws.addTaskNext(task.id, picked));
+    if (error != null) _toast(error, error: true);
+  }
+
+  /// 「断开后续…」：断开某一条后续边（合流处断掉一条就退回单线）。
+  Future<void> beginUnlinkNext(Task task) async {
+    final ws = app.ws;
+    final successors = TaskFlow.of(ws.allTasks, eventId: eventId).successorsOf(task.id);
+    if (successors.isEmpty) return;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                '「${task.title}」现在接向',
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
+            ),
+            for (final successor in successors)
+              ListTile(
+                leading: const Icon(Icons.link_off),
+                title: Text(successor.title),
+                subtitle: const Text('断开这一条'),
+                onTap: () => Navigator.of(sheetContext).pop(successor.id),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    final error = app.run(() => ws.removeTaskNext(task.id, picked));
+    if (error != null) _toast(error, error: true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -675,7 +800,7 @@ class _TaskLine extends StatelessWidget {
               await _run(context, value);
             },
             itemBuilder: (_) => <PopupMenuEntry<String>>[
-              for (final action in taskActions(task))
+              for (final action in taskActions(task, successorCount: host.successorCountOf(task)))
                 PopupMenuItem<String>(value: action.value, child: Text(action.label)),
             ],
           ),
@@ -700,6 +825,12 @@ class _TaskLine extends StatelessWidget {
         break;
       case 'rename':
         host.beginRename(task.id);
+        break;
+      case 'linkNext':
+        await host.beginLinkNext(task);
+        break;
+      case 'unlinkNext':
+        await host.beginUnlinkNext(task);
         break;
       case 'due':
         await setTaskDueAction(context, app, task);
@@ -736,7 +867,7 @@ class _TaskLine extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Text(task.title, style: Theme.of(sheetContext).textTheme.titleMedium),
             ),
-            for (final action in taskActions(task))
+            for (final action in taskActions(task, successorCount: host.successorCountOf(task)))
               ListTile(
                 leading: Icon(action.icon),
                 title: Text(action.label),
@@ -760,13 +891,24 @@ class TaskAction {
   final IconData icon;
 }
 
-List<TaskAction> taskActions(Task task) {
+/// 一条任务在动作面板里能做的事。
+///
+/// `successorCount` 由调用方按**走向**算出来传进来（`nextIds` 在隐式链模式下总是空的，
+/// 拿它当"有没有后续"判会把「断开后续…」藏起来）。
+List<TaskAction> taskActions(Task task, {int? successorCount}) {
   final actions = <TaskAction>[];
   if (task.taskType != TaskType.subtask) {
     actions.add(const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right));
   }
   if (task.taskType == TaskType.standard) {
     actions.add(const TaskAction('par', '新建并列任务', Icons.call_split));
+  }
+  // 只有主线任务在"走向"上，子任务不参与
+  if (task.parentId == null) {
+    actions.add(const TaskAction('linkNext', '接后续任务…', Icons.timeline));
+    if ((successorCount ?? task.nextIds.length) > 0) {
+      actions.add(const TaskAction('unlinkNext', '断开后续…', Icons.link_off));
+    }
   }
   actions.add(const TaskAction('rename', '重命名', Icons.edit_outlined));
   actions.add(TaskAction('due', task.dueAt == null ? '设到期日' : '改到期日', Icons.event_outlined));
