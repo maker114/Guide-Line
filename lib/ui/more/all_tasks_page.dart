@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/ids.dart';
 import '../../core/models/enums.dart';
+import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../common/empty_state.dart';
 import '../common/labels.dart';
@@ -19,6 +20,93 @@ enum TaskGrouping {
 
   final String label;
 }
+
+/// 一个分组：分组头 + 组内任务。
+class TaskGroup {
+  const TaskGroup({required this.label, required this.tone, required this.tasks});
+
+  final String label;
+
+  /// 配色档位；`null` 表示"已结束"那一档（走灰）。
+  final Urgency? tone;
+
+  final List<Task> tasks;
+}
+
+/// 按紧迫度分组。
+///
+/// **纯粹的排序 + 分桶**，不依赖界面，所以可以直接单测 ——
+/// 这里出过一个错：把已完成的任务也塞进 `none` 档，而那一档的标签是
+/// 「没有到期日」，于是一个写着 `10月15日` 的已完成任务被归到了"没有到期日"下面。
+List<TaskGroup> groupByUrgency(List<Task> tasks) {
+  final groups = <TaskGroup>[];
+
+  final finished = tasks
+      .where((Task t) => t.status != NodeStatus.pending)
+      .toList(growable: false)
+    ..sort(byDueThenOrder);
+
+  final byUrgency = <Urgency, List<Task>>{};
+  for (final task in tasks.where((Task t) => t.status == NodeStatus.pending)) {
+    byUrgency.putIfAbsent(urgencyOf(task.dueAt), () => <Task>[]).add(task);
+  }
+  for (final urgency in Urgency.values) {
+    final group = byUrgency[urgency];
+    if (group == null || group.isEmpty) continue;
+    group.sort(byDueThenOrder);
+    groups.add(TaskGroup(label: urgencyLabel(urgency), tone: urgency, tasks: group));
+  }
+
+  if (finished.isNotEmpty) {
+    groups.add(TaskGroup(label: '已完成 / 已搁置', tone: null, tasks: finished));
+  }
+  return groups;
+}
+
+/// 按所属事件分组（组序 = 事件顺序）。
+List<TaskGroup> groupByEvent(
+  List<Task> tasks,
+  Iterable<Event> events,
+  String Function(String eventId) nameOf,
+) {
+  int eventOrder(String id) {
+    for (final Event event in events) {
+      if (event.id == id) return event.order;
+    }
+    return 1 << 30;
+  }
+
+  final byEvent = <String, List<Task>>{};
+  for (final task in tasks) {
+    byEvent.putIfAbsent(task.eventId, () => <Task>[]).add(task);
+  }
+  final ordered = byEvent.keys.toList()
+    ..sort((a, b) => eventOrder(a).compareTo(eventOrder(b)));
+
+  return <TaskGroup>[
+    for (final eventId in ordered)
+      TaskGroup(
+        label: nameOf(eventId),
+        tone: null,
+        tasks: byEvent[eventId]!..sort(byOrderOfTask),
+      ),
+  ];
+}
+
+/// 到期日近的在前；没排期的垫底。
+int byDueThenOrder(Task a, Task b) {
+  final da = a.dueAt;
+  final db = b.dueAt;
+  if (da == null && db != null) return 1;
+  if (da != null && db == null) return -1;
+  if (da != null && db != null) {
+    final byDate = da.compareTo(db);
+    if (byDate != 0) return byDate;
+  }
+  return byOrderOfTask(a, b);
+}
+
+int byOrderOfTask(Task a, Task b) => compareByOrder(a.order, a.id, b.order, b.id);
 
 /// 全部任务：**跨事件的任务总表**。
 ///
@@ -137,72 +225,44 @@ class _AllTasksPageState extends State<AllTasksPage> {
   }
 
   /// 把任务摊成「分组头 + 任务」的扁平列表，交给 `ListView.builder` 增量构建。
+  ///
+  /// 分组本身在文件顶部的纯函数里（可单测），这里只负责摊平。
   List<_Row> _buildRows(List<Task> tasks) {
     final rows = <_Row>[];
     final app = widget.app;
 
     switch (_grouping) {
       case TaskGrouping.none:
-        tasks.sort(_byDueThenOrder);
+        tasks.sort(byDueThenOrder);
         rows.addAll(tasks.map(_Row.task));
 
       case TaskGrouping.event:
-        final events = app.ws.liveEvents;
-        int eventOrder(String id) {
-          for (final event in events) {
-            if (event.id == id) return event.order;
-          }
-          return 1 << 30;
-        }
-
-        final byEvent = <String, List<Task>>{};
-        for (final task in tasks) {
-          byEvent.putIfAbsent(task.eventId, () => <Task>[]).add(task);
-        }
-        final ordered = byEvent.keys.toList()
-          ..sort((a, b) => eventOrder(a).compareTo(eventOrder(b)));
-        for (final eventId in ordered) {
-          final group = byEvent[eventId]!..sort(_byOrderOfEvent);
-          rows.add(
-            _Row.header(app.ws.findEvent(eventId)?.name ?? '（事件已删除）', group.length),
-          );
-          rows.addAll(group.map(_Row.task));
+        final groups = groupByEvent(
+          tasks,
+          app.ws.liveEvents,
+          (eventId) => app.ws.findEvent(eventId)?.name ?? '（事件已删除）',
+        );
+        for (final group in groups) {
+          rows.add(_Row.header(group.label, group.tasks.length));
+          rows.addAll(group.tasks.map(_Row.task));
         }
 
       case TaskGrouping.urgency:
-        final byUrgency = <Urgency, List<Task>>{};
-        for (final task in tasks) {
-          final urgency =
-              task.status == NodeStatus.pending ? urgencyOf(task.dueAt) : Urgency.none;
-          byUrgency.putIfAbsent(urgency, () => <Task>[]).add(task);
-        }
         final colors = UrgencyColors.ofContext(context);
-        final ordered = byUrgency.keys.toList()
-          ..sort((a, b) => urgencyRank(a).compareTo(urgencyRank(b)));
-        for (final urgency in ordered) {
-          final group = byUrgency[urgency]!..sort(_byDueThenOrder);
-          rows.add(_Row.header(urgencyLabel(urgency), group.length, colors.of(urgency)));
-          rows.addAll(group.map(_Row.task));
+        for (final group in groupByUrgency(tasks)) {
+          rows.add(
+            _Row.header(
+              group.label,
+              group.tasks.length,
+              colors.of(group.tone ?? Urgency.none),
+            ),
+          );
+          rows.addAll(group.tasks.map(_Row.task));
         }
     }
 
     return rows;
   }
-
-  /// 到期日近的在前；没排期的垫底。
-  int _byDueThenOrder(Task a, Task b) {
-    final da = a.dueAt;
-    final db = b.dueAt;
-    if (da == null && db != null) return 1;
-    if (da != null && db == null) return -1;
-    if (da != null && db != null) {
-      final byDate = da.compareTo(db);
-      if (byDate != 0) return byDate;
-    }
-    return compareByOrder(a.order, a.id, b.order, b.id);
-  }
-
-  int _byOrderOfEvent(Task a, Task b) => compareByOrder(a.order, a.id, b.order, b.id);
 }
 
 /// 扁平列表里的一行：要么是分组头，要么是一条任务。
