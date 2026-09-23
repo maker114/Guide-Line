@@ -2,12 +2,19 @@ import '../json/canonical.dart';
 import 'entity.dart';
 import 'enums.dart';
 
-/// 任务（《数据契约》§3.4）—— 树形实体，主线为 `parent_task_id == null` 的兄弟链。
+/// 任务（《数据契约》§3.4）。
+///
+/// 两种关系**分开表达**：
+///   · `parent_task_id` —— **归属**（子任务挂在主任务框内）；
+///   · `next_task_ids`  —— **走向**（主线上下一步接到哪些任务，可多可合）。
+///
+/// 原来只有前者，于是主线只能是一条兄弟链、并列任务只能"分叉不能合流"。
 class Task implements EntityNode {
   const Task({
     required this.id,
     required this.eventId,
     required String? parentTaskId,
+    this.nextIds = const <String>[],
     required this.taskType,
     required this.title,
     required this.dueAt,
@@ -25,6 +32,7 @@ class Task implements EntityNode {
     'id',
     'event_id',
     'parent_task_id',
+    'next_task_ids',
     'task_type',
     'title',
     'due_at',
@@ -45,6 +53,12 @@ class Task implements EntityNode {
 
   @override
   final String? parentId;
+
+  /// **后续边**：这条任务往下接到哪些主线任务。
+  ///
+  /// 空列表 = 没有显式后续（老数据都是这样，按 `order` 顺序成链，见 `TaskFlow`）。
+  /// 两条以上 = 分叉；被两条以上任务指向 = 合流。
+  final List<String> nextIds;
 
   final TaskType taskType;
   final String title;
@@ -95,6 +109,7 @@ class Task implements EntityNode {
   Task copyWith({
     String? eventId,
     Object? parentId = _unset,
+    List<String>? nextIds,
     TaskType? taskType,
     String? title,
     Object? dueAt = _unset,
@@ -109,6 +124,7 @@ class Task implements EntityNode {
       id: id,
       eventId: eventId ?? this.eventId,
       parentTaskId: parentId == _unset ? this.parentId : parentId as String?,
+      nextIds: nextIds ?? this.nextIds,
       taskType: taskType ?? this.taskType,
       title: title ?? this.title,
       dueAt: dueAt == _unset ? this.dueAt : dueAt as String?,
@@ -128,6 +144,7 @@ class Task implements EntityNode {
       id: Canonical.readString(json['id'], 'task.id', issues) ?? '',
       eventId: Canonical.readString(json['event_id'], 'task.event_id', issues) ?? '',
       parentTaskId: Canonical.readString(json['parent_task_id'], 'task.parent_task_id', issues),
+      nextIds: _readIdList(json['next_task_ids']),
       taskType: TaskType.fromWire(json['task_type'], issues.error),
       title: Canonical.readString(json['title'], 'task.title', issues) ?? '',
       dueAt: Canonical.readDate(json['due_at'], 'task.due_at', issues),
@@ -142,12 +159,24 @@ class Task implements EntityNode {
     );
   }
 
+  /// 容错读取后续边：不是列表就当空，列表里非字符串的项直接丢掉。
+  /// 按契约 §8，**绝不因为一个字段畸形就让整条记录失败**。
+  static List<String> _readIdList(Object? raw) {
+    if (raw is! List) return const <String>[];
+    final out = <String>[];
+    for (final item in raw) {
+      if (item is String && item.isNotEmpty) out.add(item);
+    }
+    return List<String>.unmodifiable(out);
+  }
+
   @override
   Map<String, dynamic> toJson() {
     final out = <String, dynamic>{
       'id': id,
       'event_id': eventId,
       'parent_task_id': parentTaskId,
+      'next_task_ids': nextIds,
       'task_type': taskType.wire,
       'title': title,
       'due_at': dueAt,
