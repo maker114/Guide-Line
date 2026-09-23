@@ -4,6 +4,7 @@ import '../app/app_controller.dart';
 import '../platform/shortcut_channel.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
+import 'more/due_page.dart';
 import 'more/more_tab.dart';
 import 'projects/project_tab.dart';
 
@@ -74,6 +75,7 @@ class _AppShellState extends State<AppShell> {
           body: Column(
             children: <Widget>[
               if (app.startupWarnings.isNotEmpty) _WarningBanner(messages: app.startupWarnings),
+              if (app.overdueCount > 0) _DueBanner(count: app.overdueCount, app: app),
               Expanded(
                 child: IndexedStack(
                   index: _index,
@@ -100,25 +102,35 @@ class _AppShellState extends State<AppShell> {
               setState(() => _index = index);
               app.setLastTab(index);
             },
-            destinations: const <NavigationDestination>[
-              NavigationDestination(
+            destinations: <NavigationDestination>[
+              const NavigationDestination(
                 icon: Icon(Icons.lightbulb_outline),
                 selectedIcon: Icon(Icons.lightbulb),
                 label: '灵感',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.account_tree_outlined),
                 selectedIcon: Icon(Icons.account_tree),
                 label: '项目',
               ),
-              NavigationDestination(
+              const NavigationDestination(
                 icon: Icon(Icons.timeline_outlined),
                 selectedIcon: Icon(Icons.timeline),
                 label: '事件',
               ),
+              // 逾期任务的数量挂在「更多」上：到期视图在那一页下面，
+              // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见。
               NavigationDestination(
-                icon: Icon(Icons.more_horiz),
-                selectedIcon: Icon(Icons.more_horiz),
+                icon: Badge.count(
+                  count: app.overdueCount,
+                  isLabelVisible: app.overdueCount > 0,
+                  child: const Icon(Icons.more_horiz),
+                ),
+                selectedIcon: Badge.count(
+                  count: app.overdueCount,
+                  isLabelVisible: app.overdueCount > 0,
+                  child: const Icon(Icons.more_horiz),
+                ),
                 label: '更多',
               ),
             ],
@@ -160,6 +172,47 @@ class _WarningBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(messages.join('；'), style: theme.textTheme.bodySmall)),
         ],
+      ),
+    );
+  }
+}
+
+/// 逾期提醒条。
+///
+/// 设计文档明确不做推送唤醒（ADR-062），所以"提醒"只能在用户打开 App 时发生：
+/// 这条横幅 + 「更多」上的角标，就是这个 App 全部的到期提醒手段。
+class _DueBanner extends StatelessWidget {
+  const _DueBanner({required this.count, required this.app});
+
+  final int count;
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.tertiaryContainer,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(builder: (_) => DuePage(app: app)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: <Widget>[
+              Icon(Icons.error_outline, size: 18, color: theme.colorScheme.onTertiaryContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '有 $count 条任务已逾期',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onTertiaryContainer),
+                ),
+              ),
+              Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onTertiaryContainer),
+            ],
+          ),
+        ),
       ),
     );
   }

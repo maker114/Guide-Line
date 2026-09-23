@@ -169,6 +169,36 @@ void main() {
     expect(app.ws.liveProjects.where((p) => !p.archived).length, 1);
   });
 
+  testWidgets('逾期任务会在启动时提醒，并能一键跳到到期页', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '带逾期任务的事件');
+    app.run(() => app.ws.createTask(
+          eventId: event.id,
+          title: '早就该做的事',
+          dueAt: '2020-01-01',
+        ));
+    app.run(() => app.ws.createTask(eventId: event.id, title: '没有到期日的事'));
+
+    expect(app.overdueCount, 1, reason: '只算逾期的，不算没设到期日的');
+    expect(app.dueCount, 1);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 启动就看得见（设计上不做推送唤醒，这是唯一的提醒入口）
+    expect(find.text('有 1 条任务已逾期'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(NavigationBar), matching: find.text('1')),
+      findsOneWidget,
+      reason: '「更多」页签上应该有逾期角标',
+    );
+
+    await tester.tap(find.text('有 1 条任务已逾期'));
+    await tester.pumpAndSettle();
+    expect(find.text('早就该做的事'), findsOneWidget);
+    expect(find.text('没有到期日的事'), findsNothing, reason: '没设到期日的不该出现在到期页');
+  });
+
   testWidgets('深色模式 + 1.6 倍字体下四个 Tab 不溢出', (tester) async {
     // 360×780 逻辑像素（常见手机），字体放大到 1.6 倍 —— 布局溢出会直接让测试失败
     tester.view.physicalSize = const Size(1080, 2340);

@@ -67,6 +67,17 @@ class AppController extends ChangeNotifier {
 
   int get archiveCount => workspace.archiveZone.totalCount;
 
+  /// 已逾期：`due_at` 严格早于今天、未完成、未归档。
+  int get overdueCount => workspace.tasksDueOnOrBefore(_yesterdayDate()).length;
+
+  /// 今天及之前到期的待处理任务（含逾期）。
+  int get dueCount => workspace.tasksDueOnOrBefore(Ids.todayDate()).length;
+
+  static String _yesterdayDate() {
+    final now = DateTime.now();
+    return Ids.todayDate(DateTime(now.year, now.month, now.day - 1));
+  }
+
   List<BackupEntry> get backups => storage.listBackups();
 
   int? get lastExportedAt => workspace.lastExportedAt;
