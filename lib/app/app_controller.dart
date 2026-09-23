@@ -170,12 +170,15 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  void toggleCollapsed(String id, bool collapsed) {
-    workspace.setCollapsed(id, collapsed);
+  /// 节点是否展开；[defaultExpanded] 由调用方按节点状态给
+  /// （任务框传的是"未完成→展开、已完成→收起"，于是"已完成自动折叠"是算出来的）。
+  bool isExpanded(String id, {bool defaultExpanded = true}) =>
+      prefs.isExpanded(id, defaultExpanded: defaultExpanded);
+
+  void setExpanded(String id, {required bool expanded}) {
+    workspace.setExpanded(id, expanded: expanded);
     notifyListeners();
   }
-
-  bool isCollapsed(String id) => prefs.isCollapsed(id);
 
   void setLastTab(int index) {
     workspace.setLastTab(index);

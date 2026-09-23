@@ -509,7 +509,7 @@ void main() {
         projectId: project.id,
         newImplementation: '正文',
       );
-      ws.setCollapsed(project.id, true);
+      ws.setExpanded(project.id, expanded: false);
       ws.persist();
 
       final reloaded = Workspace.fromLoad(storage, storage.load());
@@ -517,7 +517,7 @@ void main() {
       expect(reloaded.findProject(project.id)!.implementation, '正文');
       expect(reloaded.findInspiration(inspiration.id)!.status, InspirationStatus.merged);
       expect(reloaded.findInspiration(inspiration.id)!.mergedInto, project.id);
-      expect(reloaded.prefs.isCollapsed(project.id), isTrue);
+      expect(reloaded.prefs.isExpanded(project.id), isFalse);
     });
   });
 

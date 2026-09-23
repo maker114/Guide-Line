@@ -164,7 +164,7 @@ List<_ProjectRow> _flatten(AppController app) {
           .whereType<Project>()
           .where((p) => !p.archived)
           .toList(growable: false);
-      final expanded = !app.isCollapsed(project.id);
+      final expanded = app.isExpanded(project.id);
       rows.add(
         _ProjectRow(
           project: project,
@@ -215,7 +215,7 @@ class _ProjectTile extends StatelessWidget {
           : IconButton(
               tooltip: row.expanded ? '收起' : '展开',
               icon: Icon(row.expanded ? Icons.expand_more : Icons.chevron_right),
-              onPressed: () => app.toggleCollapsed(project.id, row.expanded),
+              onPressed: () => app.setExpanded(project.id, expanded: !row.expanded),
             ),
       title: Text(
         project.title,

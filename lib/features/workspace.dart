@@ -945,8 +945,9 @@ class Workspace {
 
   // ---------------------------------------------------------------- 视图偏好
 
-  void setCollapsed(String id, bool collapsed) {
-    _prefs = _prefs.toggleCollapsed(id, collapsed);
+  /// 记录一次显式展开 / 收起（默认值由 UI 按节点状态算，不写进偏好）。
+  void setExpanded(String id, {required bool expanded}) {
+    _prefs = _prefs.withExpanded(id, expanded: expanded);
     _storage.savePrefs(_prefs);
   }
 

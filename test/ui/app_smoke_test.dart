@@ -227,6 +227,34 @@ void main() {
     expect(find.text('没有到期日的事'), findsNothing, reason: '没设到期日的不该出现在到期页');
   });
 
+  testWidgets('已完成的任务默认折叠下级，点一下能展开', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '折叠演示');
+    final mainTask = app.ws.createTask(eventId: event.id, title: '主任务');
+    final subtask = app.ws.createTask(
+      eventId: event.id,
+      title: '子任务可见性',
+      parentTaskId: mainTask.id,
+      type: TaskType.subtask,
+    );
+    // 子任务先完成，父任务才允许被标记完成
+    app.run(() => app.ws.setTaskStatus(subtask.id, NodeStatus.done));
+    app.run(() => app.ws.setTaskStatus(mainTask.id, NodeStatus.done));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await switchTab(tester, '事件');
+    await tester.tap(find.text('折叠演示'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已折叠 1 个下级'), findsOneWidget, reason: '已完成的任务应默认折叠下级');
+    expect(find.text('子任务可见性'), findsNothing, reason: '折叠状态下级行不该被构建出来');
+
+    await tester.tap(find.text('已折叠 1 个下级'));
+    await tester.pumpAndSettle();
+    expect(find.text('子任务可见性'), findsOneWidget, reason: '点开后要能看到下级');
+  });
+
   testWidgets('深色模式 + 1.6 倍字体下四个 Tab 不溢出', (tester) async {
     // 360×780 逻辑像素（常见手机），字体放大到 1.6 倍 —— 布局溢出会直接让测试失败
     tester.view.physicalSize = const Size(1080, 2340);

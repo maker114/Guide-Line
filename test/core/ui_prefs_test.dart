@@ -77,7 +77,7 @@ void main() {
     });
   });
 
-  test('toggleCollapsed 不会顺手弄丢别的字段', () {
+  test('withExpanded 不会顺手弄丢别的字段', () {
     const original = UiPrefs(
       lastTabIndex: 1,
       compactTaskView: true,
@@ -89,8 +89,8 @@ void main() {
       backgroundSeedHex: '#0e7c86',
     );
 
-    final collapsed = original.toggleCollapsed('node-1', true);
-    expect(collapsed.isCollapsed('node-1'), isTrue);
+    final collapsed = original.withExpanded('node-1', expanded: false);
+    expect(collapsed.isExpanded('node-1'), isFalse);
     expect(collapsed.lastTabIndex, 1);
     expect(collapsed.compactTaskView, isTrue);
     expect(collapsed.lastExportedAt, 1788652799999);
@@ -100,9 +100,42 @@ void main() {
     expect(collapsed.backgroundBlur, 12);
     expect(collapsed.backgroundSeedHex, '#0e7c86');
 
-    final expanded = collapsed.toggleCollapsed('node-1', false);
-    expect(expanded.isCollapsed('node-1'), isFalse);
+    final expanded = collapsed.withExpanded('node-1', expanded: true);
+    expect(expanded.isExpanded('node-1'), isTrue);
     expect(expanded.themeId, 'ocean');
     expect(expanded.backgroundImagePath, '/p/bg.img');
+  });
+
+  group('展开 / 收起的两集合语义', () {
+    test('没有显式选择时用调用方给的默认值（已完成的任务默认收起）', () {
+      const prefs = UiPrefs.empty;
+      expect(prefs.isExpanded('t1'), isTrue, reason: '未完成默认展开');
+      expect(prefs.isExpanded('t1', defaultExpanded: false), isFalse, reason: '已完成默认收起');
+    });
+
+    test('显式展开优先于显式收起', () {
+      final prefs = UiPrefs.empty
+          .withExpanded('t1', expanded: false)
+          .withExpanded('t1', expanded: true);
+      expect(prefs.collapsedIds.contains('t1'), isFalse, reason: '两个集合互斥');
+      expect(prefs.expandedIds.contains('t1'), isTrue);
+      expect(prefs.isExpanded('t1', defaultExpanded: false), isTrue, reason: '手动展开要留得住');
+    });
+
+    test('显式收起优先于默认展开', () {
+      final prefs = UiPrefs.empty.withExpanded('t1', expanded: false);
+      expect(prefs.isExpanded('t1'), isFalse);
+      expect(prefs.isExpanded('t1', defaultExpanded: false), isFalse);
+    });
+
+    test('两个集合都能 JSON 往返', () {
+      final prefs = UiPrefs.empty
+          .withExpanded('a', expanded: false)
+          .withExpanded('b', expanded: true);
+      final restored = UiPrefs.fromJson(prefs.toJson());
+
+      expect(restored.isExpanded('a'), isFalse);
+      expect(restored.isExpanded('b'), isTrue);
+    });
   });
 }

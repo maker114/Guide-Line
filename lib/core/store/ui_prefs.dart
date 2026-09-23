@@ -8,6 +8,7 @@ import '../models/enums.dart';
 class UiPrefs {
   const UiPrefs({
     this.collapsedIds = const <String>{},
+    this.expandedIds = const <String>{},
     this.lastTabIndex = 0,
     this.compactTaskView = false,
     this.lastExportedAt,
@@ -30,6 +31,14 @@ class UiPrefs {
 
   /// 已折叠的节点 id（项目树 / 任务线共用）
   final Set<String> collapsedIds;
+
+  /// **被显式展开过**的节点 id。
+  ///
+  /// 为什么需要两个集合：折叠的"默认值"是算出来的 ——
+  /// 未完成的默认展开、已完成的默认收起（所以「已完成任务自动折叠」不需要
+  /// 在状态变化时去改偏好）。但用户手动展开一个已完成任务后，这个选择必须留得住，
+  /// 否则它下次又会自己缩回去。显式展开优先于显式收起，两者都没有才用默认值。
+  final Set<String> expandedIds;
 
   /// 上次停留的底部页签
   final int lastTabIndex;
@@ -61,20 +70,30 @@ class UiPrefs {
 
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
-  bool isCollapsed(String id) => collapsedIds.contains(id);
+  /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
+  bool isExpanded(String id, {bool defaultExpanded = true}) {
+    if (expandedIds.contains(id)) return true;
+    if (collapsedIds.contains(id)) return false;
+    return defaultExpanded;
+  }
 
-  UiPrefs toggleCollapsed(String id, bool collapsed) {
-    final next = Set<String>.from(collapsedIds);
-    if (collapsed) {
-      next.add(id);
+  /// 记录一次显式展开 / 收起，并把该 id 从另一个集合里清掉（两者互斥）。
+  UiPrefs withExpanded(String id, {required bool expanded}) {
+    final collapsed = Set<String>.from(collapsedIds);
+    final expandedSet = Set<String>.from(expandedIds);
+    if (expanded) {
+      expandedSet.add(id);
+      collapsed.remove(id);
     } else {
-      next.remove(id);
+      collapsed.add(id);
+      expandedSet.remove(id);
     }
-    return copyWith(collapsedIds: next);
+    return copyWith(collapsedIds: collapsed, expandedIds: expandedSet);
   }
 
   UiPrefs copyWith({
     Set<String>? collapsedIds,
+    Set<String>? expandedIds,
     int? lastTabIndex,
     bool? compactTaskView,
     Object? lastExportedAt = _unset,
@@ -86,6 +105,7 @@ class UiPrefs {
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
+        expandedIds: expandedIds ?? this.expandedIds,
         lastTabIndex: lastTabIndex ?? this.lastTabIndex,
         compactTaskView: compactTaskView ?? this.compactTaskView,
         lastExportedAt:
@@ -103,6 +123,7 @@ class UiPrefs {
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'collapsedIds': collapsedIds.toList(growable: false)..sort(),
+        'expandedIds': expandedIds.toList(growable: false)..sort(),
         'lastTabIndex': lastTabIndex,
         'compactTaskView': compactTaskView,
         'lastExportedAt': lastExportedAt,
@@ -114,17 +135,13 @@ class UiPrefs {
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
-    final raw = json['collapsedIds'];
-    final collapsed = <String>{};
-    if (raw is List) {
-      for (final item in raw) {
-        if (item is String) collapsed.add(item);
-      }
-    }
+    final collapsed = _readIdSet(json['collapsedIds']);
+    final expanded = _readIdSet(json['expandedIds']);
     final themeId = json['themeId'];
     final backgroundPath = json['backgroundImagePath'];
     return UiPrefs(
       collapsedIds: collapsed,
+      expandedIds: expanded,
       lastTabIndex: json['lastTabIndex'] is int ? json['lastTabIndex'] as int : 0,
       compactTaskView: json['compactTaskView'] == true,
       lastExportedAt: json['lastExportedAt'] is int ? json['lastExportedAt'] as int : null,
@@ -142,6 +159,16 @@ class UiPrefs {
     final trimmed = value.trim();
     if (trimmed.length != 7 || !trimmed.startsWith('#')) return null;
     return trimmed.toLowerCase();
+  }
+
+  static Set<String> _readIdSet(Object? raw) {
+    final out = <String>{};
+    if (raw is List) {
+      for (final item in raw) {
+        if (item is String && item.isNotEmpty) out.add(item);
+      }
+    }
+    return out;
   }
 
   static double _readUnitDouble(Object? value, double fallback) {

@@ -293,10 +293,12 @@ void main() {
       storage.save(storeWith('项目'), nowMillis: day);
       final before = storage.paths.storeFile.readAsStringSync(encoding: utf8);
 
-      storage.savePrefs(UiPrefs.empty.toggleCollapsed('p-1', true).copyWith(lastTabIndex: 2));
+      storage.savePrefs(
+        UiPrefs.empty.withExpanded('p-1', expanded: false).copyWith(lastTabIndex: 2),
+      );
 
       final report = storage.load();
-      expect(report.prefs.isCollapsed('p-1'), isTrue);
+      expect(report.prefs.isExpanded('p-1'), isFalse);
       expect(report.prefs.lastTabIndex, 2);
       expect(storage.paths.storeFile.readAsStringSync(encoding: utf8), before);
     });

@@ -298,16 +298,47 @@ class _TaskBox extends StatelessWidget {
     final theme = Theme.of(context);
     final addingSubtask = host._subtaskParentId == task.id;
     final addingParallel = host._parallelParentId == task.id;
+    final isDone = task.status != NodeStatus.pending;
+
+    // 已完成（含已搁置）的任务**默认折叠**下级：减少视觉噪音。
+    // 但**不改变顺序** —— 主线是一条链，把已完成的挪到末尾会破坏"接着做"的语义，
+    // 所以这里是就地缩成一行，而不是重新分组。
+    final expanded = app.isExpanded(task.id, defaultExpanded: !isDone);
+    final hasChildren = subtasks.isNotEmpty || parallels.isNotEmpty;
 
     return Card(
       margin: EdgeInsets.zero,
+      elevation: 0,
+      color: theme.colorScheme.surfaceContainerLow,
+      // 主任务框描一圈主题色：与框内那些"没有描边"的子任务行区分开
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary,
+          width: isDone ? 1 : 1.4,
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _TaskLine(host: host, task: task, indent: 0, childSummary: _summarize(children)),
-          for (final subtask in subtasks)
-            _TaskLine(host: host, task: subtask, indent: 1),
-          if (addingSubtask)
+          _TaskLine(
+            host: host,
+            task: task,
+            indent: 0,
+            childSummary: _summarize(children),
+            collapsible: hasChildren,
+            expanded: expanded,
+            onToggle: () => app.setExpanded(task.id, expanded: !expanded),
+          ),
+          if (hasChildren && !expanded)
+            _CollapsedChildrenHint(
+              count: children.length,
+              onTap: () => app.setExpanded(task.id, expanded: true),
+            ),
+          if (expanded)
+            for (final subtask in subtasks)
+              _TaskLine(host: host, task: subtask, indent: 1),
+          if (expanded && addingSubtask)
             Padding(
               padding: const EdgeInsets.only(left: 20),
               child: InlineComposer(
@@ -322,7 +353,7 @@ class _TaskBox extends StatelessWidget {
                 ),
               ),
             ),
-          if (addingParallel)
+          if (expanded && addingParallel)
             Padding(
               padding: const EdgeInsets.only(left: 20),
               child: InlineComposer(
@@ -337,7 +368,7 @@ class _TaskBox extends StatelessWidget {
                 ),
               ),
             ),
-          if (parallels.isNotEmpty && !compact)
+          if (expanded && parallels.isNotEmpty && !compact)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
               child: Column(
@@ -381,6 +412,35 @@ class _TaskBox extends StatelessWidget {
   }
 }
 
+/// 折叠起来的下级摘要（已完成的任务默认是折叠的）。
+class _CollapsedChildrenHint extends StatelessWidget {
+  const _CollapsedChildrenHint({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 12, 10),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.unfold_more, size: 14, color: theme.colorScheme.outline),
+            const SizedBox(width: 4),
+            Text(
+              '已折叠 $count 个下级',
+              style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 一行任务（框标题行或框内子任务行）。
 class _TaskLine extends StatelessWidget {
   const _TaskLine({
@@ -388,12 +448,20 @@ class _TaskLine extends StatelessWidget {
     required this.task,
     required this.indent,
     this.childSummary,
+    this.collapsible = false,
+    this.expanded = true,
+    this.onToggle,
   });
 
   final _EventDetailPageState host;
   final Task task;
   final int indent;
   final String? childSummary;
+
+  /// 有下级可折叠时才显示展开/收起按钮
+  final bool collapsible;
+  final bool expanded;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -403,6 +471,15 @@ class _TaskLine extends StatelessWidget {
     final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status == NodeStatus.done;
     final summary = childSummary;
+
+    // 层级区分：主任务是 titleSmall（更大更重），子任务降到 bodySmall 并缩进
+    final baseStyle = indent > 0 ? theme.textTheme.bodySmall : theme.textTheme.titleSmall;
+    final titleStyle = done
+        ? baseStyle?.copyWith(
+            decoration: TextDecoration.lineThrough,
+            color: theme.colorScheme.outline,
+          )
+        : baseStyle;
 
     if (host._renamingTaskId == task.id) {
       return Padding(
@@ -418,13 +495,26 @@ class _TaskLine extends StatelessWidget {
       );
     }
 
-    return ListTile(
+    final tile = ListTile(
       dense: indent > 0,
+      // 子任务行铺一层浅底。**不能**改用外面包 DecoratedBox 的做法：
+      // ListTile 的墨迹是画在最近的 Material 上的，中间夹一个有底色的 DecoratedBox
+      // 会让水波纹看不见，Flutter 会直接断言报错（这里踩过一次）。
+      tileColor: indent > 0
+          ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35)
+          : null,
       contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 0),
       leading: TaskStatusButton(app: app, task: task),
       title: Row(
         children: <Widget>[
           if (indent > 0) ...<Widget>[
+            // 一道短竖线，配合缩进与浅底，把子任务明确"挂"在主任务下面
+            Container(
+              width: 2,
+              height: 14,
+              color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            ),
+            const SizedBox(width: 5),
             Icon(Icons.subdirectory_arrow_right, size: 14, color: theme.colorScheme.outline),
             const SizedBox(width: 2),
           ],
@@ -433,12 +523,7 @@ class _TaskLine extends StatelessWidget {
               task.title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: done
-                  ? theme.textTheme.bodyMedium?.copyWith(
-                      decoration: TextDecoration.lineThrough,
-                      color: theme.colorScheme.outline,
-                    )
-                  : null,
+              style: titleStyle,
             ),
           ),
           if (task.taskType == TaskType.parallel)
@@ -469,18 +554,32 @@ class _TaskLine extends StatelessWidget {
                 if (summary != null) Text(summary, style: theme.textTheme.labelSmall),
               ],
             ),
-      trailing: PopupMenuButton<String>(
-        tooltip: '更多',
-        onSelected: (value) async {
-          await _run(context, value);
-        },
-        itemBuilder: (_) => <PopupMenuEntry<String>>[
-          for (final action in taskActions(task))
-            PopupMenuItem<String>(value: action.value, child: Text(action.label)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (collapsible)
+            IconButton(
+              tooltip: expanded ? '收起下级' : '展开下级',
+              icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+              onPressed: onToggle,
+            ),
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (value) async {
+              await _run(context, value);
+            },
+            itemBuilder: (_) => <PopupMenuEntry<String>>[
+              for (final action in taskActions(task))
+                PopupMenuItem<String>(value: action.value, child: Text(action.label)),
+            ],
+          ),
         ],
       ),
       onTap: () => _showActions(context),
     );
+
+    if (indent == 0) return tile;
+    return tile;
   }
 
   Future<void> _run(BuildContext context, String value) async {
