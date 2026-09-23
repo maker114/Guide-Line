@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// 原子文件操作的唯一实现（《同步与云函数契约》§1）。
+/// 原子文件操作的唯一实现。
 ///
 /// 落盘规则：
 ///   写 `<name>.tmp` → flush → rename 覆盖。
@@ -9,7 +9,7 @@ import 'dart:io';
 ///
 /// 读取规则：
 ///   内容损坏时**绝不静默重建空数据** —— 把现场改名保留为 `.corrupt.<ts>` 并向上报告，
-///   由数据层决定是从云端重新拉取，还是进入只读告警态。
+///   由数据层决定是从备份恢复，还是进入只读告警态。
 class AtomicFile {
   AtomicFile(this.file);
 

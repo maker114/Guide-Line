@@ -7,6 +7,7 @@ import 'all_tasks_page.dart';
 import 'archive_page.dart';
 import 'backups_page.dart';
 import 'due_page.dart';
+import 'export_page.dart';
 import 'search_page.dart';
 
 /// 更多 Tab：**浏览入口 + 数据安全 + 关于**。
@@ -61,12 +62,12 @@ class MoreTab extends StatelessWidget {
           subtitle: '${backups.length} 份可用备份（滚动保留 10 份 + 日快照 7 天）',
           page: BackupsPage(app: app),
         ),
-        const ListTile(
-          leading: Icon(Icons.ios_share),
-          title: Text('导出 / 分享'),
-          subtitle: Text('导出为 .json.gz 后通过系统分享发出'),
-          enabled: false,
-          trailing: Text('下一轮'),
+        _MoreItem(
+          icon: Icons.ios_share,
+          title: '导出 / 导入',
+          subtitle: _exportSubtitle(),
+          danger: app.exportOverdue,
+          page: ExportPage(app: app),
         ),
         const SectionHeader('关于'),
         ListTile(
@@ -82,6 +83,17 @@ class MoreTab extends StatelessWidget {
       ],
     );
   }
+
+  /// 导出入口的副标题：把"多久没导出"直接摆在列表上。
+  String _exportSubtitle() {
+    final last = app.lastExportedAt;
+    if (last == null) return '还没有导出过 —— 数据只在这台手机里';
+    final when = relativeTime(last);
+    if (app.exportOverdue) {
+      return '上次导出 $when，已超过 ${AppController.exportReminderDays} 天';
+    }
+    return '上次导出 $when · 导出为 .json.gz 后可分享出去';
+  }
 }
 
 class _MoreItem extends StatelessWidget {
@@ -90,19 +102,25 @@ class _MoreItem extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.page,
+    this.danger = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final Widget page;
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return ListTile(
-      leading: Icon(icon),
+      leading: Icon(icon, color: danger ? theme.colorScheme.error : null),
       title: Text(title),
-      subtitle: Text(subtitle),
+      subtitle: Text(
+        subtitle,
+        style: danger ? TextStyle(color: theme.colorScheme.error) : null,
+      ),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => Navigator.of(context).push<void>(
         MaterialPageRoute<void>(builder: (_) => page),

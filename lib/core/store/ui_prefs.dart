@@ -10,6 +10,7 @@ class UiPrefs {
     this.collapsedIds = const <String>{},
     this.lastTabIndex = 0,
     this.compactTaskView = false,
+    this.lastExportedAt,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -22,6 +23,11 @@ class UiPrefs {
 
   /// 任务线是否使用紧凑模式（手机上默认更紧凑）
   final bool compactTaskView;
+
+  /// 上次成功导出的时间戳；`null` 表示从未导出。
+  ///
+  /// 没有云端时导出是唯一的"离开这台手机"的通道，所以要能提醒用户该导出了。
+  final int? lastExportedAt;
 
   bool isCollapsed(String id) => collapsedIds.contains(id);
 
@@ -36,6 +42,7 @@ class UiPrefs {
       collapsedIds: next,
       lastTabIndex: lastTabIndex,
       compactTaskView: compactTaskView,
+      lastExportedAt: lastExportedAt,
     );
   }
 
@@ -43,17 +50,21 @@ class UiPrefs {
     Set<String>? collapsedIds,
     int? lastTabIndex,
     bool? compactTaskView,
+    Object? lastExportedAt = _unset,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
         lastTabIndex: lastTabIndex ?? this.lastTabIndex,
         compactTaskView: compactTaskView ?? this.compactTaskView,
+        lastExportedAt:
+            lastExportedAt == _unset ? this.lastExportedAt : lastExportedAt as int?,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'collapsedIds': collapsedIds.toList(growable: false)..sort(),
         'lastTabIndex': lastTabIndex,
         'compactTaskView': compactTaskView,
+        'lastExportedAt': lastExportedAt,
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -68,6 +79,7 @@ class UiPrefs {
       collapsedIds: collapsed,
       lastTabIndex: json['lastTabIndex'] is int ? json['lastTabIndex'] as int : 0,
       compactTaskView: json['compactTaskView'] == true,
+      lastExportedAt: json['lastExportedAt'] is int ? json['lastExportedAt'] as int : null,
     );
   }
 
@@ -83,3 +95,5 @@ class UiPrefs {
   /// 未使用但保留：枚举 → 集合名（供将来把偏好扩展到"上次打开的集合"）。
   static String collectionLabel(DocName name) => name.key;
 }
+
+const Object _unset = Object();

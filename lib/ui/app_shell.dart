@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../platform/shortcut_channel.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
 import 'more/more_tab.dart';
@@ -28,6 +29,30 @@ class _AppShellState extends State<AppShell> {
   late int _index = widget.app.prefs.lastTabIndex.clamp(0, 3);
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
+
+  @override
+  void initState() {
+    super.initState();
+    _bindCaptureShortcut();
+  }
+
+  /// 长按桌面图标 → 速记：热启动靠推送，冷启动靠启动时问一次。
+  void _bindCaptureShortcut() {
+    ShortcutChannel.onCapture(_goCapture);
+    ShortcutChannel.consumePendingCapture().then((pending) {
+      if (pending) _goCapture();
+    });
+  }
+
+  /// 切到灵感页并把光标放进输入框 —— 「记一笔」的代价必须足够小。
+  void _goCapture() {
+    if (!mounted) return;
+    setState(() => _index = 0);
+    widget.app.setLastTab(0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _inspirationKey.currentState?.focusCapture();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,13 +90,7 @@ class _AppShellState extends State<AppShell> {
           floatingActionButton: _index == 0
               ? null
               : FloatingActionButton.extended(
-                  onPressed: () {
-                    setState(() => _index = 0);
-                    app.setLastTab(0);
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      _inspirationKey.currentState?.focusCapture();
-                    });
-                  },
+                  onPressed: _goCapture,
                   icon: const Icon(Icons.bolt),
                   label: const Text('速记'),
                 ),

@@ -268,6 +268,53 @@ class AppStorage {
     return dir;
   }
 
+  /// 导出保留份数：导出文件是完整副本，留最近几份够用于"手滑选错目标"。
+  static const int exportKeepCount = 5;
+
+  /// 写一份导出文件，返回它。
+  ///
+  /// 放在**应用私有目录**里而不是外部存储：分享面板会通过 FileProvider 授权读取，
+  /// 不需要申请存储权限，也不会把数据留在公共目录里被别的 App 扫到。
+  File writeExport(List<int> bytes, {required int nowMillis}) {
+    final dir = ensureExportsDir();
+    final file = File('${dir.path}${Platform.pathSeparator}${_exportName(nowMillis)}');
+    AtomicFile(file).writeBytes(bytes);
+    _pruneExports();
+    return file;
+  }
+
+  /// 现有的导出文件（新 → 旧）。
+  List<File> listExports() {
+    if (!paths.exportsDir.existsSync()) return <File>[];
+    final files = paths.exportsDir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.uri.pathSegments.last.startsWith('guideline-'))
+        .toList(growable: false);
+    files.sort((a, b) => b.path.compareTo(a.path));
+    return files;
+  }
+
+  void _pruneExports() {
+    final files = listExports();
+    for (var i = exportKeepCount; i < files.length; i += 1) {
+      try {
+        files[i].deleteSync();
+      } catch (_) {
+        // 清理失败不影响本次导出
+      }
+    }
+  }
+
+  /// `guideline-YYYYMMDD-HHmmss.json.gz`
+  String _exportName(int millis) {
+    final d = DateTime.fromMillisecondsSinceEpoch(millis);
+    String two(int v) => v.toString().padLeft(2, '0');
+    final date = '${d.year}${two(d.month)}${two(d.day)}';
+    final time = '${two(d.hour)}${two(d.minute)}${two(d.second)}';
+    return 'guideline-$date-$time.json.gz';
+  }
+
   // ---------------------------------------------------------------- 偏好
 
   UiPrefs _readPrefs() {

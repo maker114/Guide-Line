@@ -2,12 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../core/ids.dart';
+import '../core/json/store_file.dart';
 import '../core/models/entity.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
+import '../core/store/export_codec.dart';
 import '../core/store/ui_prefs.dart';
 import '../features/workspace.dart';
 import '../platform/data_directory.dart';
+import '../platform/data_transfer_platform.dart';
 
 /// 应用装配与动作门面（**单机形态**）。
 ///
@@ -65,6 +69,21 @@ class AppController extends ChangeNotifier {
 
   List<BackupEntry> get backups => storage.listBackups();
 
+  int? get lastExportedAt => workspace.lastExportedAt;
+
+  /// 「该导出了」的提醒阈值（天）。
+  static const int exportReminderDays = 7;
+
+  /// 从未导出，或距上次导出已超过 [exportReminderDays] 天。
+  ///
+  /// 没有云端之后，导出是数据离开这台手机的唯一通道，所以要主动提醒。
+  bool get exportOverdue {
+    final last = lastExportedAt;
+    if (last == null) return true;
+    final days = (Ids.nowMillis() - last) / Duration.millisecondsPerDay;
+    return days >= exportReminderDays;
+  }
+
   /// 设置页展示的数据文件大小。
   String get storeFileSize {
     final file = storage.paths.storeFile;
@@ -114,6 +133,63 @@ class AppController extends ChangeNotifier {
     } catch (error) {
       return '恢复失败：$error';
     }
+  }
+
+  // ------------------------------------------------------------ 导出 / 导入
+
+  /// 导出整份数据并交给系统分享面板。
+  ///
+  /// 分享是否成功**不影响导出本身**：文件已经落在应用私有目录里了，
+  /// 用户取消分享只是没把它发出去。
+  Future<({bool ok, String message})> exportAndShare() async {
+    try {
+      final now = Ids.nowMillis();
+      final bytes = ExportCodec.encode(workspace.buildStoreFile(), exportedAt: now);
+      final file = storage.writeExport(bytes, nowMillis: now);
+      workspace.markExported(now);
+      notifyListeners();
+
+      final name = _fileNameOf(file.path);
+      final shared = await DataTransferPlatform.shareFile(
+        file.path,
+        text: 'Guide Line 数据导出',
+        subject: 'Guide Line 数据导出',
+      );
+      return (
+        ok: true,
+        message: shared ? '已导出并分享：$name' : '已导出到应用私有目录：$name',
+      );
+    } catch (error) {
+      return (ok: false, message: '导出失败：$error');
+    }
+  }
+
+  /// 用导入的数据**整体替换**当前数据。
+  ///
+  /// 替换前 [AppStorage.save] 会先把当前数据轮转进滚动备份，
+  /// 所以"导错了文件"也能从「备份与恢复」里退回来。
+  String? applyImport(StoreFile store) {
+    try {
+      storage.save(store);
+      workspace = Workspace.fromLoad(
+        storage,
+        LoadReport(
+          store: store,
+          prefs: prefs,
+          issues: DecodeIssues(),
+          quarantinedPaths: const <String>[],
+        ),
+      );
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '导入失败：$error';
+    }
+  }
+
+  static String _fileNameOf(String path) {
+    final parts = path.split(Platform.pathSeparator);
+    return parts.isEmpty ? path : parts.last;
   }
 
   /// 启动告警：把加载报告翻译成人能看懂的话。

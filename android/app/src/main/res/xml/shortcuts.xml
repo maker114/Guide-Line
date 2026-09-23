@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  长按桌面图标的快捷方式（v1.0 唯一的系统级入口）。
+
+  「速记」直接落到灵感输入框：记一笔的代价必须比解锁手机多不了多少，
+  否则灵感箱就会空着。图标用系统自带的 @mipmap/ic_launcher（同一张图，不做二次维护）。
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="capture"
+        android:shortcutLongLabel="@string/shortcut_capture_long"
+        android:shortcutShortLabel="@string/shortcut_capture_short">
+        <intent
+            android:action="com.maker.guideline.SHORTCUT_CAPTURE"
+            android:targetClass="com.maker.guideline.MainActivity"
+            android:targetPackage="com.maker.guideline" />
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>

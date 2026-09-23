@@ -168,4 +168,62 @@ void main() {
     await tester.pumpAndSettle();
     expect(app.ws.liveProjects.where((p) => !p.archived).length, 1);
   });
+
+  testWidgets('深色模式 + 1.6 倍字体下四个 Tab 不溢出', (tester) async {
+    // 360×780 逻辑像素（常见手机），字体放大到 1.6 倍 —— 布局溢出会直接让测试失败
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final project = app.ws.createProject(title: '一个名字相当长的项目名');
+    app.run(() => app.ws.updateProject(project.id, purpose: '一句相当长的目的说明，用来撑满一行'));
+    final event = app.ws.createEvent(name: '一个名字相当长的事件名');
+    final task = app.ws.createTask(eventId: event.id, title: '一条名字相当长的主线任务');
+    app.run(() => app.ws.createTask(
+          eventId: event.id,
+          title: '子任务',
+          parentTaskId: task.id,
+          type: TaskType.subtask,
+        ));
+    app.run(() => app.ws.createTask(
+          eventId: event.id,
+          title: '并列任务',
+          parentTaskId: task.id,
+          type: TaskType.parallel,
+        ));
+    app.run(() => app.ws.captureInspiration('一条比较长的灵感内容，用来检验放大字体后会不会挤爆布局'));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: AppShell(app: app),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await switchTab(tester, '项目');
+    await switchTab(tester, '事件');
+
+    // 进任务线并打开任务动作面板（7 项，是最容易溢出的地方）
+    await tester.tap(find.text('一个名字相当长的事件名'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('一条名字相当长的主线任务'));
+    await tester.pumpAndSettle();
+    expect(find.text('新建并列任务'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉面板
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    await switchTab(tester, '更多');
+    await tester.tap(find.text('全部任务'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+  });
 }

@@ -956,22 +956,29 @@ class Workspace {
     _storage.savePrefs(_prefs);
   }
 
+  /// 记下"刚刚成功导出过"（用于「超过 7 天没导出」的提醒）。
+  void markExported(int millis) {
+    _prefs = _prefs.copyWith(lastExportedAt: millis);
+    _storage.savePrefs(_prefs);
+  }
+
+  int? get lastExportedAt => _prefs.lastExportedAt;
+
   /// 数据目录（供设置页展示）
   String get dataDirectoryPath => _storage.paths.describe();
 
+  /// 当前的完整数据快照（导出用）。
+  StoreFile buildStoreFile() => StoreFile(documents: _docs, savedAt: Ids.nowMillis());
+
   /// 原子落盘：**整份数据一次写入**（单文件让跨实体变更天然原子）。
   void persist() {
-    _storage.save(
-      StoreFile(documents: _docs, savedAt: Ids.nowMillis()),
-    );
+    _storage.save(buildStoreFile());
     _storage.savePrefs(_prefs);
   }
 
   /// 手动触发一次备份轮转（导入、批量操作前可调用）。
   void snapshotNow() {
-    _storage.save(
-      StoreFile(documents: _docs, savedAt: Ids.nowMillis()),
-    );
+    _storage.save(buildStoreFile());
   }
 
   // ---------------------------------------------------------------- 内部

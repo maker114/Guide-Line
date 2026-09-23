@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 桌面显示名：与 Dart 侧 AppInfo.displayName 保持一致 -->
+    <string name="app_name">Guide Line</string>
+    <!-- 长按图标的快捷方式文案 -->
+    <string name="shortcut_capture_short">速记</string>
+    <string name="shortcut_capture_long">速记一条灵感</string>
+</resources>

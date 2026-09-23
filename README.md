@@ -1,17 +1,71 @@
-# guideline
+# GuideLine
 
-A new Flutter project.
+本地优先的个人生活管理工具：**把「灵感」和「任务线」两条线管清楚**。
+当前形态是 **Android 单机版**（Flutter），数据全部留在你自己的手机上。
 
-## Getting Started
+> 双端（手机 + 电脑）方案在服务器成本上卡住了，因此先把**单机体验**做扎实：
+> 数据全部本地、可导出、可备份，不依赖任何第三方服务。
+> 来龙去脉见 `docs/plan/mobile-v1-计划.md`，电脑端成果归档在 `archive/desktop-v1/`。
 
-This project is a starting point for a Flutter application.
+## 功能
 
-A few resources to get you started if this is your first Flutter project:
+底部四个 Tab：
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+| Tab | 干什么 |
+|---|---|
+| **灵感** | 速记优先：随手扔进输入框，之后再决定分配 / 合并进项目 / 丢弃 |
+| **项目** | 项目树（≤ 3 层）+ 目的 / 实现 / 日期 / 三态；灵感合并会写进项目「实现」 |
+| **事件** | 每个事件是一条任务线：主线纵向串联、子任务同框、并列任务并排 |
+| **更多** | 到期、全部任务、全局搜索、归档区（五个分区可反向找回）、备份与恢复、导出 / 导入 |
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+另外：**长按桌面图标 → 速记**，一键落到灵感输入框。
+
+## 数据与安全
+
+没有云端，所以数据安全是一等公民：
+
+- **单文件存储** `guideline.json`：临时文件 → flush → rename 的**原子替换**；
+  跨实体操作（合并灵感同时改项目与灵感）天然全有或全无
+- **备份轮转**：每次保存前留一份滚动备份（最近 10 份），每天第一份保存留日快照（最近 7 天）
+- **损坏永不静默**：主文件读不出来就隔离现场，并自动从最近备份恢复
+- **导出 / 导入**：整份数据导出为 `.json.gz` 经系统分享发出；导入前给摘要与二次确认，
+  替换前自动留一份备份，导错了能退回
+- 电脑端旧格式（v1 四文档信封）可以直接导入
+
+## 目录
+
+```
+lib/
+  core/       数据层与规则（纯 Dart，禁止 import Flutter）
+  features/   业务逻辑（Workspace：全部业务规则）
+  app/        应用装配与动作门面
+  ui/         界面（手机外壳 + 各 Tab）
+  platform/   平台适配（唯一允许出现平台判断 / 插件的地方）
+docs/         计划、数据契约、构建说明
+test/         契约样本回归、规则、存储、架构边界、界面冒烟
+tool/         一次性脚本（启动图标生成）
+archive/      已归档的电脑端成果（不参与本工程的分析与构建）
+```
+
+分层边界由 `test/core/architecture_test.dart` 扫描源码守护。
+
+## 构建
+
+```powershell
+flutter analyze --no-pub
+flutter test
+flutter build apk --release   # 产物 build/app/outputs/flutter-apk/app-release.apk
+```
+
+环境要求、图标生成、以及**首次构建时 Gradle 发行包下载卡住**的处理办法，
+见 [`docs/构建与发布.md`](docs/构建与发布.md)。
+
+## 文档地图
+
+| 文件 | 内容 |
+|---|---|
+| [`docs/plan/mobile-v1-计划.md`](docs/plan/mobile-v1-计划.md) | 手机端 v1.0 的范围、里程碑、待确认问题 |
+| [`docs/spec/数据契约.md`](docs/spec/数据契约.md) | 四类实体的字段、取值与序列化规则（**权威**） |
+| [`docs/构建与发布.md`](docs/构建与发布.md) | 构建、图标、发布流程 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 版本规则与变更记录 |
+| [`archive/desktop-v1/README.md`](archive/desktop-v1/README.md) | 电脑端归档了什么、为什么、哪些还能复用 |
