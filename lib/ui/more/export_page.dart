@@ -130,7 +130,9 @@ class _ExportPageState extends State<ExportPage> {
     setState(() => _busy = true);
     PickedTransferFile? picked;
     try {
-      picked = await DataTransferPlatform.pickFile();
+      picked = await DataTransferPlatform.pickFile(
+        dialogTitle: '选择要导入的导出文件',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _busy = false);

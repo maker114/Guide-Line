@@ -41,7 +41,7 @@ class AppController extends ChangeNotifier {
       workspace: workspace,
       dataDirectory: dir,
       startupWarnings: buildWarnings(report),
-    );
+    ).._loadBackgroundBytes();
   }
 
   final AppStorage storage;
@@ -93,6 +93,48 @@ class AppController extends ChangeNotifier {
     if (last == null) return true;
     final days = (Ids.nowMillis() - last) / Duration.millisecondsPerDay;
     return days >= exportReminderDays;
+  }
+
+  // ------------------------------------------------------------ 外观偏好
+
+  /// 背景图字节（启动时读一次，换图时更新）。
+  ///
+  /// 缓存在内存里的原因：`Image.memory` 靠同一个 `Uint8List` 实例命中 Flutter 的
+  /// 图片缓存；每次 build 都重新读盘会让背景反复闪烁。
+  Uint8List? backgroundBytes;
+
+  void _loadBackgroundBytes() {
+    backgroundBytes = prefs.hasBackground ? storage.readBackgroundImage() : null;
+  }
+
+  /// 外观类偏好统一入口（主题 / 背景参数）。取色由 UI 层算好后一并传进来。
+  void updatePrefs(UiPrefs next) {
+    workspace.updatePrefs(next);
+    notifyListeners();
+  }
+
+  /// 存下背景图并写回偏好；[seedHex] 是从图里取到的主色（可为空）。
+  String? applyBackgroundImage(List<int> bytes, {String? seedHex}) {
+    try {
+      final file = storage.saveBackgroundImage(bytes);
+      workspace.updatePrefs(
+        prefs.copyWith(backgroundImagePath: file.path, backgroundSeedHex: seedHex),
+      );
+      backgroundBytes = Uint8List.fromList(bytes);
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '保存背景图失败：$error';
+    }
+  }
+
+  void clearBackgroundImage() {
+    storage.deleteBackgroundImage();
+    workspace.updatePrefs(
+      prefs.copyWith(backgroundImagePath: null, backgroundSeedHex: null),
+    );
+    backgroundBytes = null;
+    notifyListeners();
   }
 
   /// 设置页展示的数据文件大小。

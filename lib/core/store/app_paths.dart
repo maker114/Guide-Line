@@ -25,9 +25,19 @@ class AppPaths {
 
   static const String exportsDirName = 'exports';
 
+  /// 背景图：从相册选进来的那张会被拷到这里，
+  /// 免得原图被删掉或移走之后背景就失效了。
+  static const String backgroundDirName = 'background';
+
   File get storeFile => File(_join(storeFileName));
 
   File get prefsFile => File(_join(prefsFileName));
+
+  Directory get backgroundDir => Directory(_join(backgroundDirName));
+
+  /// 背景图统一叫 `background.img` —— 解码器按内容判格式，不靠扩展名。
+  File get backgroundImageFile =>
+      File(_join('$backgroundDirName${Platform.pathSeparator}background.img'));
 
   /// 滚动备份：索引 1 表示"上一份"，越大越旧。
   File rollingBackup(int index) => File(_join('$backupPrefix$index.json'));
@@ -37,7 +47,7 @@ class AppPaths {
 
   Directory get exportsDir => Directory(_join(exportsDirName));
 
-  List<File> get managedFiles => <File>[storeFile, prefsFile];
+  List<File> get managedFiles => <File>[storeFile, prefsFile, backgroundImageFile];
 
   void ensureDirectories() {
     if (!directory.existsSync()) directory.createSync(recursive: true);

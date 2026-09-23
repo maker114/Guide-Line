@@ -108,6 +108,10 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
 
+    // 「更多」是一张会变长的列表，靠后的条目在小屏上不会被构建出来 ——
+    // 所以要先滚到它可见再点，不能直接 tap（这里踩过一次）
+    await tester.scrollUntilVisible(find.text('备份与恢复'), 120);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('备份与恢复'));
     await tester.pumpAndSettle();
     expect(find.text('立即备份一份'), findsOneWidget);

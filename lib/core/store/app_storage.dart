@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../json/canonical.dart';
 import '../json/document.dart';
@@ -358,6 +359,36 @@ class AppStorage {
     final date = '${d.year}${two(d.month)}${two(d.day)}';
     final time = '${two(d.hour)}${two(d.minute)}${two(d.second)}';
     return 'guideline-$date-$time.json.gz';
+  }
+
+  // ---------------------------------------------------------------- 背景图
+
+  /// 保存背景图（拷进应用私有目录，走原子替换）。
+  File saveBackgroundImage(List<int> bytes) {
+    final dir = paths.backgroundDir;
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    AtomicFile(paths.backgroundImageFile).writeBytes(bytes);
+    return paths.backgroundImageFile;
+  }
+
+  /// 读背景图字节；没有或读不出来返回 `null`（背景坏了不该影响启动）。
+  Uint8List? readBackgroundImage() {
+    final file = paths.backgroundImageFile;
+    if (!file.existsSync()) return null;
+    try {
+      return file.readAsBytesSync();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void deleteBackgroundImage() {
+    final file = paths.backgroundImageFile;
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } catch (_) {
+      // 删不掉也无所谓：偏好里已经不再引用它了
+    }
   }
 
   // ---------------------------------------------------------------- 偏好

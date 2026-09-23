@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../common/format.dart';
 import '../common/section_header.dart';
+import '../theme/app_theme.dart';
 import 'all_tasks_page.dart';
+import 'appearance_page.dart';
 import 'archive_page.dart';
 import 'backups_page.dart';
 import 'due_page.dart';
@@ -55,6 +57,13 @@ class MoreTab extends StatelessWidget {
           subtitle: '已归档 / 已丢弃 / 已合并 / 回收站 共 ${app.archiveCount} 条',
           page: ArchivePage(app: app),
         ),
+        const SectionHeader('外观'),
+        _MoreItem(
+          icon: Icons.palette_outlined,
+          title: '主题与背景',
+          subtitle: _appearanceSubtitle(),
+          page: AppearancePage(app: app),
+        ),
         const SectionHeader('数据安全'),
         _MoreItem(
           icon: Icons.history,
@@ -93,6 +102,16 @@ class MoreTab extends StatelessWidget {
       return '上次导出 $when，已超过 ${AppController.exportReminderDays} 天';
     }
     return '上次导出 $when · 导出为 .json.gz 后可分享出去';
+  }
+
+  /// 外观入口的副标题：一眼看出当前是哪套主题、有没有背景图。
+  String _appearanceSubtitle() {
+    final prefs = app.prefs;
+    final themeName = prefs.themeId == followBackgroundThemeId
+        ? '跟随背景图'
+        : presetOf(prefs.themeId).name;
+    final background = prefs.hasBackground ? ' · 有背景图' : '';
+    return '$themeName$background';
   }
 }
 

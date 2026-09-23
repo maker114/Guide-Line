@@ -962,6 +962,15 @@ class Workspace {
     _storage.savePrefs(_prefs);
   }
 
+  /// 直接替换整套界面偏好并落盘。
+  ///
+  /// 外观类改动（主题 / 背景图 / 不透明度 / 模糊）又多又碎，
+  /// 逐个写 setter 不划算，统一走这里。
+  void updatePrefs(UiPrefs next) {
+    _prefs = next;
+    _storage.savePrefs(_prefs);
+  }
+
   int? get lastExportedAt => _prefs.lastExportedAt;
 
   /// 数据目录（供设置页展示）

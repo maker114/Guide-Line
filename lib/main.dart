@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'app/app_controller.dart';
 import 'platform/data_directory.dart';
 import 'ui/app_shell.dart';
+import 'ui/theme/app_theme.dart';
+import 'ui/theme/background_layer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,19 +35,25 @@ class GuidelineApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: AppInfo.displayName,
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF2F6FEB),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorSchemeSeed: const Color(0xFF2F6FEB),
-        brightness: Brightness.dark,
-        useMaterial3: true,
-      ),
-      home: AppShell(app: controller),
+    // 主题与背景都来自界面偏好，所以整棵树跟着控制器重建
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) {
+        final prefs = controller.prefs;
+        return MaterialApp(
+          title: AppInfo.displayName,
+          debugShowCheckedModeBanner: false,
+          theme: buildAppTheme(prefs, Brightness.light),
+          darkTheme: buildAppTheme(prefs, Brightness.dark),
+          builder: (context, child) => AppBackground(
+            bytes: controller.backgroundBytes,
+            opacity: prefs.backgroundOpacity,
+            blur: prefs.backgroundBlur,
+            child: child ?? const SizedBox.shrink(),
+          ),
+          home: AppShell(app: controller),
+        );
+      },
     );
   }
 }

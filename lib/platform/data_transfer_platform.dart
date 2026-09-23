@@ -29,10 +29,17 @@ class DataTransferPlatform {
 
   /// 让用户挑一个文件；取消返回 `null`。
   ///
-  /// 不做扩展名过滤：Android 上 `.json.gz` 的 MIME 常被识别成 `application/gzip`，
-  /// 按扩展名过滤反而会让用户"看不到自己的文件"。内容对不对由解码器判断。
-  static Future<PickedTransferFile?> pickFile() async {
-    final files = await FilePicker.pickFiles(dialogTitle: '选择要导入的导出文件');
+  /// 导入数据时**不做扩展名过滤**：Android 上 `.json.gz` 的 MIME 常被识别成
+  /// `application/gzip`，按扩展名过滤反而会让用户"看不到自己的文件"；
+  /// 内容对不对由解码器判断。选背景图时用 [imagesOnly] 让系统只列图片。
+  static Future<PickedTransferFile?> pickFile({
+    String? dialogTitle,
+    bool imagesOnly = false,
+  }) async {
+    final files = await FilePicker.pickFiles(
+      dialogTitle: dialogTitle ?? '选择文件',
+      type: imagesOnly ? FileType.image : FileType.any,
+    );
     if (files.isEmpty) return null;
     final file = files.first;
     return PickedTransferFile(name: file.name, bytes: await file.readAsBytes());
