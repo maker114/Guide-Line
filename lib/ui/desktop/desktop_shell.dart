@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
-import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../../core/rules/completion.dart';
 import '../archive/archive_zone_page.dart';
 import '../board1/board1_page.dart';
+import '../board2/board2_page.dart';
 import '../settings/settings_page.dart';
 import '../shared/widgets.dart';
 
@@ -103,7 +103,7 @@ class _DesktopShellState extends State<DesktopShell> {
       case _NavItem.projects:
         return Board1Page(app: widget.app);
       case _NavItem.events:
-        return _EventsView(app: widget.app);
+        return Board2Page(app: widget.app);
       case _NavItem.dueSoon:
         return _DueSoonView(app: widget.app);
       case _NavItem.allTasks:
@@ -157,115 +157,6 @@ class _WarningBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(messages.join('；'), style: theme.textTheme.bodySmall),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 事件与任务线：完整任务树渲染（设计文档 4.9）在下一轮实现；
-/// 当前提供事件级别的新建 / 完成 / 删除与进度概览。
-class _EventsView extends StatelessWidget {
-  const _EventsView({required this.app});
-
-  final AppController app;
-
-  Future<void> _createEvent(BuildContext context) async {
-    final name = await promptText(context, title: '新建事件', label: '事件名');
-    if (name == null) return;
-    app.run(() => app.ws.createEvent(name: name));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final events = app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
-    if (events.isEmpty) {
-      return EmptyState(
-        icon: Icons.timeline_outlined,
-        title: '还没有事件',
-        hint: '事件是一条任务线的根；建好之后可以往后排标准任务',
-        action: FilledButton.icon(
-          onPressed: () => _createEvent(context),
-          icon: const Icon(Icons.add),
-          label: const Text('新建事件'),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        SectionLabel(
-          '事件（${events.length}）',
-          trailing: IconButton(
-            tooltip: '新建事件',
-            icon: const Icon(Icons.add),
-            onPressed: () => _createEvent(context),
-          ),
-        ),
-        Expanded(
-          child: ListView(
-            children: <Widget>[
-              for (final Event event in events) _EventSummaryTile(app: app, event: event),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _EventSummaryTile extends StatelessWidget {
-  const _EventSummaryTile({required this.app, required this.event});
-
-  final AppController app;
-  final Event event;
-
-  @override
-  Widget build(BuildContext context) {
-    final ws = app.ws;
-    final mainLine = ws.mainLineOf(event.id);
-    final done = mainLine.where((t) => t.status == NodeStatus.done).length;
-    final check = ws.checkEventCompletion(event.id);
-
-    return ListTile(
-      leading: NodeStatusChip(
-        status: event.status,
-        completeBlockedReason: check.canComplete ? null : check.reason,
-        onChanged: (status) {
-          final error = app.run(() => ws.setEventStatus(event.id, status));
-          if (error != null) showNotice(context, error, error: true);
-        },
-      ),
-      title: Text(event.name),
-      subtitle: Text('主线任务 $done/${mainLine.length} 已完成'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          IconButton(
-            tooltip: '归档事件（含整条任务线）',
-            icon: const Icon(Icons.archive_outlined),
-            onPressed: () {
-              app.run(() => ws.setEventArchived(event.id, true));
-              showNotice(context, '已归档（可在归档区取消）');
-            },
-          ),
-          IconButton(
-            tooltip: '删除事件（含整条任务线）',
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () async {
-              final count = ws.liveTasks.where((t) => t.eventId == event.id).length;
-              final ok = await confirmAction(
-                context,
-                title: '删除事件',
-                message: '「${event.name}」及其整条任务线（$count 个任务）将被删除，可在归档区恢复。',
-                confirmLabel: '删除',
-                danger: true,
-              );
-              if (!ok) return;
-              app.run(() => ws.deleteEvent(event.id));
-            },
           ),
         ],
       ),
