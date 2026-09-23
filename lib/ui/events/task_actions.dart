@@ -1,59 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
-import '../../core/models/enums.dart';
 import '../../core/models/task.dart';
 import '../common/dialogs.dart';
 import '../common/event_picker.dart';
 
-/// 任务的常用动作（事件页与任务框菜单共用）。
-
-/// 新建任务：主线（[parentTaskId] 为空）或挂在某任务下。
-Future<void> createTaskAction(
-  BuildContext context,
-  AppController app, {
-  required String eventId,
-  String? parentTaskId,
-  TaskType type = TaskType.standard,
-}) async {
-  final titles = <TaskType, String>{
-    TaskType.standard: '新建主线任务',
-    TaskType.subtask: '新建子任务',
-    TaskType.parallel: '新建并列任务',
-  };
-  final title = await promptText(
-    context,
-    title: titles[type] ?? '新建任务',
-    hintText: '任务名',
-  );
-  if (title == null || !context.mounted) return;
-
-  final error = app.run(
-    () => app.ws.createTask(
-      eventId: eventId,
-      title: title,
-      parentTaskId: parentTaskId,
-      type: type,
-    ),
-  );
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
-
-Future<void> renameTaskAction(
-  BuildContext context,
-  AppController app,
-  Task task,
-) async {
-  final title = await promptText(
-    context,
-    title: '重命名任务',
-    initialText: task.title,
-    hintText: '任务名',
-  );
-  if (title == null || !context.mounted) return;
-  final error = app.run(() => app.ws.updateTask(task.id, title: title));
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
+/// 任务的常用动作：**到期 / 移动 / 归档 / 删除**。
+///
+/// 新建与重命名不在这里 —— 它们改成了**页面内直接输入**
+/// （主线在任务线末尾、子任务与并列任务在各自的框内、重命名就在那一行），
+/// 不再弹对话框。留在这里的都是"改完会有副作用、值得问一句"的动作。
 
 /// 设置 / 清除到期日。
 Future<void> setTaskDueAction(

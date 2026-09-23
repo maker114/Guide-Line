@@ -37,32 +37,6 @@ Future<bool> confirmAction(
   return result ?? false;
 }
 
-/// 文本输入对话框。
-///
-/// 返回 `null` 表示取消；空白输入也返回 `null`（业务规则里"名字不能为空"
-/// 属于用户错误，不该由调用方逐个再判一遍）。
-Future<String?> promptText(
-  BuildContext context, {
-  required String title,
-  String initialText = '',
-  String? hintText,
-  String confirmLabel = '保存',
-  int maxLines = 1,
-}) async {
-  final result = await showDialog<String>(
-    context: context,
-    builder: (_) => _TextPromptDialog(
-      title: title,
-      initialText: initialText,
-      hintText: hintText,
-      confirmLabel: confirmLabel,
-      maxLines: maxLines,
-    ),
-  );
-  final trimmed = result?.trim() ?? '';
-  return trimmed.isEmpty ? null : trimmed;
-}
-
 /// 轻提示（`SnackBar`）。没有 `ScaffoldMessenger` 时静默忽略。
 void showToast(BuildContext context, String message, {bool error = false}) {
   final messenger = ScaffoldMessenger.maybeOf(context);
@@ -73,57 +47,4 @@ void showToast(BuildContext context, String message, {bool error = false}) {
       backgroundColor: error ? Theme.of(context).colorScheme.errorContainer : null,
     ),
   );
-}
-
-class _TextPromptDialog extends StatefulWidget {
-  const _TextPromptDialog({
-    required this.title,
-    required this.initialText,
-    required this.hintText,
-    required this.confirmLabel,
-    required this.maxLines,
-  });
-
-  final String title;
-  final String initialText;
-  final String? hintText;
-  final String confirmLabel;
-  final int maxLines;
-
-  @override
-  State<_TextPromptDialog> createState() => _TextPromptDialogState();
-}
-
-class _TextPromptDialogState extends State<_TextPromptDialog> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialText);
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() => Navigator.of(context).pop(_controller.text);
-
-  @override
-  Widget build(BuildContext context) {
-    final multiline = widget.maxLines > 1;
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        minLines: multiline ? 3 : 1,
-        maxLines: widget.maxLines,
-        textInputAction: multiline ? TextInputAction.newline : TextInputAction.done,
-        decoration: InputDecoration(hintText: widget.hintText, border: const OutlineInputBorder()),
-        onSubmitted: multiline ? null : (_) => _submit(),
-      ),
-      actions: <Widget>[
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
-        FilledButton(onPressed: _submit, child: Text(widget.confirmLabel)),
-      ],
-    );
-  }
 }

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/inline_editor.dart';
 
 /// 手机端界面冒烟测试：**把四个 Tab 的主干路径真的走一遍**。
 ///
@@ -28,15 +29,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 填写并提交 `promptText` 对话框（任务相关仍走对话框）。
-  Future<void> submitPrompt(WidgetTester tester, String text) async {
-    await tester.enterText(find.byType(TextField).last, text);
-    await tester.tap(find.text('保存'));
-    await tester.pumpAndSettle();
-  }
-
-  /// 走「页面内直接输入」：点开那一行 → 输入 → 点对勾。
-  /// 项目与事件的新建都改成了这种形式（不再弹对话框）。
+  /// 走「页面内直接输入」：点开那一行 → 输入 → 点**那一行**的「添加」。
+  ///
+  /// 不能图省事用 `.last` 找输入框和按钮：已经展开的输入行会留在列表里，
+  /// 而它们在树里的先后顺序与你想点的那个并不一致 ——
+  /// 这里踩过一次，结果是文字输进了主线输入行、子任务根本没建出来。
+  /// 所以用**当前获得焦点的那一行**来定位（展开时会自动聚焦）。
   Future<void> submitInlineComposer(
     WidgetTester tester,
     String label,
@@ -44,8 +42,16 @@ void main() {
   ) async {
     await tester.tap(find.text(label));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).last, text);
-    await tester.tap(find.byIcon(Icons.check));
+
+    final focused = find.byWidgetPredicate(
+      (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+      description: '当前获得焦点的输入框',
+    );
+    expect(focused, findsOneWidget, reason: '点开「$label」后应有一个输入框获得焦点');
+
+    await tester.enterText(focused, text);
+    final composer = find.ancestor(of: focused, matching: find.byType(InlineComposer));
+    await tester.tap(find.descendant(of: composer, matching: find.byTooltip('添加')));
     await tester.pumpAndSettle();
   }
 
@@ -79,19 +85,26 @@ void main() {
     // 进任务线
     await tester.tap(find.text('手机端上线'));
     await tester.pumpAndSettle();
-    expect(find.text('这条任务线还是空的'), findsOneWidget);
+    expect(find.textContaining('这条任务线还是空的'), findsOneWidget);
 
-    await tester.tap(find.text('新建主线任务'));
-    await tester.pumpAndSettle();
-    await submitPrompt(tester, '完成四个 Tab');
+    // 新建主线任务：现在是任务线末尾的页内输入行
+    await submitInlineComposer(tester, '新建主线任务', '完成四个 Tab');
     expect(find.text('完成四个 Tab'), findsOneWidget);
 
     // 点任务行 → 动作面板 → 加一个子任务（验证框内渲染）
+    // 「新建子任务」不再是对话框，而是在那个框内展开一行输入
     await tester.tap(find.text('完成四个 Tab'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新建子任务'));
     await tester.pumpAndSettle();
-    await submitPrompt(tester, '子任务甲');
+    await submitInlineComposer(tester, '新建子任务', '子任务甲');
+    // 先断数据再断界面：`find.text` 连输入框里的文字也算命中，
+    // 万一提交没生效，只断文字会假通过（这里踩过一次）
+    expect(
+      app.ws.liveTasks.where((t) => t.parentId != null).length,
+      1,
+      reason: '子任务应该真的建出来了',
+    );
     expect(find.text('子任务甲'), findsOneWidget);
 
     // 点状态按钮 = 完成（子任务先完成：父任务有未处理子任务时不允许直接完成）

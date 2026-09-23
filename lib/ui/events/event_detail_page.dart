@@ -6,8 +6,8 @@ import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../../core/rules/completion.dart';
 import '../common/dialogs.dart';
-import '../common/empty_state.dart';
 import '../common/format.dart';
+import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/task_status_button.dart';
 import 'task_actions.dart';
@@ -20,11 +20,79 @@ import 'task_actions.dart';
 ///   · `parallel` —— 独立节点框，与兄弟**横向并排**（表示"两条都能走"），其子任务仍在框内
 ///
 /// 手机屏幕放不下真正的双列，所以并列框用**横向滚动**表达"并联"，而不是硬挤成两列。
-class EventDetailPage extends StatelessWidget {
+///
+/// 新建与重命名都是**页面内直接输入**：主线在任务线末尾，子任务 / 并列任务在各自的框内，
+/// 重命名就在那一行原地改。只有"必须有副作用提示"的动作（到期 / 移动 / 归档 / 删除）
+/// 才用底部面板问一句。
+class EventDetailPage extends StatefulWidget {
   const EventDetailPage({super.key, required this.app, required this.eventId});
 
   final AppController app;
   final String eventId;
+
+  @override
+  State<EventDetailPage> createState() => _EventDetailPageState();
+}
+
+class _EventDetailPageState extends State<EventDetailPage> {
+  AppController get app => widget.app;
+
+  String get eventId => widget.eventId;
+
+  /// 正在原地重命名的任务 id
+  String? _renamingTaskId;
+
+  /// 正在为哪个任务录子任务 / 并列任务
+  String? _subtaskParentId;
+  String? _parallelParentId;
+
+  void _createTask({
+    required String title,
+    String? parentTaskId,
+    TaskType type = TaskType.standard,
+  }) {
+    final error = app.run(
+      () => app.ws.createTask(
+        eventId: eventId,
+        title: title,
+        parentTaskId: parentTaskId,
+        type: type,
+      ),
+    );
+    if (error != null) {
+      _toast(error, error: true);
+      return;
+    }
+    // 挂完子节点就把那个框内的输入收起来，免得一屏挂着好几个输入框
+    if (parentTaskId != null) {
+      setState(() {
+        _subtaskParentId = null;
+        _parallelParentId = null;
+      });
+    }
+  }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    showToast(context, message, error: error);
+  }
+
+  // 下面几个是给同文件里的私有子控件用的：`setState` 是 protected，
+  // 子控件不能直接调，所以在这里开几个语义明确的入口。
+
+  void beginRename(String taskId) => setState(() => _renamingTaskId = taskId);
+
+  void endRename() => setState(() => _renamingTaskId = null);
+
+  void beginSubtask(String taskId) => setState(() {
+        _subtaskParentId = taskId;
+        _parallelParentId = null;
+      });
+
+  void beginParallel(String taskId) => setState(() {
+        _parallelParentId = taskId;
+        _subtaskParentId = null;
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -51,20 +119,6 @@ class EventDetailPage extends StatelessWidget {
                 tooltip: '更多',
                 onSelected: (value) async {
                   switch (value) {
-                    case 'task':
-                      await createTaskAction(context, app, eventId: eventId);
-                      break;
-                    case 'rename':
-                      final name = await promptText(
-                        context,
-                        title: '重命名事件',
-                        initialText: event.name,
-                        hintText: '事件名',
-                      );
-                      if (name == null || !context.mounted) return;
-                      final error = app.run(() => ws.updateEvent(eventId, name: name));
-                      if (error != null && context.mounted) showToast(context, error, error: true);
-                      break;
                     case 'archive':
                       final error = app.run(() => ws.setEventArchived(eventId, true));
                       if (!context.mounted) return;
@@ -81,41 +135,41 @@ class EventDetailPage extends StatelessWidget {
                   }
                 },
                 itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(value: 'task', child: Text('新建主线任务')),
-                  PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
                   PopupMenuItem<String>(value: 'archive', child: Text('归档（含任务线）')),
                   PopupMenuItem<String>(value: 'delete', child: Text('删除（含任务线）')),
                 ],
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => createTaskAction(context, app, eventId: eventId),
-            icon: const Icon(Icons.add),
-            label: const Text('主线任务'),
-          ),
-          body: mainLine.isEmpty
-              ? EmptyState(
-                  icon: Icons.timeline_outlined,
-                  title: '这条任务线还是空的',
-                  hint: '主线任务是同级兄弟链，沿主线依次向后排',
-                  action: FilledButton.icon(
-                    onPressed: () => createTaskAction(context, app, eventId: eventId),
-                    icon: const Icon(Icons.add),
-                    label: const Text('新建主线任务'),
+          body: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+            children: <Widget>[
+              _EventHeader(host: this, event: event, completion: completion),
+              const SizedBox(height: 12),
+              if (mainLine.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
+                  child: Text(
+                    '这条任务线还是空的 —— 主线任务是同级兄弟链，沿主线依次向后排',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
-                  children: <Widget>[
-                    _EventHeader(app: app, event: event, completion: completion),
-                    const SizedBox(height: 12),
-                    for (var i = 0; i < mainLine.length; i += 1) ...<Widget>[
-                      if (i > 0) const _VerticalConnector(),
-                      _TaskBox(app: app, task: mainLine[i], eventId: eventId),
-                    ],
-                  ],
+              else
+                for (var i = 0; i < mainLine.length; i += 1) ...<Widget>[
+                  if (i > 0) const _VerticalConnector(),
+                  _TaskBox(host: this, task: mainLine[i]),
+                ],
+              const SizedBox(height: 16),
+              Card(
+                margin: EdgeInsets.zero,
+                child: InlineComposer(
+                  label: '新建主线任务',
+                  hint: '任务名',
+                  onCreate: (title) => _createTask(title: title),
                 ),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -144,17 +198,18 @@ class EventDetailPage extends StatelessWidget {
   }
 }
 
-/// 事件自身的三态 + 主线完成情况。
+/// 事件自身：名字（页内可改）+ 三态 + 主线完成情况。
 class _EventHeader extends StatelessWidget {
-  const _EventHeader({required this.app, required this.event, required this.completion});
+  const _EventHeader({required this.host, required this.event, required this.completion});
 
-  final AppController app;
+  final _EventDetailPageState host;
   final Event event;
   final CompletionCheck completion;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final app = host.app;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -162,6 +217,14 @@ class _EventHeader extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
+            Text('事件名', style: theme.textTheme.labelLarge),
+            InlineTextField(
+              value: event.name,
+              hint: '事件名',
+              textStyle: theme.textTheme.titleMedium,
+              onSubmitted: (name) => app.run(() => app.ws.updateEvent(event.id, name: name)),
+            ),
+            const SizedBox(height: 6),
             Text(
               completion.judgedChildCount == 0
                   ? '主线还没有可判定的任务'
@@ -217,41 +280,63 @@ class _VerticalConnector extends StatelessWidget {
 
 /// 一个任务节点框：自身 + 框内子任务 + （若有）并排的并列任务框。
 class _TaskBox extends StatelessWidget {
-  const _TaskBox({
-    required this.app,
-    required this.task,
-    required this.eventId,
-    this.compact = false,
-  });
+  const _TaskBox({required this.host, required this.task, this.compact = false});
 
-  final AppController app;
+  final _EventDetailPageState host;
   final Task task;
-  final String eventId;
 
   /// 并列框内使用：不显示进一步的并列分组（并列任务只能挂子任务）。
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final app = host.app;
+    final eventId = host.eventId;
     final children = app.ws.subtasksOf(task.id, eventId: eventId);
     final subtasks = children.where((c) => c.taskType != TaskType.parallel).toList(growable: false);
     final parallels = children.where((c) => c.taskType == TaskType.parallel).toList(growable: false);
     final theme = Theme.of(context);
+    final addingSubtask = host._subtaskParentId == task.id;
+    final addingParallel = host._parallelParentId == task.id;
 
     return Card(
       margin: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          _TaskLine(
-            app: app,
-            task: task,
-            eventId: eventId,
-            indent: 0,
-            childSummary: _summarize(children),
-          ),
+          _TaskLine(host: host, task: task, indent: 0, childSummary: _summarize(children)),
           for (final subtask in subtasks)
-            _TaskLine(app: app, task: subtask, eventId: eventId, indent: 1),
+            _TaskLine(host: host, task: subtask, indent: 1),
+          if (addingSubtask)
+            Padding(
+              padding: const EdgeInsets.only(left: 20),
+              child: InlineComposer(
+                label: '新建子任务',
+                hint: '子任务名',
+                leading: Icons.subdirectory_arrow_right,
+                dense: true,
+                onCreate: (title) => host._createTask(
+                  title: title,
+                  parentTaskId: task.id,
+                  type: TaskType.subtask,
+                ),
+              ),
+            ),
+          if (addingParallel)
+            Padding(
+              padding: const EdgeInsets.only(left: 20),
+              child: InlineComposer(
+                label: '新建并列任务',
+                hint: '并列任务名',
+                leading: Icons.call_split,
+                dense: true,
+                onCreate: (title) => host._createTask(
+                  title: title,
+                  parentTaskId: task.id,
+                  type: TaskType.parallel,
+                ),
+              ),
+            ),
           if (parallels.isNotEmpty && !compact)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
@@ -275,12 +360,7 @@ class _TaskBox extends StatelessWidget {
                           if (i > 0) const SizedBox(width: 8),
                           SizedBox(
                             width: 220,
-                            child: _TaskBox(
-                              app: app,
-                              task: parallels[i],
-                              eventId: eventId,
-                              compact: true,
-                            ),
+                            child: _TaskBox(host: host, task: parallels[i], compact: true),
                           ),
                         ],
                       ],
@@ -304,26 +384,39 @@ class _TaskBox extends StatelessWidget {
 /// 一行任务（框标题行或框内子任务行）。
 class _TaskLine extends StatelessWidget {
   const _TaskLine({
-    required this.app,
+    required this.host,
     required this.task,
-    required this.eventId,
     required this.indent,
     this.childSummary,
   });
 
-  final AppController app;
+  final _EventDetailPageState host;
   final Task task;
-  final String eventId;
   final int indent;
   final String? childSummary;
 
   @override
   Widget build(BuildContext context) {
+    final app = host.app;
     final theme = Theme.of(context);
     final due = describeDate(task.dueAt);
     final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status == NodeStatus.done;
     final summary = childSummary;
+
+    if (host._renamingTaskId == task.id) {
+      return Padding(
+        padding: EdgeInsets.only(left: 12.0 + indent * 20, right: 12),
+        child: InlineTextField(
+          value: task.title,
+          autofocus: true,
+          hint: '任务名',
+          textStyle: theme.textTheme.bodyMedium,
+          onSubmitted: (title) => app.run(() => app.ws.updateTask(task.id, title: title)),
+          onEditClosed: host.endRename,
+        ),
+      );
+    }
 
     return ListTile(
       dense: indent > 0,
@@ -373,8 +466,7 @@ class _TaskLine extends StatelessWidget {
                   ),
                 ],
                 if (due.isNotEmpty && summary != null) const SizedBox(width: 10),
-                if (summary != null)
-                  Text(summary, style: theme.textTheme.labelSmall),
+                if (summary != null) Text(summary, style: theme.textTheme.labelSmall),
               ],
             ),
       trailing: PopupMenuButton<String>(
@@ -392,27 +484,17 @@ class _TaskLine extends StatelessWidget {
   }
 
   Future<void> _run(BuildContext context, String value) async {
+    final app = host.app;
     switch (value) {
+      // 新建与重命名不再弹对话框，改为把"页内输入框"在这一行附近展开
       case 'sub':
-        await createTaskAction(
-          context,
-          app,
-          eventId: eventId,
-          parentTaskId: task.id,
-          type: TaskType.subtask,
-        );
+        host.beginSubtask(task.id);
         break;
       case 'par':
-        await createTaskAction(
-          context,
-          app,
-          eventId: eventId,
-          parentTaskId: task.id,
-          type: TaskType.parallel,
-        );
+        host.beginParallel(task.id);
         break;
       case 'rename':
-        await renameTaskAction(context, app, task);
+        host.beginRename(task.id);
         break;
       case 'due':
         await setTaskDueAction(context, app, task);
