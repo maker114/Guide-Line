@@ -117,7 +117,7 @@ class _ArchivedPane extends StatelessWidget {
       );
     }
     return _Pane(
-      note: '只列**归档根**（父节点也归档的不重复列出）；取消归档会沿树级联恢复。',
+      note: '只列「归档根」——父节点也归档的不重复列出；取消归档会沿树级联恢复。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -264,7 +264,7 @@ class _TrashPane extends StatelessWidget {
       );
     }
     return _Pane(
-      note: '只列**级联根**；恢复会连同被一起删掉的下级一起回来。「彻底删除」不可撤销。',
+      note: '只列「级联根」——恢复会连同被一起删掉的下级一起回来。「彻底删除」不可撤销。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -364,8 +364,8 @@ Future<void> _purge(BuildContext context, AppController app, Entity entity) asyn
     context,
     title: '彻底删除',
     message: extra <= 0
-        ? '「${entityTitle(entity)}」的内容会被清空，只留一条墓碑记录。此操作**不可撤销**。'
-        : '「${entityTitle(entity)}」及其下 $extra 条关联记录的内容会被清空，只留墓碑。此操作**不可撤销**。',
+        ? '「${entityTitle(entity)}」的内容会被清空，只留一条墓碑记录。此操作不可撤销。'
+        : '「${entityTitle(entity)}」及其下 $extra 条关联记录的内容会被清空，只留墓碑。此操作不可撤销。',
     confirmLabel: '彻底删除',
     danger: true,
   );
