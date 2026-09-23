@@ -167,6 +167,21 @@ void main() {
         reason: 'backup.1 是最近一次保存前的状态',
       );
       expect(report.issues.warnings.any((w) => w.contains('备份')), isTrue);
+
+      // 恢复出来的数据必须**当场写回主文件**。
+      // 否则这次恢复只活在内存里：用户没做任何改动就退出，下次启动主文件依旧不存在，
+      // 而 load 对「没有主文件」的处理是「空数据 + 不告警」——
+      // 界面上就是一个崭新的空库，看起来等同于数据全丢（真机上真的这么翻过车）。
+      expect(storage.paths.storeFile.existsSync(), isTrue, reason: '恢复后主文件必须重建');
+
+      final again = storage.load(nowMillis: day + 3);
+      expect(again.recoveredFromBackup, isNull, reason: '主文件已修好，不该再走一次恢复');
+      expect(again.quarantinedPaths, isEmpty);
+      expect(
+        again.store.documentOf(DocName.projects).projectItems.single.title,
+        '完好版本',
+        reason: '第二次启动必须还能看到数据 —— 这一条是本用例的重点',
+      );
     });
 
     test('主文件损坏且没有任何备份 → 隔离 + 空数据 + 明确告警（绝不静默）', () {

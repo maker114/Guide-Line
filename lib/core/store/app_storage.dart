@@ -72,6 +72,7 @@ class AppStorage {
           store = recovery.store;
           recoveredFrom = recovery.path;
           issues.warn('已从备份恢复：${recovery.path}');
+          _writeBackRecovered(store, stamp, issues);
         }
       }
     }
@@ -83,6 +84,22 @@ class AppStorage {
       quarantinedPaths: quarantined,
       recoveredFromBackup: recoveredFrom,
     );
+  }
+
+  /// 把恢复出来的数据**立刻写回主文件**。
+  ///
+  /// 不写回的话，这次恢复只活在内存里：用户没做任何改动就退出，下次启动主文件依旧不存在，
+  /// 而 `load` 对「没有主文件」的处理是**空数据且不告警** —— 界面上就是一个崭新的空库，
+  /// 看起来等同于「数据全没了」。真机实测正是这个现象，所以恢复必须落盘。
+  ///
+  /// 这里**不做备份轮转**：主文件刚刚才被隔离走，没有「上一份」可轮转，
+  /// 而且这一步的目的只是让状态自愈，不该再动备份窗口。
+  void _writeBackRecovered(StoreFile store, int now, DecodeIssues issues) {
+    try {
+      AtomicFile(paths.storeFile).writeText(store.copyWith(savedAt: now).toCanonicalText());
+    } catch (error) {
+      issues.error('从备份恢复后写回主文件失败：$error');
+    }
   }
 
   StoreFile? _tryParse(String text, DecodeIssues issues) {
