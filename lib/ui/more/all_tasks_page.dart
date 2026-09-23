@@ -7,10 +7,26 @@ import '../../core/models/task.dart';
 import '../common/empty_state.dart';
 import '../common/labels.dart';
 import '../common/task_tile.dart';
+import '../common/urgency.dart';
 
-/// 全部任务：**跨事件的任务总表**，按状态筛选。
+/// 任务的显示方式。
+enum TaskGrouping {
+  none('不分组'),
+  event('按事件'),
+  urgency('按紧迫度');
+
+  const TaskGrouping(this.label);
+
+  final String label;
+}
+
+/// 全部任务：**跨事件的任务总表**。
 ///
-/// 事件层级在手机上层层点进去太慢，这里给一个"平铺"的入口。
+/// 事件层级在手机上层层点进去太慢，这里给一个"平铺"的入口：
+/// 可以按状态筛，也可以按事件 / 紧迫度分组。
+///
+/// 注：任务在数据上挂在**事件**下、不属于项目，所以分组维度是事件与紧迫度，
+/// 没有"按项目"这一项。
 class AllTasksPage extends StatefulWidget {
   const AllTasksPage({super.key, required this.app});
 
@@ -22,6 +38,7 @@ class AllTasksPage extends StatefulWidget {
 
 class _AllTasksPageState extends State<AllTasksPage> {
   NodeStatus? _filter;
+  TaskGrouping _grouping = TaskGrouping.none;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +50,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
         final tasks = _filter == null
             ? List<Task>.from(all)
             : all.where((t) => t.status == _filter).toList(growable: true);
-        tasks.sort(_byEventThenOrder);
+        final rows = _buildRows(tasks);
 
         return Scaffold(
           appBar: AppBar(title: const Text('全部任务')),
@@ -41,7 +58,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -66,20 +83,50 @@ class _AllTasksPageState extends State<AllTasksPage> {
                   ),
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                child: SegmentedButton<TaskGrouping>(
+                  showSelectedIcon: false,
+                  segments: <ButtonSegment<TaskGrouping>>[
+                    for (final grouping in TaskGrouping.values)
+                      ButtonSegment<TaskGrouping>(
+                        value: grouping,
+                        label: Text(grouping.label),
+                      ),
+                  ],
+                  selected: <TaskGrouping>{_grouping},
+                  onSelectionChanged: (selection) =>
+                      setState(() => _grouping = selection.first),
+                ),
+              ),
+              const Divider(height: 1),
               Expanded(
-                child: tasks.isEmpty
+                child: rows.isEmpty
                     ? const EmptyState(
                         icon: Icons.checklist_outlined,
                         title: '没有符合条件的任务',
                         hint: '换一个筛选条件，或先去「事件」页新建任务',
                       )
-                    : ListView.separated(
+                    : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 24),
-                        itemCount: tasks.length,
-                        separatorBuilder: (_, _) =>
-                            const Divider(height: 1, indent: 16, endIndent: 16),
-                        itemBuilder: (context, index) =>
-                            TaskTile(app: widget.app, task: tasks[index]),
+                        itemCount: rows.length,
+                        itemBuilder: (context, index) {
+                          final row = rows[index];
+                          final header = row.header;
+                          if (header != null) {
+                            return _GroupHeader(
+                              title: header,
+                              count: row.count,
+                              color: row.color,
+                            );
+                          }
+                          return Column(
+                            children: <Widget>[
+                              TaskTile(app: widget.app, task: row.task!),
+                              const Divider(height: 1, indent: 16, endIndent: 16),
+                            ],
+                          );
+                        },
                       ),
               ),
             ],
@@ -89,18 +136,125 @@ class _AllTasksPageState extends State<AllTasksPage> {
     );
   }
 
-  /// 按所属事件、再按任务自身 `order` 排 —— 与任务线里的先后顺序一致。
-  int _byEventThenOrder(Task a, Task b) {
-    final events = widget.app.ws.liveEvents;
-    int eventOrder(String eventId) {
-      for (final event in events) {
-        if (event.id == eventId) return event.order;
-      }
-      return 1 << 30;
+  /// 把任务摊成「分组头 + 任务」的扁平列表，交给 `ListView.builder` 增量构建。
+  List<_Row> _buildRows(List<Task> tasks) {
+    final rows = <_Row>[];
+    final app = widget.app;
+
+    switch (_grouping) {
+      case TaskGrouping.none:
+        tasks.sort(_byDueThenOrder);
+        rows.addAll(tasks.map(_Row.task));
+
+      case TaskGrouping.event:
+        final events = app.ws.liveEvents;
+        int eventOrder(String id) {
+          for (final event in events) {
+            if (event.id == id) return event.order;
+          }
+          return 1 << 30;
+        }
+
+        final byEvent = <String, List<Task>>{};
+        for (final task in tasks) {
+          byEvent.putIfAbsent(task.eventId, () => <Task>[]).add(task);
+        }
+        final ordered = byEvent.keys.toList()
+          ..sort((a, b) => eventOrder(a).compareTo(eventOrder(b)));
+        for (final eventId in ordered) {
+          final group = byEvent[eventId]!..sort(_byOrderOfEvent);
+          rows.add(
+            _Row.header(app.ws.findEvent(eventId)?.name ?? '（事件已删除）', group.length),
+          );
+          rows.addAll(group.map(_Row.task));
+        }
+
+      case TaskGrouping.urgency:
+        final byUrgency = <Urgency, List<Task>>{};
+        for (final task in tasks) {
+          final urgency =
+              task.status == NodeStatus.pending ? urgencyOf(task.dueAt) : Urgency.none;
+          byUrgency.putIfAbsent(urgency, () => <Task>[]).add(task);
+        }
+        final colors = UrgencyColors.ofContext(context);
+        final ordered = byUrgency.keys.toList()
+          ..sort((a, b) => urgencyRank(a).compareTo(urgencyRank(b)));
+        for (final urgency in ordered) {
+          final group = byUrgency[urgency]!..sort(_byDueThenOrder);
+          rows.add(_Row.header(urgencyLabel(urgency), group.length, colors.of(urgency)));
+          rows.addAll(group.map(_Row.task));
+        }
     }
 
-    final byEvent = eventOrder(a.eventId).compareTo(eventOrder(b.eventId));
-    if (byEvent != 0) return byEvent;
+    return rows;
+  }
+
+  /// 到期日近的在前；没排期的垫底。
+  int _byDueThenOrder(Task a, Task b) {
+    final da = a.dueAt;
+    final db = b.dueAt;
+    if (da == null && db != null) return 1;
+    if (da != null && db == null) return -1;
+    if (da != null && db != null) {
+      final byDate = da.compareTo(db);
+      if (byDate != 0) return byDate;
+    }
     return compareByOrder(a.order, a.id, b.order, b.id);
+  }
+
+  int _byOrderOfEvent(Task a, Task b) => compareByOrder(a.order, a.id, b.order, b.id);
+}
+
+/// 扁平列表里的一行：要么是分组头，要么是一条任务。
+class _Row {
+  const _Row.header(this.header, this.count, [this.color]) : task = null;
+
+  const _Row.task(Task this.task)
+      : header = null,
+        count = 0,
+        color = null;
+
+  final String? header;
+  final int count;
+  final Color? color;
+  final Task? task;
+}
+
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({required this.title, required this.count, this.color});
+
+  final String title;
+  final int count;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dot = color;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+      child: Row(
+        children: <Widget>[
+          if (dot != null) ...<Widget>[
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: dot, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: dot ?? theme.colorScheme.primary,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text('$count 条', style: theme.textTheme.labelSmall),
+        ],
+      ),
+    );
   }
 }

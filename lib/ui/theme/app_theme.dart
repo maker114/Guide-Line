@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/store/ui_prefs.dart';
+import '../common/urgency.dart';
 
 /// 主题预设。
 ///
@@ -81,6 +82,10 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
     colorSchemeSeed: seed,
     brightness: brightness,
     useMaterial3: true,
+    // 紧迫度色阶（绿→红）注册在主题里，控件只按档位取色
+    extensions: <ThemeExtension<dynamic>>[
+      brightness == Brightness.dark ? UrgencyColors.dark : UrgencyColors.light,
+    ],
   );
   if (!prefs.hasBackground) return base;
 
