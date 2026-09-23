@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
+import 'more/more_tab.dart';
+import 'projects/project_tab.dart';
 
 /// 手机端外壳：**底部四 Tab + 速记优先**（对应归档设计 §3.1.1 的手机端定位）。
 ///
@@ -51,19 +54,9 @@ class _AppShellState extends State<AppShell> {
                   index: _index,
                   children: <Widget>[
                     InspirationTab(key: _inspirationKey, app: app),
-                    _Placeholder(
-                      icon: Icons.account_tree_outlined,
-                      title: '项目与灵感',
-                      hint: '项目树（≤3 层）、目的 / 实现 / 日期、三态完成、归档与删除\n—— 下一轮实现（M4）',
-                      stats: '当前：项目 ${app.projectCount} 个 · 灵感 ${app.inspirationCount} 条',
-                    ),
-                    _Placeholder(
-                      icon: Icons.timeline_outlined,
-                      title: '事件与任务线',
-                      hint: '事件 → 主线标准任务 → 子任务 / 并列任务，含到期日与勾选完成\n—— 下一轮实现（M4）',
-                      stats: '当前：事件 ${app.eventCount} 个 · 任务 ${app.taskCount} 条',
-                    ),
-                    _MoreTab(app: app),
+                    ProjectTab(app: app),
+                    EventTab(app: app),
+                    MoreTab(app: app),
                   ],
                 ),
               ),
@@ -148,134 +141,6 @@ class _WarningBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(child: Text(messages.join('；'), style: theme.textTheme.bodySmall)),
         ],
-      ),
-    );
-  }
-}
-
-class _MoreTab extends StatelessWidget {
-  const _MoreTab({required this.app});
-
-  final AppController app;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: <Widget>[
-        const _SectionHeader('浏览'),
-        ListTile(
-          leading: const Icon(Icons.event_available_outlined),
-          title: const Text('今天 / 本周到期'),
-          subtitle: Text('当前 ${app.ws.tasksDueOnOrBefore(_today()).length} 条待处理'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.checklist_outlined),
-          title: const Text('全部任务'),
-          subtitle: Text('当前 ${app.taskCount} 条'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.search),
-          title: const Text('搜索'),
-          subtitle: Text('项目 / 事件 / 任务 / 灵感（${app.projectCount + app.eventCount + app.taskCount + app.inspirationCount} 条可搜）'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.inventory_2_outlined),
-          title: const Text('归档区'),
-          subtitle: Text('已归档 / 已丢弃 / 已合并 / 回收站（当前 ${app.archiveCount} 条）'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        const _SectionHeader('数据安全'),
-        ListTile(
-          leading: const Icon(Icons.storage_outlined),
-          title: const Text('数据文件'),
-          subtitle: Text('${app.storeFileSize} · ${app.dataDirectory.path}'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.history),
-          title: const Text('备份与恢复'),
-          subtitle: Text('已有 ${app.backups.length} 份备份（自动轮转 + 日快照）'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.ios_share),
-          title: const Text('导出 / 分享'),
-          subtitle: const Text('导出为 .json.gz 后可通过系统分享发出'),
-          enabled: false,
-          trailing: const Text('下一轮'),
-        ),
-        const _SectionHeader('关于'),
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('版本'),
-          subtitle: Text('1.0.0+1（Android 单机版）'),
-        ),
-      ],
-    );
-  }
-
-  static String _today() {
-    final d = DateTime.now();
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        text,
-        style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.primary),
-      ),
-    );
-  }
-}
-
-class _Placeholder extends StatelessWidget {
-  const _Placeholder({
-    required this.icon,
-    required this.title,
-    required this.hint,
-    required this.stats,
-  });
-
-  final IconData icon;
-  final String title;
-  final String hint;
-  final String stats;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(icon, size: 56, color: theme.colorScheme.outlineVariant),
-            const SizedBox(height: 12),
-            Text(title, style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(hint, style: theme.textTheme.bodySmall, textAlign: TextAlign.center),
-            const SizedBox(height: 12),
-            Text(stats, style: theme.textTheme.labelMedium),
-          ],
-        ),
       ),
     );
   }

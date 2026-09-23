@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
-import '../../core/models/project.dart';
+import '../common/dialogs.dart';
+import '../common/empty_state.dart';
+import '../common/format.dart';
+import '../common/project_picker.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -99,7 +102,11 @@ class InspirationTabState extends State<InspirationTab> {
         const SizedBox(height: 4),
         Expanded(
           child: list.isEmpty
-              ? const _EmptyInspiration()
+              ? const EmptyState(
+                  icon: Icons.lightbulb_outline,
+                  title: '灵感箱是空的',
+                  hint: '在上面输入框里随手记一条，之后再决定归到哪个项目',
+                )
               : ListView.separated(
                   padding: const EdgeInsets.only(bottom: 96),
                   itemCount: list.length,
@@ -125,50 +132,11 @@ class InspirationTabState extends State<InspirationTab> {
     final error =
         widget.app.run(() => widget.app.ws.captureInspiration(text, projectId: projectId));
     if (error != null) {
-      _notify(error, error: true);
+      showToast(context, error, error: true);
       return;
     }
     _capture.clear();
     _focus.requestFocus();
-  }
-
-  void _notify(String message, {bool error = false}) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.errorContainer : null,
-      ),
-    );
-  }
-}
-
-class _EmptyInspiration extends StatelessWidget {
-  const _EmptyInspiration();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            Icon(Icons.lightbulb_outline, size: 56, color: theme.colorScheme.outlineVariant),
-            const SizedBox(height: 12),
-            Text('灵感箱是空的', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              '在上面输入框里随手记一条，之后再决定归到哪个项目',
-              style: theme.textTheme.bodySmall,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -209,7 +177,7 @@ class _InspirationTile extends StatelessWidget {
               ),
             ),
           ),
-          Text(_relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
+          Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
         ],
       ),
       trailing: IconButton(
@@ -225,17 +193,25 @@ class _InspirationTile extends StatelessWidget {
     final ws = app.ws;
     await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: <Widget>[
             ListTile(
               leading: const Icon(Icons.drive_file_move_outline),
               title: const Text('分配到项目…'),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
-                final projectId = await pickProject(context, app, title: '分配到项目');
-                if (projectId == null || !context.mounted) return;
+                final picked = await pickProject(
+                  context,
+                  app,
+                  title: '分配到项目',
+                  allowNone: true,
+                  noneLabel: '（解除分配）',
+                );
+                if (picked == null || !context.mounted) return;
+                final projectId = picked == pickNone ? null : picked;
                 _run(context, () => ws.assignInspiration(inspiration.id, projectId));
               },
             ),
@@ -260,10 +236,12 @@ class _InspirationTile extends StatelessWidget {
               title: const Text('删除'),
               onTap: () async {
                 Navigator.of(sheetContext).pop();
-                final ok = await _confirm(
+                final ok = await confirmAction(
                   context,
                   title: '删除灵感',
                   message: '删除后可在「更多 → 归档区 → 回收站」恢复。',
+                  confirmLabel: '删除',
+                  danger: true,
                 );
                 if (!ok || !context.mounted) return;
                 _run(context, () => ws.deleteInspiration(inspiration.id));
@@ -299,127 +277,16 @@ class _InspirationTile extends StatelessWidget {
           newImplementation: merged,
         ));
     if (error != null) {
-      if (context.mounted) _notify(context, error, error: true);
+      if (context.mounted) showToast(context, error, error: true);
       return;
     }
     if (context.mounted) {
-      _notify(context, '已合并进「${project.title}」，原文可在归档区「已合并」找回');
+      showToast(context, '已合并进「${project.title}」，原文可在归档区「已合并」找回');
     }
   }
 
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
-    if (error != null) _notify(context, error, error: true);
+    if (error != null) showToast(context, error, error: true);
   }
-
-  void _notify(BuildContext context, String message, {bool error = false}) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.errorContainer : null,
-      ),
-    );
-  }
-
-  static String _relativeTime(int millis) {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final diff = now - millis;
-    if (diff < 60 * 1000) return '刚刚';
-    if (diff < 60 * 60 * 1000) return '${diff ~/ (60 * 1000)} 分钟前';
-    if (diff < 24 * 60 * 60 * 1000) return '${diff ~/ (60 * 60 * 1000)} 小时前';
-    final d = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${d.month}-${d.day}';
-  }
-}
-
-/// 项目选择器（底部弹出的树形列表，带缩进）。
-Future<String?> pickProject(
-  BuildContext context,
-  AppController app, {
-  required String title,
-  bool allowClear = false,
-}) {
-  final flat = <MapEntry<Project, int>>[];
-  void walk(String? parentId, int depth) {
-    for (final project in app.ws.projectTree.childrenOf(parentId).whereType<Project>()) {
-      if (project.archived) continue;
-      flat.add(MapEntry(project, depth));
-      walk(project.id, depth + 1);
-    }
-  }
-
-  walk(null, 0);
-
-  return showModalBottomSheet<String>(
-    context: context,
-    builder: (sheetContext) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(title, style: Theme.of(sheetContext).textTheme.titleMedium),
-          ),
-          if (flat.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('还没有项目，先去「项目」页建一个'),
-            )
-          else
-            Flexible(
-              child: ListView(
-                shrinkWrap: true,
-                children: <Widget>[
-                  if (allowClear)
-                    ListTile(
-                      leading: const Icon(Icons.clear),
-                      title: const Text('（解除分配）'),
-                      onTap: () => Navigator.of(sheetContext).pop(''),
-                    ),
-                  for (final entry in flat)
-                    ListTile(
-                      contentPadding: EdgeInsets.only(left: 16.0 + entry.value * 20, right: 16),
-                      leading: const Icon(Icons.folder_outlined, size: 18),
-                      title: Text(entry.key.title),
-                      onTap: () => Navigator.of(sheetContext).pop(entry.key.id),
-                    ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    ),
-  );
-}
-
-Future<bool> _confirm(
-  BuildContext context, {
-  required String title,
-  required String message,
-  String confirmLabel = '确认',
-  bool danger = false,
-}) async {
-  final result = await showDialog<bool>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(title),
-      content: Text(message),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.of(dialogContext).pop(false),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          style: danger
-              ? FilledButton.styleFrom(backgroundColor: Theme.of(dialogContext).colorScheme.error)
-              : null,
-          onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: Text(confirmLabel),
-        ),
-      ],
-    ),
-  );
-  return result ?? false;
 }
