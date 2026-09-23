@@ -7,6 +7,7 @@ import '../../core/rules/completion.dart';
 import '../archive/archive_zone_page.dart';
 import '../board1/board1_page.dart';
 import '../board2/board2_page.dart';
+import '../search/search_view.dart';
 import '../settings/settings_page.dart';
 import '../shared/widgets.dart';
 
@@ -25,6 +26,7 @@ enum _NavItem {
   events('事件与任务线', Icons.timeline_outlined),
   dueSoon('今天 / 本周到期', Icons.event_available_outlined),
   allTasks('全部任务', Icons.checklist_outlined),
+  search('搜索', Icons.search),
   archive('归档区', Icons.inventory_2_outlined),
   settings('设置', Icons.settings_outlined);
 
@@ -36,6 +38,10 @@ enum _NavItem {
 
 class _DesktopShellState extends State<DesktopShell> {
   _NavItem _selected = _NavItem.projects;
+
+  /// 选中项由外壳持有，便于全局搜索结果直达对应板块
+  String? _selectedProjectId;
+  String? _selectedEventId;
 
   @override
   Widget build(BuildContext context) {
@@ -101,9 +107,29 @@ class _DesktopShellState extends State<DesktopShell> {
   Widget _content() {
     switch (_selected) {
       case _NavItem.projects:
-        return Board1Page(app: widget.app);
+        return Board1Page(
+          app: widget.app,
+          selectedProjectId: _selectedProjectId,
+          onSelect: (id) => setState(() => _selectedProjectId = id),
+        );
       case _NavItem.events:
-        return Board2Page(app: widget.app);
+        return Board2Page(
+          app: widget.app,
+          selectedEventId: _selectedEventId,
+          onSelect: (id) => setState(() => _selectedEventId = id),
+        );
+      case _NavItem.search:
+        return SearchView(
+          app: widget.app,
+          onOpenProject: (id) => setState(() {
+            _selectedProjectId = id;
+            _selected = _NavItem.projects;
+          }),
+          onOpenEvent: (id) => setState(() {
+            _selectedEventId = id;
+            _selected = _NavItem.events;
+          }),
+        );
       case _NavItem.dueSoon:
         return _DueSoonView(app: widget.app);
       case _NavItem.allTasks:

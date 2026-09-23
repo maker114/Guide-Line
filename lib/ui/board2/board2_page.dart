@@ -13,24 +13,26 @@ import '../shared/widgets.dart';
 ///   · `standard` —— 独立节点框，同一事件下的标准任务**沿主线纵向排列并用连线表示次序**
 ///   · `subtask`  —— 渲染在**父节点框内**，缩进列表（叶子，不能再有子节点）
 ///   · `parallel` —— **独立节点框**，与兄弟并列排布表达分叉；它自己的子任务仍在**该框内**
-class Board2Page extends StatefulWidget {
-  const Board2Page({super.key, required this.app});
+///
+/// 选中项由外层（外壳）持有，这样全局搜索可以直接跳到某个事件。
+class Board2Page extends StatelessWidget {
+  const Board2Page({
+    super.key,
+    required this.app,
+    required this.selectedEventId,
+    required this.onSelect,
+  });
 
   final AppController app;
-
-  @override
-  State<Board2Page> createState() => _Board2PageState();
-}
-
-class _Board2PageState extends State<Board2Page> {
-  String? _selectedEventId;
+  final String? selectedEventId;
+  final ValueChanged<String?> onSelect;
 
   @override
   Widget build(BuildContext context) {
-    final events = widget.app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
-    final selected = _selectedEventId == null
+    final events = app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
+    final selected = selectedEventId == null
         ? (events.isEmpty ? null : events.first)
-        : widget.app.ws.findEvent(_selectedEventId!);
+        : app.ws.findEvent(selectedEventId!);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -38,10 +40,10 @@ class _Board2PageState extends State<Board2Page> {
         SizedBox(
           width: 300,
           child: _EventListPane(
-            app: widget.app,
+            app: app,
             events: events,
             selectedId: selected?.id,
-            onSelect: (id) => setState(() => _selectedEventId = id),
+            onSelect: onSelect,
           ),
         ),
         const VerticalDivider(width: 1),
@@ -52,7 +54,7 @@ class _Board2PageState extends State<Board2Page> {
                   title: '选一个事件',
                   hint: '事件是一条任务线的根；左栏新建后即可往后排标准任务',
                 )
-              : TaskTreePane(app: widget.app, event: selected),
+              : TaskTreePane(app: app, event: selected),
         ),
       ],
     );
