@@ -17,6 +17,22 @@ void main() {
     expect(files.any((f) => f.path.contains('core')), isTrue);
   });
 
+  test('分层识别正确（防止规则空转 —— 这里曾经出过 bug）', () {
+    expect(_layerOf(File('lib/core/models/entity.dart')), 'core');
+    expect(_layerOf(File('lib/sync/sync_engine.dart')), 'sync');
+    expect(_layerOf(File('lib/features/workspace.dart')), 'features');
+    expect(_layerOf(File('lib/ui/desktop/desktop_shell.dart')), 'ui');
+    expect(_layerOf(File('lib/platform/data_directory.dart')), 'platform');
+    expect(_layerOf(File('lib/main.dart')), 'root');
+
+    // 每条分层规则都必须真的扫到了文件
+    expect(_inLayer(files, 'core'), isNotEmpty);
+    expect(_inLayer(files, 'sync'), isNotEmpty);
+    expect(_inLayer(files, 'features'), isNotEmpty);
+    expect(_inLayer(files, 'ui'), isNotEmpty);
+    expect(_inLayer(files, 'platform'), isNotEmpty);
+  });
+
   test('lib/core 不得 import Flutter', () {
     final offenders = <String>[];
     for (final file in _inLayer(files, 'core')) {
@@ -90,7 +106,11 @@ Iterable<File> _inLayer(List<File> files, String layer) =>
 String _layerOf(File file) {
   final normalized = file.path.replaceAll(r'\', '/');
   for (final layer in <String>['core', 'sync', 'features', 'ui', 'platform']) {
-    if (normalized.contains('/lib/$layer/')) return layer;
+    // 同时兼容 `lib/core/...` 与 `/lib/core/...` 两种写法 ——
+    // 早先只判断带前导斜杠的形式，导致所有分层规则**空转**（永远通过）
+    if (normalized.startsWith('lib/$layer/') || normalized.contains('/lib/$layer/')) {
+      return layer;
+    }
   }
   return 'root';
 }

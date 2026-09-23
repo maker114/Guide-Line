@@ -900,6 +900,60 @@ class Workspace {
     }
   }
 
+  /// 从回收站恢复（**连同级联进来的后代一起恢复**）；返回实际恢复的 id 集合。
+  ///
+  /// 灵感是扁平实体，恢复的只有它自己；项目/任务/事件会连同后代一起回来。
+  Set<String> restoreFromTrash(DocName doc, String rootId) {
+    final now = Ids.nowMillis();
+    final restored = <String>{};
+
+    switch (doc) {
+      case DocName.projects:
+        for (final node in TreeIndex(allProjects).subtreeOf(rootId)) {
+          final project = findProject(node.id);
+          if (project != null && project.deleted) {
+            _upsert(doc, project.copyWith(deleted: false, updatedAt: now));
+            restored.add(project.id);
+          }
+        }
+        break;
+      case DocName.tasks:
+        for (final node in TreeIndex(allTasks).subtreeOf(rootId)) {
+          final task = findTask(node.id);
+          if (task != null && task.deleted) {
+            _upsert(doc, task.copyWith(deleted: false, updatedAt: now));
+            restored.add(task.id);
+          }
+        }
+        break;
+      case DocName.events:
+        final event = findEvent(rootId);
+        if (event != null && event.deleted) {
+          _upsert(doc, event.copyWith(deleted: false, updatedAt: now));
+          restored.add(event.id);
+        }
+        for (final task in allTasks.where((t) => t.eventId == rootId && t.deleted).toList()) {
+          _upsert(DocName.tasks, task.copyWith(deleted: false, updatedAt: now));
+          restored.add(task.id);
+        }
+        break;
+      case DocName.inspirations:
+        final inspiration = findInspiration(rootId);
+        if (inspiration != null && inspiration.deleted) {
+          _upsert(doc, inspiration.copyWith(deleted: false, updatedAt: now));
+          restored.add(inspiration.id);
+        }
+        break;
+    }
+
+    if (restored.isNotEmpty) {
+      _touch(<DocName>[doc]);
+      if (doc == DocName.events) _touch(<DocName>[DocName.tasks]);
+      persist();
+    }
+    return restored;
+  }
+
   // ---------------------------------------------------------------- 视图偏好
 
   void setCollapsed(String id, bool collapsed) {

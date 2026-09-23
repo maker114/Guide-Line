@@ -1,17 +1,25 @@
 import 'package:flutter/material.dart';
 
+import '../../app/app_controller.dart';
+import '../../core/models/enums.dart';
+import '../../core/models/event.dart';
+import '../../core/models/task.dart';
+import '../../core/rules/completion.dart';
+import '../archive/archive_zone_page.dart';
+import '../board1/board1_page.dart';
+import '../settings/settings_page.dart';
+import '../shared/widgets.dart';
+
 /// 电脑端外壳（设计文档 3.1.1 / 6.2 / ADR-023）：**侧栏 + 多栏，编辑优先**。
-///
-/// 当前是 M2 的**结构占位**：导航骨架已按信息架构摆好，
-/// 数据绑定与真实视图在 M4（业务层）/ M6（UI）接入。
 class DesktopShell extends StatefulWidget {
-  const DesktopShell({super.key});
+  const DesktopShell({super.key, required this.app});
+
+  final AppController app;
 
   @override
   State<DesktopShell> createState() => _DesktopShellState();
 }
 
-/// 导航项 —— 两个板块 + 聚合视图 + 归档区（设计文档 4.10）。
 enum _NavItem {
   projects('项目与灵感', Icons.account_tree_outlined),
   events('事件与任务线', Icons.timeline_outlined),
@@ -31,68 +39,124 @@ class _DesktopShellState extends State<DesktopShell> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      body: Row(
-        children: <Widget>[
-          NavigationRail(
-            extended: true,
-            minExtendedWidth: 220,
-            selectedIndex: _NavItem.values.indexOf(_selected),
-            onDestinationSelected: (index) {
-              setState(() => _selected = _NavItem.values[index]);
-            },
-            destinations: <NavigationRailDestination>[
-              for (final item in _NavItem.values)
-                NavigationRailDestination(
-                  icon: Icon(item.icon),
-                  label: Text(item.label),
+    return ListenableBuilder(
+      listenable: widget.app,
+      builder: (context, _) {
+        final theme = Theme.of(context);
+        return Scaffold(
+          body: Row(
+            children: <Widget>[
+              NavigationRail(
+                extended: true,
+                minExtendedWidth: 210,
+                selectedIndex: _NavItem.values.indexOf(_selected),
+                onDestinationSelected: (index) {
+                  setState(() => _selected = _NavItem.values[index]);
+                },
+                destinations: <NavigationRailDestination>[
+                  for (final item in _NavItem.values)
+                    NavigationRailDestination(
+                      icon: Icon(item.icon),
+                      label: Text(item.label),
+                    ),
+                ],
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      child: Row(
+                        children: <Widget>[
+                          Text(_selected.label, style: theme.textTheme.headlineSmall),
+                          const Spacer(),
+                          if (_selected == _NavItem.archive)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: Text(
+                                '这里的东西都还能找回；只有「彻底删除」不可恢复',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          _SyncStatusChip(app: widget.app),
+                        ],
+                      ),
+                    ),
+                    if (widget.app.startupWarnings.isNotEmpty)
+                      _WarningBanner(messages: widget.app.startupWarnings),
+                    const Divider(height: 1),
+                    Expanded(child: _content()),
+                  ],
                 ),
+              ),
             ],
           ),
-          const VerticalDivider(width: 1),
+        );
+      },
+    );
+  }
+
+  Widget _content() {
+    switch (_selected) {
+      case _NavItem.projects:
+        return Board1Page(app: widget.app);
+      case _NavItem.events:
+        return _EventsView(app: widget.app);
+      case _NavItem.dueSoon:
+        return _DueSoonView(app: widget.app);
+      case _NavItem.allTasks:
+        return _AllTasksView(app: widget.app);
+      case _NavItem.archive:
+        return ArchiveZonePage(app: widget.app);
+      case _NavItem.settings:
+        return SettingsPage(app: widget.app);
+    }
+  }
+}
+
+/// 同步状态位（设计文档 §2「状态可见」）。
+class _SyncStatusChip extends StatelessWidget {
+  const _SyncStatusChip({required this.app});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasCloud = app.hasCloud;
+    final label = hasCloud ? app.syncStatus.label : '本地模式 · 未配置云端';
+    return Chip(
+      avatar: Icon(
+        hasCloud ? Icons.cloud_sync_outlined : Icons.cloud_off_outlined,
+        size: 18,
+        color: theme.colorScheme.outline,
+      ),
+      label: Text(label),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+class _WarningBanner extends StatelessWidget {
+  const _WarningBanner({required this.messages});
+
+  final List<String> messages;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      color: theme.colorScheme.errorContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: Row(
+        children: <Widget>[
+          const Icon(Icons.warning_amber_outlined, size: 18),
+          const SizedBox(width: 8),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-                  child: Row(
-                    children: <Widget>[
-                      Text(_selected.label, style: theme.textTheme.headlineSmall),
-                      const Spacer(),
-                      // 设计文档 §2「状态可见」：同步状态必须常驻可见（M5 接入真实状态）
-                      const _SyncStatusChip(),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Icon(
-                          _selected.icon,
-                          size: 56,
-                          color: theme.colorScheme.outlineVariant,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          '${_selected.label} —— 视图待接入',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          '数据层与业务规则已就绪（core / store / sync 三块已测试通过）',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            child: Text(messages.join('；'), style: theme.textTheme.bodySmall),
           ),
         ],
       ),
@@ -100,17 +164,222 @@ class _DesktopShellState extends State<DesktopShell> {
   }
 }
 
-/// 同步状态指示（先把位置占住，M5 接入真实状态机）。
-class _SyncStatusChip extends StatelessWidget {
-  const _SyncStatusChip();
+/// 事件与任务线：完整任务树渲染（设计文档 4.9）在下一轮实现；
+/// 当前提供事件级别的新建 / 完成 / 删除与进度概览。
+class _EventsView extends StatelessWidget {
+  const _EventsView({required this.app});
+
+  final AppController app;
+
+  Future<void> _createEvent(BuildContext context) async {
+    final name = await promptText(context, title: '新建事件', label: '事件名');
+    if (name == null) return;
+    app.run(() => app.ws.createEvent(name: name));
+  }
 
   @override
   Widget build(BuildContext context) {
+    final events = app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
+    if (events.isEmpty) {
+      return EmptyState(
+        icon: Icons.timeline_outlined,
+        title: '还没有事件',
+        hint: '事件是一条任务线的根；建好之后可以往后排标准任务',
+        action: FilledButton.icon(
+          onPressed: () => _createEvent(context),
+          icon: const Icon(Icons.add),
+          label: const Text('新建事件'),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        SectionLabel(
+          '事件（${events.length}）',
+          trailing: IconButton(
+            tooltip: '新建事件',
+            icon: const Icon(Icons.add),
+            onPressed: () => _createEvent(context),
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            children: <Widget>[
+              for (final Event event in events) _EventSummaryTile(app: app, event: event),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EventSummaryTile extends StatelessWidget {
+  const _EventSummaryTile({required this.app, required this.event});
+
+  final AppController app;
+  final Event event;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = app.ws;
+    final mainLine = ws.mainLineOf(event.id);
+    final done = mainLine.where((t) => t.status == NodeStatus.done).length;
+    final check = ws.checkEventCompletion(event.id);
+
+    return ListTile(
+      leading: NodeStatusChip(
+        status: event.status,
+        completeBlockedReason: check.canComplete ? null : check.reason,
+        onChanged: (status) {
+          final error = app.run(() => ws.setEventStatus(event.id, status));
+          if (error != null) showNotice(context, error, error: true);
+        },
+      ),
+      title: Text(event.name),
+      subtitle: Text('主线任务 $done/${mainLine.length} 已完成'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          IconButton(
+            tooltip: '归档事件（含整条任务线）',
+            icon: const Icon(Icons.archive_outlined),
+            onPressed: () {
+              app.run(() => ws.setEventArchived(event.id, true));
+              showNotice(context, '已归档（可在归档区取消）');
+            },
+          ),
+          IconButton(
+            tooltip: '删除事件（含整条任务线）',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () async {
+              final count = ws.liveTasks.where((t) => t.eventId == event.id).length;
+              final ok = await confirmAction(
+                context,
+                title: '删除事件',
+                message: '「${event.name}」及其整条任务线（$count 个任务）将被删除，可在归档区恢复。',
+                confirmLabel: '删除',
+                danger: true,
+              );
+              if (!ok) return;
+              app.run(() => ws.deleteEvent(event.id));
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 到期聚合视图（Q29 / Q48）。
+class _DueSoonView extends StatelessWidget {
+  const _DueSoonView({required this.app});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final weekLater = today.add(const Duration(days: 7));
+    String fmt(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+    final overdue = app.ws.tasksDueOnOrBefore(fmt(today.subtract(const Duration(days: 1))));
+    final dueSoon = app.ws
+        .tasksDueOnOrBefore(fmt(weekLater))
+        .where((t) => (t.dueAt ?? '').compareTo(fmt(today)) >= 0)
+        .toList(growable: false);
+
+    if (overdue.isEmpty && dueSoon.isEmpty) {
+      return const EmptyState(
+        icon: Icons.event_available_outlined,
+        title: '没有到期任务',
+        hint: '给任务设置到期日后，会在这里按时间聚合',
+      );
+    }
+
+    return ListView(
+      children: <Widget>[
+        if (overdue.isNotEmpty) ...<Widget>[
+          SectionLabel('已逾期（${overdue.length}）'),
+          for (final task in overdue) _TaskRow(app: app, task: task, overdue: true),
+        ],
+        if (dueSoon.isNotEmpty) ...<Widget>[
+          SectionLabel('本周到期（${dueSoon.length}）'),
+          for (final task in dueSoon) _TaskRow(app: app, task: task, overdue: false),
+        ],
+      ],
+    );
+  }
+}
+
+/// 全部任务（按到期日排序，无日期沉底）。
+class _AllTasksView extends StatelessWidget {
+  const _AllTasksView({required this.app});
+
+  final AppController app;
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = app.ws.liveTasks.where((t) => !t.archived).toList(growable: false);
+    if (tasks.isEmpty) {
+      return const EmptyState(
+        icon: Icons.checklist_outlined,
+        title: '还没有任务',
+        hint: '在「事件与任务线」里为事件添加任务',
+      );
+    }
+    tasks.sort((a, b) {
+      final byDate = (a.dueAt ?? '9999').compareTo(b.dueAt ?? '9999');
+      if (byDate != 0) return byDate;
+      return a.order.compareTo(b.order);
+    });
+
+    return ListView(
+      children: <Widget>[
+        for (final task in tasks) _TaskRow(app: app, task: task, overdue: false),
+      ],
+    );
+  }
+}
+
+class _TaskRow extends StatelessWidget {
+  const _TaskRow({required this.app, required this.task, required this.overdue});
+
+  final AppController app;
+  final Task task;
+  final bool overdue;
+
+  @override
+  Widget build(BuildContext context) {
+    final ws = app.ws;
     final theme = Theme.of(context);
-    return Chip(
-      avatar: Icon(Icons.cloud_off_outlined, size: 18, color: theme.colorScheme.outline),
-      label: const Text('未配对 · 本地可用'),
-      visualDensity: VisualDensity.compact,
+    final event = ws.findEvent(task.eventId);
+    final check = checkCompletion(ws.taskTree, task.id);
+    final isOverdue = overdue && task.status == NodeStatus.pending;
+
+    return ListTile(
+      dense: true,
+      leading: NodeStatusChip(
+        status: task.status,
+        completeBlockedReason: check.canComplete ? null : check.reason,
+        onChanged: (status) {
+          final error = app.run(() => ws.setTaskStatus(task.id, status));
+          if (error != null) showNotice(context, error, error: true);
+        },
+      ),
+      title: Text(
+        task.title,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          decoration: task.status == NodeStatus.done ? TextDecoration.lineThrough : null,
+        ),
+      ),
+      subtitle: Text('${event?.name ?? '（事件已删除）'} · ${task.dueAt ?? '无到期日'}'),
+      trailing: isOverdue
+          ? Text('逾期', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.error))
+          : null,
     );
   }
 }
