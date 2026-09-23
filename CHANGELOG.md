@@ -91,6 +91,18 @@
   - `docs/spec/数据契约.md` §2 改为描述**当前的单文件形态**（`schemaVersion: 2` + `collections`），
     v1 四文档信封降级为**只读兼容**；§5/§6 同步对齐实际的文件名与测试文件路径
 
+### 验证
+
+- **Android 运行时端到端验证**（Android 15 / x86_64 模拟器，2026-09-23；真机验收仍待你在手机上跑一周）
+  - 安装、启动无崩溃，logcat 无 `FATAL` / `MissingPluginException`
+  - `path_provider`（Android 侧已改为 JNI 实现）正确解析出应用私有目录 `files/guideline`
+  - 速记落盘为契约形态：`schemaVersion: 2` + 四个集合、可空字段的 `null` key 齐全、
+    仅 `LF`、无 BOM、末尾恰好一个换行
+  - 第二次保存正确轮转出 `guideline.backup.1.json`，并留下 `guideline.daily.20260923.json` 日快照
+  - 长按图标的 `SHORTCUT_CAPTURE` 意图在**冷启动与热启动**下都能切到灵感页并聚焦输入框
+  - 「导出并分享」走通系统分享面板（`ChooserActivity`），导出文件可被 gzip 解开、
+    内容自描述且包含刚录入的数据
+
 ### Changed
 
 - **方向变更：双端 → 纯手机单机应用**（2026-09-22）
