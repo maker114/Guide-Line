@@ -104,13 +104,27 @@ class AppController extends ChangeNotifier {
   }
 
   /// 执行业务动作：把 `RuleViolation` 变成可读文案（返回 null 表示成功）。
+  ///
+  /// 也要接住**写盘失败**。业务动作的写法是「先改内存、再整份原子落盘」，
+  /// 写盘失败时内存已经改了；如果让异常抛出去，界面只会记一条框架错误，
+  /// 而用户看到的是「改成功了」—— 下次启动才发现改动没了。这种**假装成功**
+  /// 比当场报错危险得多，所以磁盘类错误必须翻译成明确的失败文案。
+  ///
+  /// 只接 [FileSystemException]：那是磁盘/权限类问题。程序自身的 bug（类型错误等）
+  /// 仍旧照常抛出，不在生产环境里被悄悄咽掉。
   String? run(void Function() action) {
+    final before = workspace.snapshotInMemory();
     try {
       action();
       notifyListeners();
       return null;
     } on RuleViolation catch (violation) {
       return violation.message;
+    } on FileSystemException catch (error) {
+      // 内存退回动作前：宁可让界面"这次没生效"，也不能显示一个磁盘上没有的状态
+      workspace.rollbackTo(before);
+      notifyListeners();
+      return '保存失败，这次改动没有写入磁盘（${error.message}）。请检查存储空间后重试。';
     }
   }
 

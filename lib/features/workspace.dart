@@ -970,6 +970,22 @@ class Workspace {
   /// 当前的完整数据快照（导出用）。
   StoreFile buildStoreFile() => StoreFile(documents: _docs, savedAt: Ids.nowMillis());
 
+  /// 内存快照 + 回滚。
+  ///
+  /// 业务动作的写法是「先改内存，再整份落盘」。写盘失败时内存已经改了，
+  /// 如果就这么放过，界面会显示一个**磁盘上并不存在**的状态 —— 用户以为存住了，
+  /// 下次启动才发现没了。所以写失败必须把内存退回动作前的样子，让两边保持一致。
+  ///
+  /// `Document` 是不可变的，`_docs` 是「整份替换」而不是就地改，
+  /// 因此浅拷贝一份 map 就是完整快照。
+  Map<DocName, Document> snapshotInMemory() => Map<DocName, Document>.from(_docs);
+
+  void rollbackTo(Map<DocName, Document> snapshot) {
+    _docs
+      ..clear()
+      ..addAll(snapshot);
+  }
+
   /// 原子落盘：**整份数据一次写入**（单文件让跨实体变更天然原子）。
   void persist() {
     _storage.save(buildStoreFile());

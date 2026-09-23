@@ -79,7 +79,13 @@ class BackupsPage extends StatelessWidget {
   }
 
   void _snapshot(BuildContext context) {
-    app.ws.snapshotNow();
+    // 走 app.run 而不是直接调 snapshotNow：写盘失败时要如实报错，
+    // 不能不管三七二十一先弹一句「已写入一份备份」。
+    final error = app.run(() => app.ws.snapshotNow());
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
     showToast(context, '已写入一份备份');
   }
 
