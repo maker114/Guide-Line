@@ -33,9 +33,15 @@ class AppInfo {
 
   static const String technicalName = 'GuideLine';
 
-  static const String version = '1.0.0';
+  static const String version = '1.1.0';
 
-  static const String buildNumber = '1';
+  static const String buildNumber = '2';
+
+  /// 界面与导出里展示的完整版本（`1.1.0+2`）。
+  ///
+  /// 只留这一个源头：以前 `pubspec.yaml`、关于对话框、更多页各写一遍，
+  /// 发版时必然漏一个（1.0.0 就是漏到 1.1.0 才发现），所以这里拼出来给界面用。
+  static const String versionLabel = '$version+$buildNumber';
 
   static const String packageName = 'com.maker.guideline';
 }

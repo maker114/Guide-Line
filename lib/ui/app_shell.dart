@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../platform/data_directory.dart';
 import '../platform/shortcut_channel.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
@@ -144,7 +145,7 @@ class _AppShellState extends State<AppShell> {
     showAboutDialog(
       context: context,
       applicationName: 'Guide Line',
-      applicationVersion: '1.0.0+1',
+      applicationVersion: AppInfo.versionLabel,
       children: <Widget>[
         const Text('本地优先的个人生活管理工具（单机版）。'),
         const SizedBox(height: 8),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../platform/data_directory.dart';
 import '../common/format.dart';
 import '../common/section_header.dart';
 import '../theme/app_theme.dart';
@@ -87,7 +88,7 @@ class MoreTab extends StatelessWidget {
         const ListTile(
           leading: Icon(Icons.info_outline),
           title: Text('版本'),
-          subtitle: Text('1.0.0+1（Android 单机版）'),
+          subtitle: Text('${AppInfo.versionLabel}（Android 单机版）'),
         ),
       ],
     );
