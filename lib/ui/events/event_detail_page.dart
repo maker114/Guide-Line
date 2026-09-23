@@ -5,12 +5,14 @@ import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../../core/rules/completion.dart';
+import '../../core/tree/task_flow.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/task_status_button.dart';
 import 'task_actions.dart';
+import 'task_flow_layout.dart';
 
 /// 事件详情：**一条任务线的可视化**。
 ///
@@ -110,6 +112,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
         final mainLine = ws.mainLineOf(eventId);
         final completion = ws.checkEventCompletion(eventId);
+        // 走向（分叉 / 合流）交给流图，界面只负责把排布结果画出来
+        final flow = TaskFlow.of(ws.allTasks, eventId: eventId);
+        final flowRows = layoutTaskFlow(flow);
 
         return Scaffold(
           appBar: AppBar(
@@ -155,9 +160,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   ),
                 )
               else
-                for (var i = 0; i < mainLine.length; i += 1) ...<Widget>[
-                  if (i > 0) const _VerticalConnector(),
-                  _TaskBox(host: this, task: mainLine[i]),
+                for (var i = 0; i < flowRows.length; i += 1) ...<Widget>[
+                  // 主线节点之间、以及同一条支路内部，都画一道连线表示"接着做"；
+                  // 分叉/合流处不画（那里是分合关系，不是次序）
+                  if (i > 0 && _needsConnector(flowRows[i - 1], flowRows[i]))
+                    const _VerticalConnector(),
+                  _buildFlowRow(context, flowRows[i]),
                 ],
               const SizedBox(height: 16),
               Card(
@@ -173,6 +181,68 @@ class _EventDetailPageState extends State<EventDetailPage> {
         );
       },
     );
+  }
+
+  /// 相邻两行之间要不要画"接着做"的连线。
+  ///
+  /// 同层且同属一条支路才画：跨层（例如主线 → 支路小标题）与跨支路都不画，
+  /// 否则连线会把"分叉/合流"读成"顺序"。
+  static bool _needsConnector(FlowRow previous, FlowRow current) {
+    if (previous.isBranchHeader || current.isBranchHeader) return false;
+    if (previous.depth != current.depth) return false;
+    if (previous.depth == 0) return true;
+    return previous.branchIndex == current.branchIndex;
+  }
+
+  /// 画一行排布结果：支路小标题，或者一个任务框。
+  Widget _buildFlowRow(BuildContext context, FlowRow row) {
+    final theme = Theme.of(context);
+    final branchIndex = row.branchIndex;
+    final color = branchIndex == null ? null : _branchColor(theme.colorScheme, branchIndex);
+
+    if (row.isBranchHeader) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: _branchColor(theme.colorScheme, branchIndex ?? 0),
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '${row.branchTitle} ${(branchIndex ?? 0) + 1} / ${row.branchCount}',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: _branchColor(theme.colorScheme, branchIndex ?? 0),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: Divider(color: color?.withValues(alpha: 0.4))),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      // 支路内的节点整体缩进一层，配合支路色分清"这是哪条支路"
+      padding: EdgeInsets.only(left: row.depth == 0 ? 0 : 12),
+      child: _TaskBox(
+        host: this,
+        task: row.task!,
+        accentOverride: row.depth == 0 ? null : color,
+        badge: row.badge,
+      ),
+    );
+  }
+
+  /// 支路配色：只从主题里取，不硬编码颜色。
+  static Color _branchColor(ColorScheme scheme, int index) {
+    final palette = <Color>[scheme.tertiary, scheme.secondary, scheme.primary];
+    return palette[index % palette.length];
   }
 
   Future<void> _deleteEvent(BuildContext context, Event event) async {
@@ -280,13 +350,25 @@ class _VerticalConnector extends StatelessWidget {
 
 /// 一个任务节点框：自身 + 框内子任务 + （若有）并排的并列任务框。
 class _TaskBox extends StatelessWidget {
-  const _TaskBox({required this.host, required this.task, this.compact = false});
+  const _TaskBox({
+    required this.host,
+    required this.task,
+    this.compact = false,
+    this.accentOverride,
+    this.badge,
+  });
 
   final _EventDetailPageState host;
   final Task task;
 
   /// 并列框内使用：不显示进一步的并列分组（并列任务只能挂子任务）。
   final bool compact;
+
+  /// 支路节点用支路色描边（主线节点传 `null`，走默认的主题色）
+  final Color? accentOverride;
+
+  /// 分叉 / 合流徽标
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +387,10 @@ class _TaskBox extends StatelessWidget {
     // 所以这里是就地缩成一行，而不是重新分组。
     final expanded = app.isExpanded(task.id, defaultExpanded: !isDone);
     final hasChildren = subtasks.isNotEmpty || parallels.isNotEmpty;
+    final accent = accentOverride ??
+        (isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary);
+    final badgeText = badge;
+    final isJoinBadge = badgeText != null && badgeText.contains('汇合');
 
     return Card(
       margin: EdgeInsets.zero,
@@ -314,8 +400,8 @@ class _TaskBox extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary,
-          width: isDone ? 1 : 1.4,
+          color: accent,
+          width: isDone && accentOverride == null ? 1 : 1.4,
         ),
       ),
       child: Column(
@@ -330,6 +416,26 @@ class _TaskBox extends StatelessWidget {
             expanded: expanded,
             onToggle: () => app.setExpanded(task.id, expanded: !expanded),
           ),
+          if (badgeText != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+              child: Row(
+                children: <Widget>[
+                  // 分叉用"分开"的图标，合流用"合并"的图标 —— 一开始两个都用了
+                  // call_split，看着像"又要分叉"，是错的
+                  Icon(
+                    isJoinBadge ? Icons.merge_type : Icons.call_split,
+                    size: 13,
+                    color: accent,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    badgeText,
+                    style: theme.textTheme.labelSmall?.copyWith(color: accent),
+                  ),
+                ],
+              ),
+            ),
           if (hasChildren && !expanded)
             _CollapsedChildrenHint(
               count: children.length,
