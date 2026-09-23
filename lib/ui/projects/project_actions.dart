@@ -5,64 +5,11 @@ import '../../core/rules/cascade.dart';
 import '../common/dialogs.dart';
 import '../common/project_picker.dart';
 
-/// 项目的常用动作。项目 Tab 的菜单、详情页的菜单共用这一套，
-/// 保证确认文案与副作用（归档级联、删除连带灵感）说法一致。
-
-Future<void> createProjectAction(
-  BuildContext context,
-  AppController app, {
-  String? parentId,
-}) async {
-  final title = await promptText(
-    context,
-    title: parentId == null ? '新建项目' : '新建子项目',
-    hintText: '项目名',
-  );
-  if (title == null || !context.mounted) return;
-  final error = app.run(() => app.ws.createProject(title: title, parentId: parentId));
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
-
-Future<void> renameProjectAction(
-  BuildContext context,
-  AppController app,
-  String projectId,
-  String currentTitle,
-) async {
-  final title = await promptText(
-    context,
-    title: '重命名项目',
-    initialText: currentTitle,
-    hintText: '项目名',
-  );
-  if (title == null || !context.mounted) return;
-  final error = app.run(() => app.ws.updateProject(projectId, title: title));
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
-
-Future<void> editProjectFieldAction(
-  BuildContext context,
-  AppController app,
-  String projectId, {
-  required String field,
-  required String currentValue,
-}) async {
-  final labels = <String, String>{'purpose': '目的', 'implementation': '实现'};
-  final value = await promptText(
-    context,
-    title: '编辑${labels[field] ?? field}',
-    initialText: currentValue,
-    hintText: field == 'purpose' ? '为什么做这个项目' : '怎么做 —— 灵感合并进来会写到这里',
-    maxLines: 8,
-  );
-  if (value == null || !context.mounted) return;
-  final error = app.run(
-    () => field == 'purpose'
-        ? app.ws.updateProject(projectId, purpose: value)
-        : app.ws.updateProject(projectId, implementation: value),
-  );
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
+/// 项目的常用动作：**移动 / 归档 / 删除**。
+///
+/// 新建与重命名不在这里 —— 它们改成了**页面内直接输入**（`InlineComposer` /
+/// `InlineTextField`），不再弹对话框，所以没有对应的 action 函数。
+/// 留在这里的都是"必须问一句"的动作（会有级联副作用），用确认框而不是输入框。
 
 Future<void> moveProjectAction(
   BuildContext context,

@@ -6,71 +6,114 @@ import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/rules/cascade.dart';
 import '../common/dialogs.dart';
-import '../common/empty_state.dart';
+import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import 'event_detail_page.dart';
-import 'task_actions.dart';
 
 /// 事件 Tab：**任务线的入口列表**。
 ///
 /// 事件本身只有名字 + 三态（无时间、无描述），所以列表上给的是
 /// 「主线进度」这个唯一有信息量的东西。
-class EventTab extends StatelessWidget {
+///
+/// 新建与重命名都是**页面内直接输入**，不弹对话框。
+class EventTab extends StatefulWidget {
   const EventTab({super.key, required this.app});
 
   final AppController app;
 
   @override
+  State<EventTab> createState() => _EventTabState();
+}
+
+class _EventTabState extends State<EventTab> {
+  String? _renamingId;
+
+  AppController get _app => widget.app;
+
+  @override
   Widget build(BuildContext context) {
-    final events = app.ws.liveEvents.where((e) => !e.archived).toList(growable: false)
+    final events = _app.ws.liveEvents.where((e) => !e.archived).toList(growable: false)
       ..sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Text('共 ${events.length} 个事件', style: Theme.of(context).textTheme.labelLarge),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => createEventAction(context, app),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('新建'),
-              ),
-            ],
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          child: Text(
+            events.isEmpty ? '还没有事件' : '共 ${events.length} 个事件',
+            style: Theme.of(context).textTheme.labelLarge,
           ),
         ),
         Expanded(
-          child: events.isEmpty
-              ? EmptyState(
-                  icon: Icons.timeline_outlined,
-                  title: '还没有事件',
-                  hint: '事件是一条任务线的起点，本身不设时间与描述',
-                  action: FilledButton.icon(
-                    onPressed: () => createEventAction(context, app),
-                    icon: const Icon(Icons.add),
-                    label: const Text('新建事件'),
+          child: ListView(
+            padding: const EdgeInsets.only(bottom: 96),
+            children: <Widget>[
+              InlineComposer(
+                label: '新建事件',
+                hint: '事件名',
+                leading: Icons.add,
+                onCreate: (name) {
+                  final error = _app.run(() => _app.ws.createEvent(name: name));
+                  if (error != null) _toast(error, error: true);
+                },
+              ),
+              if (events.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    '事件是一条任务线的起点，本身不设时间与描述',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.only(bottom: 96),
-                  itemCount: events.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1, indent: 16, endIndent: 16),
-                  itemBuilder: (context, index) => _EventTile(app: app, event: events[index]),
-                ),
+              else
+                for (final event in events) ...<Widget>[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  if (_renamingId == event.id)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: InlineTextField(
+                        value: event.name,
+                        autofocus: true,
+                        hint: '事件名',
+                        textStyle: Theme.of(context).textTheme.bodyLarge,
+                        onSubmitted: (name) =>
+                            _app.run(() => _app.ws.updateEvent(event.id, name: name)),
+                        onEditClosed: () {
+                          if (mounted) setState(() => _renamingId = null);
+                        },
+                      ),
+                    )
+                  else
+                    _EventTile(
+                      app: _app,
+                      event: event,
+                      onStartRename: () => setState(() => _renamingId = event.id),
+                    ),
+                ],
+            ],
+          ),
         ),
       ],
     );
   }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    showToast(context, message, error: error);
+  }
 }
 
 class _EventTile extends StatelessWidget {
-  const _EventTile({required this.app, required this.event});
+  const _EventTile({
+    required this.app,
+    required this.event,
+    required this.onStartRename,
+  });
 
   final AppController app;
   final Event event;
+  final VoidCallback onStartRename;
 
   @override
   Widget build(BuildContext context) {
@@ -109,18 +152,7 @@ class _EventTile extends StatelessWidget {
         onSelected: (value) async {
           switch (value) {
             case 'rename':
-              final name = await promptText(
-                context,
-                title: '重命名事件',
-                initialText: event.name,
-                hintText: '事件名',
-              );
-              if (name == null || !context.mounted) return;
-              final error = app.run(() => app.ws.updateEvent(event.id, name: name));
-              if (error != null && context.mounted) showToast(context, error, error: true);
-              break;
-            case 'task':
-              await createTaskAction(context, app, eventId: event.id);
+              onStartRename();
               break;
             case 'archive':
               final error = app.run(() => app.ws.setEventArchived(event.id, true));
@@ -137,7 +169,6 @@ class _EventTile extends StatelessWidget {
           }
         },
         itemBuilder: (_) => const <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(value: 'task', child: Text('新建主线任务')),
           PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
           PopupMenuItem<String>(value: 'archive', child: Text('归档（含任务线）')),
           PopupMenuItem<String>(value: 'delete', child: Text('删除（含任务线）')),
@@ -167,11 +198,4 @@ class _EventTile extends StatelessWidget {
     final error = app.run(() => app.ws.deleteEvent(event.id));
     if (error != null && context.mounted) showToast(context, error, error: true);
   }
-}
-
-Future<void> createEventAction(BuildContext context, AppController app) async {
-  final name = await promptText(context, title: '新建事件', hintText: '事件名');
-  if (name == null || !context.mounted) return;
-  final error = app.run(() => app.ws.createEvent(name: name));
-  if (error != null && context.mounted) showToast(context, error, error: true);
 }

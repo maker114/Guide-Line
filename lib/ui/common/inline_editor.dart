@@ -1,0 +1,272 @@
+import 'package:flutter/material.dart';
+
+/// 页面内直接编辑（**不弹对话框**）。
+///
+/// 用法是"点一下就变成输入框"：读的时候只显示文字（空值显示浅色提示），
+/// 点一下原地变成可编辑，失焦或点键盘的完成即提交。
+///
+/// 两条刻意的约束：
+///   · **值没变就不回调** —— 存储层每次保存都会重写整份文件并轮转备份，
+///     不能因为"点了一下又点回去"就白写一次盘；
+///   · **必填项被清空时不提交，恢复原值** —— 否则用户一失手就把标题清没了。
+class InlineTextField extends StatefulWidget {
+  const InlineTextField({
+    super.key,
+    required this.value,
+    required this.onSubmitted,
+    this.hint = '点一下输入',
+    this.minLines = 1,
+    this.maxLines = 1,
+    this.allowEmpty = false,
+    this.textStyle,
+    this.hintStyle,
+    this.padding = const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+    this.autofocus = false,
+    this.onEditClosed,
+  });
+
+  /// 当前值（外部真源）
+  final String value;
+
+  /// 提交回调；只在值真的变了时调用
+  final ValueChanged<String> onSubmitted;
+
+  final String hint;
+  final int minLines;
+  final int maxLines;
+
+  /// 允许提交空值（例如"目的"可以为空）
+  final bool allowEmpty;
+
+  final TextStyle? textStyle;
+  final TextStyle? hintStyle;
+  final EdgeInsets padding;
+
+  /// 一进来就直接进入编辑态（列表里刚点"新建"时用得上）
+  final bool autofocus;
+
+  /// 每次**结束编辑**都会调用（无论值有没有变）。
+  /// 列表里用来把"正在重命名"的行恢复成普通行。
+  final VoidCallback? onEditClosed;
+
+  @override
+  State<InlineTextField> createState() => _InlineTextFieldState();
+}
+
+class _InlineTextFieldState extends State<InlineTextField> {
+  late final TextEditingController _controller = TextEditingController(text: widget.value);
+  late final FocusNode _focus = FocusNode();
+  bool _editing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChanged);
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startEditing());
+    }
+  }
+
+  @override
+  void didUpdateWidget(InlineTextField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 外部值变了（例如别处改了）而当前不在编辑，就同步过来
+    if (!_editing && widget.value != _controller.text) {
+      _controller.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.removeListener(_onFocusChanged);
+    _focus.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (!_focus.hasFocus && _editing) _commit();
+  }
+
+  void _startEditing() {
+    if (!mounted) return;
+    setState(() => _editing = true);
+    _focus.requestFocus();
+  }
+
+  void _commit() {
+    final next = _controller.text.trim();
+    setState(() => _editing = false);
+    if (next == widget.value) {
+      widget.onEditClosed?.call();
+      return;
+    }
+    if (next.isEmpty && !widget.allowEmpty) {
+      // 必填项被清空：恢复原值，不写盘
+      _controller.text = widget.value;
+      widget.onEditClosed?.call();
+      return;
+    }
+    widget.onSubmitted(next);
+    widget.onEditClosed?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (_editing) {
+      return Padding(
+        padding: widget.padding,
+        child: TextField(
+          controller: _controller,
+          focusNode: _focus,
+          minLines: widget.minLines,
+          maxLines: widget.maxLines,
+          textInputAction:
+              widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
+          style: widget.textStyle,
+          decoration: const InputDecoration(
+            isDense: true,
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          onSubmitted: widget.maxLines > 1 ? null : (_) => _commit(),
+        ),
+      );
+    }
+
+    final empty = widget.value.trim().isEmpty;
+    return InkWell(
+      onTap: _startEditing,
+      child: Padding(
+        padding: widget.padding,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                empty ? widget.hint : widget.value,
+                style: empty
+                    ? (widget.hintStyle ??
+                        theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.outline))
+                    : widget.textStyle,
+              ),
+            ),
+            // 给一个"这里能改"的轻微提示，不做成显眼按钮
+            Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.outlineVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 列表里的"直接输入"行：点一下展开成输入框，提交后**保持展开**继续输入，
+/// 想收起来点右侧的对勾。像系统「备忘录」那样连着记几条不用反复点。
+class InlineComposer extends StatefulWidget {
+  const InlineComposer({
+    super.key,
+    required this.label,
+    required this.hint,
+    required this.onCreate,
+    this.minLines = 1,
+    this.maxLines = 1,
+    this.leading,
+    this.dense = false,
+  });
+
+  /// 折叠时显示的文案，例如「新建项目」
+  final String label;
+  final String hint;
+  final ValueChanged<String> onCreate;
+  final int minLines;
+  final int maxLines;
+  final IconData? leading;
+  final bool dense;
+
+  @override
+  State<InlineComposer> createState() => _InlineComposerState();
+}
+
+class _InlineComposerState extends State<InlineComposer> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focus = FocusNode();
+  bool _expanded = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _expand() {
+    setState(() => _expanded = true);
+    _focus.requestFocus();
+  }
+
+  void _collapse() {
+    _controller.clear();
+    _focus.unfocus();
+    setState(() => _expanded = false);
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    widget.onCreate(text);
+    // 保持展开，方便接着记下一条
+    _controller.clear();
+    _focus.requestFocus();
+    setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (!_expanded) {
+      return ListTile(
+        dense: widget.dense,
+        leading: Icon(widget.leading ?? Icons.add, color: theme.colorScheme.primary),
+        title: Text(widget.label, style: TextStyle(color: theme.colorScheme.primary)),
+        onTap: _expand,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: <Widget>[
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              focusNode: _focus,
+              minLines: widget.minLines,
+              maxLines: widget.maxLines,
+              textInputAction:
+                  widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
+              decoration: InputDecoration(
+                hintText: widget.hint,
+                isDense: true,
+                border: const OutlineInputBorder(),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              ),
+              onSubmitted: widget.maxLines > 1 ? null : (_) => _submit(),
+            ),
+          ),
+          IconButton(
+            tooltip: '添加',
+            icon: const Icon(Icons.check),
+            onPressed: _submit,
+          ),
+          IconButton(
+            tooltip: '收起',
+            icon: const Icon(Icons.close),
+            onPressed: _collapse,
+          ),
+        ],
+      ),
+    );
+  }
+}

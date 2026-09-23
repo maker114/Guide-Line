@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/project.dart';
-import '../common/empty_state.dart';
 import '../common/format.dart';
+import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import 'project_actions.dart';
 import 'project_detail_page.dart';
@@ -13,53 +13,126 @@ import 'project_detail_page.dart';
 ///
 /// 手机上没有树控件的余地，所以用「扁平化 + 缩进 + 展开箭头」渲染：
 /// 折叠状态存在 `UiPrefs` 里，下次进来还是原样。
-class ProjectTab extends StatelessWidget {
+///
+/// 新建与重命名都是**页面内直接输入**（见 `InlineComposer` / `InlineTextField`）：
+/// 点一下原地变成输入框，不再弹对话框。
+class ProjectTab extends StatefulWidget {
   const ProjectTab({super.key, required this.app});
 
   final AppController app;
 
   @override
-  Widget build(BuildContext context) {
-    final rows = _flatten(app);
-    if (rows.isEmpty) {
-      return EmptyState(
-        icon: Icons.account_tree_outlined,
-        title: '还没有项目',
-        hint: '项目是「目的 + 实现」的容器，灵感可以合并进项目正文',
-        action: FilledButton.icon(
-          onPressed: () => createProjectAction(context, app),
-          icon: const Icon(Icons.add),
-          label: const Text('新建项目'),
-        ),
-      );
-    }
+  State<ProjectTab> createState() => _ProjectTabState();
+}
 
+class _ProjectTabState extends State<ProjectTab> {
+  /// 正在重命名的项目 id
+  String? _renamingId;
+
+  /// 正在为哪个项目录子项目
+  String? _addingChildOf;
+
+  AppController get _app => widget.app;
+
+  void _create({String? parentId, required String title}) {
+    final error = _app.run(() => _app.ws.createProject(title: title, parentId: parentId));
+    if (error != null) {
+      _toast(error, error: true);
+      return;
+    }
+    // 加完子项目就把那一行的输入框收起来，避免列表里挂着一排展开的输入
+    if (parentId != null) setState(() => _addingChildOf = null);
+  }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger?.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? Theme.of(context).colorScheme.errorContainer : null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _flatten(_app);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Text('共 ${rows.length} 个项目', style: Theme.of(context).textTheme.labelLarge),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => createProjectAction(context, app),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('新建'),
-              ),
-            ],
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          child: Text(
+            rows.isEmpty ? '还没有项目' : '共 ${rows.length} 个项目',
+            style: Theme.of(context).textTheme.labelLarge,
           ),
         ),
         Expanded(
-          child: ListView.separated(
+          child: ListView(
             padding: const EdgeInsets.only(bottom: 96),
-            itemCount: rows.length,
-            separatorBuilder: (_, _) => const Divider(height: 1, indent: 16, endIndent: 16),
-            itemBuilder: (context, index) => _ProjectTile(app: app, row: rows[index]),
+            children: <Widget>[
+              InlineComposer(
+                label: '新建项目',
+                hint: '项目名',
+                leading: Icons.create_new_folder_outlined,
+                onCreate: (title) => _create(title: title),
+              ),
+              if (rows.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    '项目是「目的 + 实现」的容器，灵感可以合并进项目正文',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                )
+              else
+                for (final row in rows) ...<Widget>[
+                  const Divider(height: 1, indent: 16, endIndent: 16),
+                  _buildTile(row),
+                  if (_addingChildOf == row.project.id)
+                    Padding(
+                      padding: EdgeInsets.only(left: 16.0 + row.depth * 16),
+                      child: InlineComposer(
+                        label: '新建子项目',
+                        hint: '子项目名',
+                        leading: Icons.subdirectory_arrow_right,
+                        dense: true,
+                        onCreate: (title) =>
+                            _create(parentId: row.project.id, title: title),
+                      ),
+                    ),
+                ],
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildTile(_ProjectRow row) {
+    final project = row.project;
+    if (_renamingId == project.id) {
+      return Padding(
+        padding: EdgeInsets.only(left: 12.0 + row.depth * 16, right: 12),
+        child: InlineTextField(
+          value: project.title,
+          autofocus: true,
+          hint: '项目名',
+          textStyle: Theme.of(context).textTheme.bodyLarge,
+          onSubmitted: (title) =>
+              _app.run(() => _app.ws.updateProject(project.id, title: title)),
+          onEditClosed: () {
+            if (mounted) setState(() => _renamingId = null);
+          },
+        ),
+      );
+    }
+    return _ProjectTile(
+      app: _app,
+      row: row,
+      onStartRename: () => setState(() => _renamingId = project.id),
+      onStartAddChild: () => setState(() => _addingChildOf = project.id),
     );
   }
 }
@@ -109,10 +182,17 @@ List<_ProjectRow> _flatten(AppController app) {
 }
 
 class _ProjectTile extends StatelessWidget {
-  const _ProjectTile({required this.app, required this.row});
+  const _ProjectTile({
+    required this.app,
+    required this.row,
+    required this.onStartRename,
+    required this.onStartAddChild,
+  });
 
   final AppController app;
   final _ProjectRow row;
+  final VoidCallback onStartRename;
+  final VoidCallback onStartAddChild;
 
   @override
   Widget build(BuildContext context) {
@@ -171,13 +251,13 @@ class _ProjectTile extends StatelessWidget {
     final project = row.project;
     switch (value) {
       case 'child':
-        await createProjectAction(context, app, parentId: project.id);
+        onStartAddChild();
         break;
       case 'open':
         await _open(context);
         break;
       case 'rename':
-        await renameProjectAction(context, app, project.id, project.title);
+        onStartRename();
         break;
       case 'move':
         await moveProjectAction(context, app, project.id);
@@ -215,7 +295,11 @@ class _Subtitle extends StatelessWidget {
     return Row(
       children: <Widget>[
         if (due.isNotEmpty) ...<Widget>[
-          Icon(Icons.event, size: 13, color: overdue ? theme.colorScheme.error : theme.colorScheme.outline),
+          Icon(
+            Icons.event,
+            size: 13,
+            color: overdue ? theme.colorScheme.error : theme.colorScheme.outline,
+          ),
           const SizedBox(width: 3),
           Text(due, style: style?.copyWith(color: overdue ? theme.colorScheme.error : null)),
           const SizedBox(width: 10),
@@ -228,7 +312,12 @@ class _Subtitle extends StatelessWidget {
         ],
         if (project.purpose.isNotEmpty)
           Expanded(
-            child: Text(project.purpose, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+            child: Text(
+              project.purpose,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
           ),
       ],
     );

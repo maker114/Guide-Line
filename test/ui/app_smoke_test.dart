@@ -28,10 +28,24 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 填写并提交 `promptText` 对话框。
+  /// 填写并提交 `promptText` 对话框（任务相关仍走对话框）。
   Future<void> submitPrompt(WidgetTester tester, String text) async {
     await tester.enterText(find.byType(TextField).last, text);
     await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+  }
+
+  /// 走「页面内直接输入」：点开那一行 → 输入 → 点对勾。
+  /// 项目与事件的新建都改成了这种形式（不再弹对话框）。
+  Future<void> submitInlineComposer(
+    WidgetTester tester,
+    String label,
+    String text,
+  ) async {
+    await tester.tap(find.text(label));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, text);
+    await tester.tap(find.byIcon(Icons.check));
     await tester.pumpAndSettle();
   }
 
@@ -48,22 +62,19 @@ void main() {
     expect(find.text('把灵感线做成一条链'), findsOneWidget);
     expect(app.ws.inspirationInbox.length, 1);
 
-    // ---- 2. 项目 Tab：建一个根项目
+    // ---- 2. 项目 Tab：页内直接输入建一个根项目
     await switchTab(tester, '项目');
     expect(find.text('还没有项目'), findsOneWidget);
-    await tester.tap(find.text('新建项目'));
-    await tester.pumpAndSettle();
-    await submitPrompt(tester, 'Guide Line');
+    await submitInlineComposer(tester, '新建项目', 'Guide Line');
     expect(find.text('Guide Line'), findsOneWidget);
     expect(app.ws.liveProjects.length, 1);
 
-    // ---- 3. 事件 Tab：建事件 + 主线任务 + 子任务
+    // ---- 3. 事件 Tab：页内直接输入建事件
     await switchTab(tester, '事件');
     expect(find.text('还没有事件'), findsOneWidget);
-    await tester.tap(find.text('新建事件'));
-    await tester.pumpAndSettle();
-    await submitPrompt(tester, '手机端上线');
+    await submitInlineComposer(tester, '新建事件', '手机端上线');
     expect(find.text('手机端上线'), findsOneWidget);
+    expect(app.ws.liveEvents.length, 1);
 
     // 进任务线
     await tester.tap(find.text('手机端上线'));

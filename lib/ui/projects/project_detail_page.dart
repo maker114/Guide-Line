@@ -6,6 +6,7 @@ import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
+import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import 'project_actions.dart';
 
@@ -52,12 +53,6 @@ class ProjectDetailPage extends StatelessWidget {
                 tooltip: '更多',
                 onSelected: (value) async {
                   switch (value) {
-                    case 'child':
-                      await createProjectAction(context, app, parentId: project.id);
-                      break;
-                    case 'rename':
-                      await renameProjectAction(context, app, project.id, project.title);
-                      break;
                     case 'move':
                       await moveProjectAction(context, app, project.id);
                       break;
@@ -72,8 +67,6 @@ class ProjectDetailPage extends StatelessWidget {
                   }
                 },
                 itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(value: 'child', child: Text('新建子项目')),
-                  PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
                   PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
                   PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                   PopupMenuItem<String>(value: 'delete', child: Text('删除')),
@@ -90,31 +83,35 @@ class ProjectDetailPage extends StatelessWidget {
                   leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
                   title: Text('属于「${parent.title}」', style: Theme.of(context).textTheme.labelMedium),
                 ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Text('名称', style: Theme.of(context).textTheme.labelLarge),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: InlineTextField(
+                  value: project.title,
+                  hint: '项目名',
+                  textStyle: Theme.of(context).textTheme.titleMedium,
+                  onSubmitted: (title) =>
+                      app.run(() => ws.updateProject(project.id, title: title)),
+                ),
+              ),
               _StatusField(app: app, project: project),
               _DateField(app: app, project: project),
               _TextField(
                 title: '目的',
                 hint: '为什么做这个项目',
                 value: project.purpose,
-                onEdit: () => editProjectFieldAction(
-                  context,
-                  app,
-                  project.id,
-                  field: 'purpose',
-                  currentValue: project.purpose,
-                ),
+                onSubmitted: (value) =>
+                    app.run(() => ws.updateProject(project.id, purpose: value)),
               ),
               _TextField(
                 title: '实现',
                 hint: '怎么做 —— 灵感合并进来会写到这里',
                 value: project.implementation,
-                onEdit: () => editProjectFieldAction(
-                  context,
-                  app,
-                  project.id,
-                  field: 'implementation',
-                  currentValue: project.implementation,
-                ),
+                onSubmitted: (value) =>
+                    app.run(() => ws.updateProject(project.id, implementation: value)),
               ),
               _ChildrenField(app: app, project: project, children: children),
               _InspirationsField(inspirations: inspirations),
@@ -222,13 +219,13 @@ class _TextField extends StatelessWidget {
     required this.title,
     required this.hint,
     required this.value,
-    required this.onEdit,
+    required this.onSubmitted,
   });
 
   final String title;
   final String hint;
   final String value;
-  final VoidCallback onEdit;
+  final ValueChanged<String> onSubmitted;
 
   @override
   Widget build(BuildContext context) {
@@ -237,33 +234,26 @@ class _TextField extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Card(
         margin: EdgeInsets.zero,
-        child: InkWell(
-          onTap: onEdit,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Text(title, style: theme.textTheme.labelLarge),
-                    const Spacer(),
-                    Icon(Icons.edit_outlined, size: 18, color: theme.colorScheme.outline),
-                  ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(title, style: theme.textTheme.labelLarge),
+              const SizedBox(height: 4),
+              InlineTextField(
+                value: value,
+                hint: hint,
+                minLines: 1,
+                maxLines: 12,
+                allowEmpty: true,
+                hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.outline,
+                  fontStyle: FontStyle.italic,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  value.isEmpty ? hint : value,
-                  style: value.isEmpty
-                      ? theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.outline,
-                          fontStyle: FontStyle.italic,
-                        )
-                      : theme.textTheme.bodyMedium,
-                ),
-              ],
-            ),
+                onSubmitted: onSubmitted,
+              ),
+            ],
           ),
         ),
       ),
@@ -285,22 +275,22 @@ class _ChildrenField extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Text('子项目 ${children.length}', style: theme.textTheme.labelLarge),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => createProjectAction(context, app, parentId: project.id),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('新建'),
-              ),
-            ],
-          ),
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+          child: Text('子项目 ${children.length}', style: theme.textTheme.labelLarge),
+        ),
+        InlineComposer(
+          label: '新建子项目',
+          hint: '子项目名',
+          leading: Icons.subdirectory_arrow_right,
+          onCreate: (title) {
+            final error =
+                app.run(() => app.ws.createProject(title: title, parentId: project.id));
+            if (error != null) showToast(context, error, error: true);
+          },
         ),
         if (children.isEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             child: Text('还没有子项目', style: theme.textTheme.bodySmall),
           )
         else

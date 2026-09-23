@@ -65,22 +65,31 @@ class InspirationTabState extends State<InspirationTab> {
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: TextField(
-            controller: _capture,
-            focusNode: _focus,
-            minLines: 1,
-            maxLines: 5,
-            textInputAction: TextInputAction.newline,
-            decoration: InputDecoration(
-              hintText: '想到什么就先扔进来…',
-              border: const OutlineInputBorder(),
-              isDense: true,
-              suffixIcon: IconButton(
-                tooltip: '保存',
-                icon: const Icon(Icons.send),
-                onPressed: _save,
+          child: Stack(
+            children: <Widget>[
+              TextField(
+                controller: _capture,
+                focusNode: _focus,
+                minLines: 3,
+                maxLines: 8,
+                textInputAction: TextInputAction.newline,
+                decoration: const InputDecoration(
+                  hintText: '想到什么就先扔进来…',
+                  border: OutlineInputBorder(),
+                  // 给右下角的发送键留位置，别让文字钻到按钮底下
+                  contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 46),
+                ),
               ),
-            ),
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: IconButton.filledTonal(
+                  tooltip: '保存',
+                  icon: const Icon(Icons.send),
+                  onPressed: _save,
+                ),
+              ),
+            ],
           ),
         ),
         if (_selectedProjectId != null)
