@@ -11,8 +11,6 @@ analyzer:
     - android/**
     - .tools/**
     - .dart_tool/**
-    # 归档的电脑端工程：它是独立的完整工程，不要用本工程的依赖去分析它
-    - archive/**
   errors:
     # 未 await 的 Future 是真 bug 温床（本项目出过异常逃逸的问题）
     unawaited_futures: error

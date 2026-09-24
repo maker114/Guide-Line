@@ -102,11 +102,13 @@ lcov.info
 *.orig
 *.rej
 
-# ---------- Node / 云函数 ----------
+# ---------- Node ----------
+# 云函数已随电脑端归档工程一起移除（见 CHANGELOG），下面几条留着以防将来再加 Node 工具
 node_modules/
 .npm/
-functions_dist/
-# 云函数打包产物（由 cloudfunctions/tools/pack.js 生成，不入库）
+
+# ---------- 发布产物 ----------
+# dist/ 放构建出来的 APK 发行包（如 dist/guideline-1.1.0.apk），不入库
 dist/
 
 # ---------- 本地工具链（不入库）----------
