@@ -8,6 +8,7 @@ import '../../core/models/inspiration.dart';
 import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
+import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
 import 'merge_editor_page.dart';
 
@@ -29,6 +30,13 @@ class InspirationTabState extends State<InspirationTab> {
   final FocusNode _focus = FocusNode();
   bool _onlySelectedProject = false;
   String? _selectedProjectId;
+
+  /// 多选模式（灵感整理第 6 条）：长按任一条进入，之后点条目标即选中。
+  bool _selecting = false;
+  final Set<String> _selectedIds = <String>{};
+
+  /// 正在就地改正文的那一条
+  String? _editingId;
 
   @override
   void dispose() {
@@ -52,6 +60,28 @@ class InspirationTabState extends State<InspirationTab> {
     await SystemChannels.textInput.invokeMethod<void>('TextInput.show');
   }
 
+  void _enterSelection(String id) {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..add(id);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = widget.app.ws;
@@ -60,39 +90,15 @@ class InspirationTabState extends State<InspirationTab> {
         ? all.where((i) => i.projectId == _selectedProjectId).toList(growable: false)
         : all;
 
+    // 选中项可能已被别人改动（例如在别处合并掉了），每次构建都清一遍幽灵选中
+    final visibleIds = list.map((i) => i.id).toSet();
+    _selectedIds.removeWhere((id) => !visibleIds.contains(id));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: Stack(
-            children: <Widget>[
-              TextField(
-                controller: _capture,
-                focusNode: _focus,
-                minLines: 3,
-                maxLines: 8,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  hintText: '想到什么就先扔进来…',
-                  border: OutlineInputBorder(),
-                  // 给右下角的发送键留位置，别让文字钻到按钮底下
-                  contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 46),
-                ),
-              ),
-              Positioned(
-                right: 4,
-                bottom: 4,
-                child: IconButton.filledTonal(
-                  tooltip: '保存',
-                  icon: const Icon(Icons.send),
-                  onPressed: _save,
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (_selectedProjectId != null)
+        if (_selecting) _buildSelectionBar(context) else _buildCaptureArea(),
+        if (!_selecting && _selectedProjectId != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
@@ -117,7 +123,16 @@ class InspirationTabState extends State<InspirationTab> {
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
           child: Row(
             children: <Widget>[
-              Text('未处理 ${all.length} 条', style: Theme.of(context).textTheme.labelLarge),
+              Text(
+                _selecting ? '已选 ${_selectedIds.length} 条' : '未处理 ${all.length} 条',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const Spacer(),
+              if (!_selecting && list.isNotEmpty)
+                TextButton(
+                  onPressed: () => _enterSelection(list.first.id),
+                  child: const Text('多选'),
+                ),
             ],
           ),
         ),
@@ -136,6 +151,13 @@ class InspirationTabState extends State<InspirationTab> {
                   itemBuilder: (context, index) => _InspirationTile(
                     app: widget.app,
                     inspiration: list[index],
+                    selecting: _selecting,
+                    selected: _selectedIds.contains(list[index].id),
+                    editing: _editingId == list[index].id,
+                    onEditClosed: () => setState(() => _editingId = null),
+                    onStartEdit: () => setState(() => _editingId = list[index].id),
+                    onLongPress: () => _enterSelection(list[index].id),
+                    onToggleSelect: () => _toggleSelection(list[index].id),
                     onFilterProject: (projectId) => setState(() {
                       _selectedProjectId = projectId;
                       _onlySelectedProject = true;
@@ -145,6 +167,130 @@ class InspirationTabState extends State<InspirationTab> {
         ),
       ],
     );
+  }
+
+  /// 速记书写区。多行，所以形状走卡片圆角而不是胶囊（《界面规范》§4）。
+  Widget _buildCaptureArea() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+      child: Stack(
+        children: <Widget>[
+          TextField(
+            controller: _capture,
+            focusNode: _focus,
+            minLines: 3,
+            maxLines: 8,
+            textInputAction: TextInputAction.newline,
+            decoration: const InputDecoration(
+              hintText: '想到什么就先扔进来…',
+              border: OutlineInputBorder(),
+              // 给右下角的发送键留位置，别让文字钻到按钮底下
+              contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 46),
+            ),
+          ),
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: IconButton.filledTonal(
+              tooltip: '保存',
+              icon: const Icon(Icons.send),
+              onPressed: _save,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 多选时的批量动作条。
+  Widget _buildSelectionBar(BuildContext context) {
+    final count = _selectedIds.length;
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+        child: Row(
+          children: <Widget>[
+            IconButton(
+              tooltip: '退出多选',
+              icon: const Icon(Icons.close),
+              onPressed: _exitSelection,
+            ),
+            Text('已选 $count 条', style: Theme.of(context).textTheme.labelLarge),
+            const Spacer(),
+            IconButton(
+              tooltip: '分配到项目…',
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: count == 0 ? null : () => _batchAssign(context),
+            ),
+            IconButton(
+              tooltip: '丢弃',
+              icon: const Icon(Icons.visibility_off_outlined),
+              onPressed: count == 0 ? null : () => _batchDiscard(context),
+            ),
+            IconButton(
+              tooltip: '删除',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: count == 0 ? null : () => _batchDelete(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _batchAssign(BuildContext context) async {
+    final picked = await pickProject(
+      context,
+      widget.app,
+      title: '分配到项目',
+      allowNone: true,
+      noneLabel: '（解除分配）',
+    );
+    if (picked == null || !context.mounted) return;
+    final projectId = picked == pickNone ? null : picked;
+    final ids = _selectedIds.toList(growable: false);
+    final error = widget.app.run(() => widget.app.ws.assignInspirations(ids, projectId));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) showToast(context, '已分配 ${ids.length} 条');
+    _exitSelection();
+  }
+
+  Future<void> _batchDiscard(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    final error = widget.app.run(() => widget.app.ws.discardInspirations(ids));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) {
+      showToast(context, '已丢弃 ${ids.length} 条，可在归档区「已丢弃」找回');
+    }
+    _exitSelection();
+  }
+
+  Future<void> _batchDelete(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    final ok = await confirmAction(
+      context,
+      title: '删除 ${ids.length} 条灵感',
+      // 灵感是扁平实体，**不进回收站**（回收站只装项目 / 事件 / 任务），
+      // 所以这里不能写"可恢复" —— 删除就是删除。
+      message: '删除后无法在应用内找回，请确认。',
+      confirmLabel: '删除',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+    final error = widget.app.run(() => widget.app.ws.deleteInspirations(ids));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) showToast(context, '已删除 ${ids.length} 条');
+    _exitSelection();
   }
 
   void _save() {
@@ -167,11 +313,29 @@ class _InspirationTile extends StatelessWidget {
     required this.app,
     required this.inspiration,
     required this.onFilterProject,
+    this.selecting = false,
+    this.selected = false,
+    this.editing = false,
+    this.onStartEdit,
+    this.onEditClosed,
+    this.onLongPress,
+    this.onToggleSelect,
   });
 
   final AppController app;
   final Inspiration inspiration;
   final ValueChanged<String> onFilterProject;
+
+  /// 多选模式：整条变成"勾选行"，点它只切换选中
+  final bool selecting;
+  final bool selected;
+
+  /// 正在就地改正文
+  final bool editing;
+  final VoidCallback? onStartEdit;
+  final VoidCallback? onEditClosed;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onToggleSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -179,8 +343,36 @@ class _InspirationTile extends StatelessWidget {
     final theme = Theme.of(context);
     final project = inspiration.projectId == null ? null : ws.findProject(inspiration.projectId!);
 
+    if (editing) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+        child: InlineTextField(
+          value: inspiration.text,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 4,
+          hint: '灵感内容',
+          textStyle: theme.textTheme.bodyMedium,
+          onSubmitted: (text) =>
+              app.run(() => app.ws.updateInspirationText(inspiration.id, text)),
+          onEditClosed: onEditClosed,
+        ),
+      );
+    }
+
     return ListTile(
-      title: Text(inspiration.text),
+      // 多选时用勾选框替掉原来的项目图标，位置不变、不跳
+      leading: selecting
+          ? Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelect?.call(),
+            )
+          : null,
+      title: Text(
+        inspiration.text,
+        maxLines: 4,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Row(
         children: <Widget>[
           Icon(
@@ -202,12 +394,17 @@ class _InspirationTile extends StatelessWidget {
           Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
         ],
       ),
-      trailing: IconButton(
-        tooltip: '更多',
-        icon: const Icon(Icons.more_vert),
-        onPressed: () => _showActions(context),
-      ),
-      onTap: () => _showActions(context),
+      selected: selecting && selected,
+      trailing: selecting
+          ? null
+          : IconButton(
+              tooltip: '更多',
+              icon: const Icon(Icons.more_vert),
+              onPressed: () => _showActions(context),
+            ),
+      onTap: selecting ? () => onToggleSelect?.call() : () => _showActions(context),
+      // 长按进入多选；已经在多选里就直接切换（与系统相册的习惯一致）
+      onLongPress: selecting ? () => onToggleSelect?.call() : onLongPress,
     );
   }
 
@@ -220,6 +417,14 @@ class _InspirationTile extends StatelessWidget {
         child: ListView(
           shrinkWrap: true,
           children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('编辑内容'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onStartEdit?.call();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.drive_file_move_outline),
               title: const Text('分配到项目…'),
@@ -254,6 +459,14 @@ class _InspirationTile extends StatelessWidget {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.checklist),
+              title: const Text('多选…'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onLongPress?.call();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.delete_outline),
               title: const Text('删除'),
               onTap: () async {
@@ -261,7 +474,7 @@ class _InspirationTile extends StatelessWidget {
                 final ok = await confirmAction(
                   context,
                   title: '删除灵感',
-                  message: '删除后可在「更多 → 归档区 → 回收站」恢复。',
+                  message: '删除后无法在应用内找回，请确认。',
                   confirmLabel: '删除',
                   danger: true,
                 );

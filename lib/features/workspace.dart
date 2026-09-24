@@ -426,6 +426,91 @@ class Workspace {
     persist();
   }
 
+  /// 改灵感正文（灵感整理第 2 条）。
+  ///
+  /// 空内容一律拒绝并保持原值 —— 与界面层的"必填项被清空时不提交"是同一条约定，
+  /// 这里再挡一次，免得别的调用点绕过去把灵感清成空串。
+  void updateInspirationText(String id, String text) {
+    final inspiration = findInspiration(id);
+    if (inspiration == null) throw const RuleViolation('灵感不存在');
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('灵感内容不能为空');
+    if (trimmed == inspiration.text) return; // 没变就不写盘
+    _upsert(
+      DocName.inspirations,
+      inspiration.copyWith(text: trimmed, updatedAt: Ids.nowMillis()),
+    );
+    persist();
+  }
+
+  /// 把一条灵感**原封不动**追加到项目「实现」的末尾（灵感整理第 7 条）。
+  ///
+  /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
+  /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
+  static String appendToImplementation(String implementation, String inspirationText) {
+    final base = implementation.trimRight();
+    final addition = inspirationText.trim();
+    if (addition.isEmpty) return base;
+    if (base.isEmpty) return addition;
+    return '$base\n$addition';
+  }
+
+  /// 批量分配（`projectId = null` 表示解除分配）。
+  ///
+  /// 规则与单条 [assignInspiration] 一致：已合并的不能改归属。
+  /// **先整体校验再落盘**，失败时一条都不动 —— 逐条调用会让每次 `persist()`
+  /// 都重写整份文件并轮转备份，批量场景下既慢又危险。
+  void assignInspirations(Iterable<String> ids, String? projectId) {
+    final list = ids.toList(growable: false);
+    if (list.isEmpty) return;
+
+    final targets = <Inspiration>[];
+    for (final id in list) {
+      final inspiration = findInspiration(id);
+      if (inspiration == null) throw const RuleViolation('灵感不存在');
+      if (inspiration.isMerged) throw const RuleViolation('已合并的灵感不能改归属，请先撤销合并');
+      targets.add(inspiration);
+    }
+    if (projectId != null) {
+      final project = findProject(projectId);
+      if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
+    }
+
+    final now = Ids.nowMillis();
+    for (final inspiration in targets) {
+      _upsert(
+        DocName.inspirations,
+        inspiration.copyWith(projectId: projectId, updatedAt: now),
+      );
+    }
+    persist();
+  }
+
+  /// 批量丢弃。
+  void discardInspirations(Iterable<String> ids) {
+    final now = Ids.nowMillis();
+    for (final id in ids) {
+      final inspiration = findInspiration(id);
+      if (inspiration == null) continue;
+      _upsert(
+        DocName.inspirations,
+        inspiration.copyWith(status: InspirationStatus.discarded, updatedAt: now),
+      );
+    }
+    persist();
+  }
+
+  /// 批量删除（墓碑，可从回收站恢复）。
+  void deleteInspirations(Iterable<String> ids) {
+    final now = Ids.nowMillis();
+    for (final id in ids) {
+      final inspiration = findInspiration(id);
+      if (inspiration == null) continue;
+      _upsert(DocName.inspirations, inspiration.copyWith(deleted: true, updatedAt: now));
+    }
+    persist();
+  }
+
   void discardInspiration(String id) {
     final inspiration = findInspiration(id);
     if (inspiration == null) throw const RuleViolation('灵感不存在');

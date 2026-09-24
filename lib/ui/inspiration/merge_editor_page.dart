@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../../features/workspace.dart';
 
 /// 合并编辑器（**手机端形态**）。
 ///
@@ -48,7 +49,20 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Text('项目的「实现」内容（可编辑）', style: theme.textTheme.labelLarge),
+            child: Row(
+              children: <Widget>[
+                Text('项目的「实现」内容（可编辑）', style: theme.textTheme.labelLarge),
+                const Spacer(),
+                // 「一键合并」：把灵感原文**原封不动**作为新的一行贴到末尾（灵感整理第 7 条）。
+                // 只改编辑框、不直接写盘 —— 用户还能在保存前再调一下，
+                // 与这个页面"编辑完再 pop 出去保存"的语义保持一致。
+                TextButton.icon(
+                  onPressed: _appendOriginal,
+                  icon: const Icon(Icons.playlist_add, size: 18),
+                  label: const Text('追加原文'),
+                ),
+              ],
+            ),
           ),
           Expanded(
             child: Padding(
@@ -62,7 +76,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
                 keyboardType: TextInputType.multiline,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
-                  hintText: '把下面这条灵感的内容整合进来（不会自动追加）',
+                  hintText: '整合一下这条灵感，或直接点右上角「追加原文」',
                 ),
               ),
             ),
@@ -83,6 +97,16 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
         ],
       ),
     );
+  }
+
+  /// 追加原文：不改写、不润色，就是"原文成为新的一行"。
+  void _appendOriginal() {
+    final next = Workspace.appendToImplementation(
+      _implementation.text,
+      widget.inspiration.text,
+    );
+    _implementation.text = next;
+    _implementation.selection = TextSelection.collapsed(offset: next.length);
   }
 }
 

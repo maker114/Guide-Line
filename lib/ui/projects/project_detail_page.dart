@@ -8,6 +8,7 @@ import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
+import '../inspiration/merge_editor_page.dart';
 import 'project_actions.dart';
 
 /// 项目详情：**目的 / 实现 / 日期 / 三态**，加子项目与已分配灵感。
@@ -114,7 +115,11 @@ class ProjectDetailPage extends StatelessWidget {
                     app.run(() => ws.updateProject(project.id, implementation: value)),
               ),
               _ChildrenField(app: app, project: project, children: children),
-              _InspirationsField(inspirations: inspirations),
+              _InspirationsField(
+                app: app,
+                project: project,
+                inspirations: inspirations,
+              ),
             ],
           ),
         );
@@ -320,8 +325,14 @@ class _ChildrenField extends StatelessWidget {
 }
 
 class _InspirationsField extends StatelessWidget {
-  const _InspirationsField({required this.inspirations});
+  const _InspirationsField({
+    required this.app,
+    required this.project,
+    required this.inspirations,
+  });
 
+  final AppController app;
+  final Project project;
   final List<Inspiration> inspirations;
 
   @override
@@ -340,22 +351,49 @@ class _InspirationsField extends StatelessWidget {
             child: Text('这个项目下没有待处理灵感', style: theme.textTheme.bodySmall),
           )
         else ...<Widget>[
+          // 点一条**直接进合并编辑器**（灵感整理第 9 条）。
+          // 原来这里是只读列表，还让用户"去灵感页合并"——入口绕了一圈。
           for (final inspiration in inspirations)
             ListTile(
               dense: true,
               leading: const Icon(Icons.lightbulb_outline, size: 18),
               title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),
               subtitle: Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
+              trailing: const Icon(Icons.merge_type, size: 18),
+              onTap: () => _merge(context, inspiration),
             ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Text(
-              '去「灵感」页可以把它合并进上面的「实现」',
+              '点一条即可把它合并进上面的「实现」',
               style: theme.textTheme.bodySmall,
             ),
           ),
         ],
       ],
     );
+  }
+
+  /// 与灵感页走的是同一个 `MergeEditorPage`，只是入口在项目侧。
+  Future<void> _merge(BuildContext context, Inspiration inspiration) async {
+    final merged = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => MergeEditorPage(project: project, inspiration: inspiration),
+      ),
+    );
+    if (merged == null || !context.mounted) return;
+
+    final error = app.run(() => app.ws.mergeInspiration(
+          inspirationId: inspiration.id,
+          projectId: project.id,
+          newImplementation: merged,
+        ));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) {
+      showToast(context, '已合并进「${project.title}」，原文可在归档区「已合并」找回');
+    }
   }
 }

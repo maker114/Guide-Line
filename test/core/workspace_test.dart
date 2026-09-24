@@ -216,6 +216,161 @@ void main() {
     });
   });
 
+  group('灵感：改正文 / 一键追加 / 批量（灵感整理第 2、6、7 条）', () {
+    test('改正文：改得掉、能落盘读回', () {
+      final inspiration = ws.captureInspiration('原来的内容');
+      ws.updateInspirationText(inspiration.id, '改过的内容');
+
+      expect(ws.findInspiration(inspiration.id)!.text, '改过的内容');
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.findInspiration(inspiration.id)!.text, '改过的内容');
+    });
+
+    test('改正文：前后空格被去掉，空内容一律拒绝且保持原值', () {
+      final inspiration = ws.captureInspiration('原文');
+      ws.updateInspirationText(inspiration.id, '  带空格  ');
+      expect(ws.findInspiration(inspiration.id)!.text, '带空格');
+
+      for (final bad in <String>['', '   ', '\n\t ']) {
+        expect(
+          () => ws.updateInspirationText(inspiration.id, bad),
+          throwsA(isA<RuleViolation>()),
+          reason: '空内容不能把灵感清没',
+        );
+      }
+      expect(ws.findInspiration(inspiration.id)!.text, '带空格', reason: '被拒绝后必须保持原值');
+    });
+
+    test('一键追加：原文原封不动作为新的一行接到实现末尾', () {
+      expect(
+        Workspace.appendToImplementation('一\n二', '三'),
+        '一\n二\n三',
+        reason: '非空实现先补一个换行',
+      );
+      expect(Workspace.appendToImplementation('', '三'), '三', reason: '空实现直接放');
+      expect(
+        Workspace.appendToImplementation('一\n\n', '三'),
+        '一\n三',
+        reason: '末尾多余空行要被收掉，不然会越接越散',
+      );
+      expect(Workspace.appendToImplementation('一', '  三  '), '一\n三');
+      expect(Workspace.appendToImplementation('一', '   '), '一', reason: '空灵感什么也不加');
+      // 关键：**不做任何润色或改写**，标点与换行都按原样
+      const original = '带 - 破折号，还有「引号」\n第二行';
+      expect(Workspace.appendToImplementation('', original), original);
+    });
+
+    test('一键追加走完整链路：合并后项目正文含原文，灵感可撤销', () {
+      final project = ws.createProject(title: '目标项目');
+      final first = ws.captureInspiration('第一条灵感');
+      ws.mergeInspiration(
+        inspirationId: first.id,
+        projectId: project.id,
+        newImplementation: Workspace.appendToImplementation(
+          ws.findProject(project.id)!.implementation,
+          ws.findInspiration(first.id)!.text,
+        ),
+      );
+      final second = ws.captureInspiration('第二条灵感');
+      ws.mergeInspiration(
+        inspirationId: second.id,
+        projectId: project.id,
+        newImplementation: Workspace.appendToImplementation(
+          ws.findProject(project.id)!.implementation,
+          ws.findInspiration(second.id)!.text,
+        ),
+      );
+
+      final implementation = ws.findProject(project.id)!.implementation;
+      expect(implementation, '第一条灵感\n第二条灵感', reason: '两条各占一行、顺序是合并顺序');
+      expect(ws.inspirationInbox, isEmpty);
+      expect(ws.archiveZone.mergedInspirations.length, 2);
+
+      ws.undoMerge(second.id);
+      expect(ws.findInspiration(second.id)!.isPending, isTrue);
+      expect(
+        ws.findProject(project.id)!.implementation,
+        '第一条灵感\n第二条灵感',
+        reason: '撤销合并只恢复灵感，不回滚正文（ADR-057）',
+      );
+    });
+
+    test('批量分配：一次落盘，全部生效', () {
+      final project = ws.createProject(title: '项目 A');
+      final ids = <String>[
+        ws.captureInspiration('一').id,
+        ws.captureInspiration('二').id,
+        ws.captureInspiration('三').id,
+      ];
+
+      ws.assignInspirations(ids, project.id);
+      for (final id in ids) {
+        expect(ws.findInspiration(id)!.projectId, project.id);
+      }
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(
+        reloaded.liveInspirations.where((i) => i.projectId == project.id).length,
+        3,
+        reason: '批量结果要真的落盘',
+      );
+    });
+
+    test('批量分配：其中一条已合并 → 整体拒绝，一条都不动', () {
+      final project = ws.createProject(title: '项目 A');
+      final ok = ws.captureInspiration('能分配的');
+      final merged = ws.captureInspiration('已合并的');
+      ws.mergeInspiration(
+        inspirationId: merged.id,
+        projectId: project.id,
+        newImplementation: '已合并的',
+      );
+
+      expect(
+        () => ws.assignInspirations(<String>[ok.id, merged.id], project.id),
+        throwsA(isA<RuleViolation>()),
+      );
+      expect(
+        ws.findInspiration(ok.id)!.projectId,
+        isNull,
+        reason: '批量要么全成、要么全不动，不能留下半截状态',
+      );
+    });
+
+    test('批量分配空列表是安全的空操作', () {
+      expect(() => ws.assignInspirations(const <String>[], null), returnsNormally);
+    });
+
+    test('批量丢弃 / 批量删除：各进各的状态', () {
+      final ids = <String>[
+        ws.captureInspiration('丢弃一').id,
+        ws.captureInspiration('丢弃二').id,
+      ];
+      ws.discardInspirations(ids);
+      expect(ws.inspirationInbox, isEmpty);
+      expect(ws.archiveZone.discardedInspirations.length, 2);
+      expect(ws.archiveZone.discardedInspirations.every((i) => !i.deleted), isTrue);
+
+      final deleted = <String>[
+        ws.captureInspiration('删一').id,
+        ws.captureInspiration('删二').id,
+      ];
+      ws.deleteInspirations(deleted);
+      expect(ws.inspirationInbox.length, 0);
+      // 注意：**回收站只装项目 / 事件 / 任务**（三种带层级的节点）。
+      // 灵感是扁平实体，删除就是立墓碑、不再出现在任何分区里 ——
+      // 所以这里断言的是"真的置了墓碑"，而不是"进了回收站"。
+      for (final id in deleted) {
+        expect(ws.findInspiration(id)!.deleted, isTrue);
+      }
+      expect(
+        ws.liveInspirations.where((i) => deleted.contains(i.id)),
+        isEmpty,
+        reason: '删掉的灵感不能还留在实时列表里',
+      );
+      expect(ws.archiveZone.trashRoots, isEmpty, reason: '灵感不进回收站，这是既有约定');
+    });
+  });
+
   group('删除项目的跨文档影响面（4.5 / ADR-056）', () {
     test('pending 灵感被删、merged 灵感回退为未分配，且一次落盘同时生效', () {
       final project = ws.createProject(title: '项目 A');
