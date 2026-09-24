@@ -11,6 +11,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/task_status_button.dart';
+import '../theme/shape_tokens.dart';
 import 'task_actions.dart';
 import 'task_flow_layout.dart';
 
@@ -570,9 +571,9 @@ class _TaskBox extends StatelessWidget {
       margin: EdgeInsets.zero,
       elevation: 0,
       color: theme.colorScheme.surfaceContainerLow,
-      // 主任务框描一圈主题色：与框内那些"没有描边"的子任务行区分开
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+      // 主任务框描一圈主题色：与框内那些"没有描边"的子任务行区分开。
+      // 形状取 `shape_tokens` 的卡片档，不再就地写 `circular(12)`（《界面规范》§2）。
+      shape: AppShapes.card.copyWith(
         side: BorderSide(
           color: accent,
           width: isDone && accentOverride == null ? 1 : 1.4,

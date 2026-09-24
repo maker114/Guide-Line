@@ -183,6 +183,88 @@ void main() {
     });
   });
 
+  group('删除备份', () {
+    test('多份备份时，删掉指定的那一份，其余留着', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.save(storeWith('v2'), nowMillis: day + 1);
+      storage.save(storeWith('v3'), nowMillis: day + 2);
+
+      final rolling = storage
+          .listBackups()
+          .where((b) => b.kind == BackupKind.rolling)
+          .toList(growable: false);
+      expect(rolling.length, greaterThanOrEqualTo(2), reason: '先得有得删');
+
+      final victim = rolling.first;
+      expect(storage.deleteBackup(victim.path), isNull, reason: '返回 null 表示删成功');
+      expect(File(victim.path).existsSync(), isFalse, reason: '文件本身要没了');
+
+      final after = storage.listBackups();
+      expect(after.any((b) => b.path == victim.path), isFalse, reason: '列表里也不该再有');
+      expect(after.length, greaterThan(0), reason: '其余备份必须还在');
+    });
+
+    test('只剩一份时拒绝删除（不把安全网清空）', () {
+      // 首次保存只留日快照；再存一次才会轮转出滚动备份
+      storage.save(storeWith('第一版'), nowMillis: day);
+      storage.save(storeWith('第二版'), nowMillis: day + 1);
+
+      final rolling = storage
+          .listBackups()
+          .where((b) => b.kind == BackupKind.rolling)
+          .toList(growable: false);
+      expect(rolling.length, 1);
+      // 先把滚动备份删掉，剩下唯一的一份日快照
+      expect(storage.deleteBackup(rolling.single.path), isNull);
+
+      final only = storage.listBackups().single;
+      expect(only.kind, BackupKind.daily, reason: '剩下的应该是日快照');
+
+      final error = storage.deleteBackup(only.path);
+      expect(error, isNotNull, reason: '要给出拒绝原因');
+      expect(error, contains('至少保留一份'));
+      expect(File(only.path).existsSync(), isTrue, reason: '拒绝之后文件必须原样在');
+      expect(storage.listBackups().length, 1);
+    });
+
+    test('只认列出来的备份：主文件 / 偏好文件 / 随便一个路径都删不动', () {
+      storage.save(storeWith('数据'), nowMillis: day);
+      storage.save(storeWith('数据二'), nowMillis: day + 1);
+      final storeFile = storage.paths.storeFile;
+      final prefsFile = storage.paths.prefsFile;
+      final before = storage.listBackups().length;
+      expect(before, greaterThanOrEqualTo(2), reason: '这一例要验的是"不是备份"，不是"最后一份"');
+
+      for (final path in <String>[
+        storeFile.path,
+        prefsFile.path,
+        '${dir.path}${Platform.pathSeparator}根本没有这个文件.json',
+      ]) {
+        expect(storage.deleteBackup(path), isNotNull, reason: '$path 不该被当成备份删掉');
+      }
+
+      expect(File(storeFile.path).existsSync(), isTrue, reason: '主文件必须毫发无损');
+      expect(storage.listBackups().length, before, reason: '真正的备份也没被动过');
+    });
+
+    test('删掉一份之后仍然能正常保存与恢复（不会把轮转搞乱）', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.save(storeWith('v2'), nowMillis: day + 1);
+      storage.save(storeWith('v3'), nowMillis: day + 2);
+
+      final victim = storage
+          .listBackups()
+          .firstWhere((b) => b.kind == BackupKind.rolling);
+      expect(storage.deleteBackup(victim.path), isNull);
+
+      // 删完之后再存一次：轮转照常，主文件仍可读
+      storage.save(storeWith('v4'), nowMillis: day + 3);
+      final report = storage.load();
+      expect(report.store.documentOf(DocName.projects).projectItems.single.title, 'v4');
+      expect(victim.path == storage.paths.storeFile.path, isFalse);
+    });
+  });
+
   group('损坏与恢复', () {
     test('主文件损坏 → 隔离现场 + 从备份自动恢复', () {
       storage.save(storeWith('完好版本'), nowMillis: day);

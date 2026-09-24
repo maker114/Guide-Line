@@ -205,6 +205,15 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 删掉某一份备份；返回 `null` 表示删掉了，否则是拒绝原因。
+  ///
+  /// 安全线（至少留一份、只认自己列的备份）在存储层，这里只负责转发与刷新。
+  String? deleteBackup(String path) {
+    final error = storage.deleteBackup(path);
+    if (error == null) notifyListeners();
+    return error;
+  }
+
   // ------------------------------------------------------------ 导出 / 导入
 
   /// 导出整份数据并交给系统分享面板。

@@ -1,5 +1,22 @@
 import 'package:flutter/material.dart';
 
+import '../theme/shape_tokens.dart';
+
+/// 输入框的形状：**单行用胶囊，多行用卡片圆角**（《界面规范》§4）。
+///
+/// 多行书写区如果也拉成胶囊，会得到两个超大的半圆端，看着更像药丸而不是书写区；
+/// 层级规则不变（输入仍是"能点的"），只是按高度换一档更合适的形状。
+OutlineInputBorder inputBorderForLines(int maxLines) {
+  if (maxLines > 1) {
+    return OutlineInputBorder(
+      borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+    );
+  }
+  return const OutlineInputBorder(
+    borderRadius: BorderRadius.all(Radius.circular(AppShapes.pillRadius)),
+  );
+}
+
 /// 页面内直接编辑（**不弹对话框**）。
 ///
 /// 用法是"点一下就变成输入框"：读的时候只显示文字（空值显示浅色提示），
@@ -125,10 +142,10 @@ class _InlineTextFieldState extends State<InlineTextField> {
           textInputAction:
               widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
           style: widget.textStyle,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             isDense: true,
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            border: inputBorderForLines(widget.maxLines),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
           onSubmitted: widget.maxLines > 1 ? null : (_) => _commit(),
         ),
@@ -249,7 +266,7 @@ class _InlineComposerState extends State<InlineComposer> {
               decoration: InputDecoration(
                 hintText: widget.hint,
                 isDense: true,
-                border: const OutlineInputBorder(),
+                border: inputBorderForLines(widget.maxLines),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               ),
               onSubmitted: widget.maxLines > 1 ? null : (_) => _submit(),

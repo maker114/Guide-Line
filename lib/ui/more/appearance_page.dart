@@ -8,6 +8,7 @@ import '../common/dialogs.dart';
 import '../common/section_header.dart';
 import '../theme/app_theme.dart';
 import '../theme/palette.dart';
+import '../theme/shape_tokens.dart';
 
 /// 外观：主题配色 + 背景图（背景图是**实验性**的）。
 class AppearancePage extends StatefulWidget {
@@ -82,7 +83,7 @@ class _AppearancePageState extends State<AppearancePage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppShapes.nestedRadius),
                     child: AspectRatio(
                       aspectRatio: 16 / 9,
                       child: Image.memory(

@@ -66,9 +66,22 @@ class BackupsPage extends StatelessWidget {
                       '${formatTimestamp(entry.modifiedAt)} · ${_formatBytes(entry.sizeBytes)}',
                       style: theme.textTheme.labelSmall,
                     ),
-                    trailing: TextButton(
-                      onPressed: () => _restore(context, entry),
-                      child: const Text('恢复'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        TextButton(
+                          onPressed: () => _restore(context, entry),
+                          child: const Text('恢复'),
+                        ),
+                        // 删除只对**滚动备份**开放：日快照是"某一天的留档"，
+                        // 删掉就再也拿不回那天的样子了，交给自动裁剪（保留 7 天）即可。
+                        if (entry.kind == BackupKind.rolling)
+                          IconButton(
+                            tooltip: '删除这份备份',
+                            icon: const Icon(Icons.delete_outline, size: 20),
+                            onPressed: () => _delete(context, entry),
+                          ),
+                      ],
                     ),
                   ),
             ],
@@ -106,6 +119,25 @@ class BackupsPage extends StatelessWidget {
       return;
     }
     showToast(context, '已恢复到「${entry.label}」');
+  }
+
+  Future<void> _delete(BuildContext context, BackupEntry entry) async {
+    final ok = await confirmAction(
+      context,
+      title: '删除备份',
+      message: '删除「${entry.label}」（${formatTimestamp(entry.modifiedAt)}）。\n'
+          '这一步不可撤销；恢复不到这一份了。至少会保留一份备份。',
+      confirmLabel: '删除',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+    // 允许删到一份不剩是被存储层拒绝的，这里如实把原因显示出来
+    final error = app.deleteBackup(entry.path);
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
+    showToast(context, '已删除「${entry.label}」');
   }
 
   static String _formatBytes(int bytes) {

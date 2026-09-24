@@ -307,6 +307,29 @@ class AppStorage {
     return parsed;
   }
 
+  /// 删掉某一份备份。
+  ///
+  /// 两条安全线，都是刻意的：
+  ///   · **只认自己列的备份**——路径必须出现在 [listBackups] 里。这样即便有人把
+  ///     别处传来的路径塞进来，也删不到主文件、偏好文件或背景图；
+  ///   · **不允许删到一份不剩**——没有云端时本地备份是唯一的安全网，
+  ///     "把备份清空"应该是不可能的操作。返回被拒绝的原因，让界面能如实说明。
+  ///
+  /// 返回 `null` 表示删掉了；否则返回拒绝原因。
+  String? deleteBackup(String backupPath) {
+    final entries = listBackups();
+    final target = entries.where((e) => e.path == backupPath).firstOrNull;
+    if (target == null) {
+      return '这不是一份可删除的备份';
+    }
+    if (entries.length <= 1) {
+      return '至少保留一份备份 —— 没有云端时它是唯一的安全网';
+    }
+    final file = File(backupPath);
+    if (file.existsSync()) file.deleteSync();
+    return null;
+  }
+
   /// 导出目录（供"导出/分享"使用）。
   Directory ensureExportsDir() {
     final dir = paths.exportsDir;

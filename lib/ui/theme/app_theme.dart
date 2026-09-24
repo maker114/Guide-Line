@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/store/ui_prefs.dart';
 import '../common/urgency.dart';
+import 'shape_tokens.dart';
 
 /// 主题预设。
 ///
@@ -86,6 +87,14 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
     extensions: <ThemeExtension<dynamic>>[
       brightness == Brightness.dark ? UrgencyColors.dark : UrgencyColors.light,
     ],
+    // 形状走《界面规范》，能在这里设的就不在控件里各写一遍。
+    // `cardTheme` 的 margin 与 shape 要一起给：只改 shape 不改 margin，
+    // 圆角会被默认外边距吃掉一块，看着不圆。
+    cardTheme: const CardThemeData(margin: EdgeInsets.zero, shape: AppShapes.card),
+    dialogTheme: const DialogThemeData(shape: AppShapes.dialog),
+    bottomSheetTheme: const BottomSheetThemeData(shape: AppShapes.sheet),
+    popupMenuTheme: PopupMenuThemeData(shape: AppShapes.chip),
+    snackBarTheme: SnackBarThemeData(shape: AppShapes.chip),
   );
   if (!prefs.hasBackground) return base;
 
