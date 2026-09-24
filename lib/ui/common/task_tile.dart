@@ -32,7 +32,7 @@ class TaskTile extends StatelessWidget {
     // 已完成 / 已搁置的任务不再"报警"，一律走灰
     final urgency = task.status == NodeStatus.pending ? urgencyOf(task.dueAt) : Urgency.none;
     final urgencyColor = UrgencyColors.ofContext(context).of(urgency);
-    final due = describeDate(task.dueAt);
+    final due = describeDateWithDays(task.dueAt);
     final dueText = due.isEmpty ? '没排期' : due;
     final labelStyle = theme.textTheme.labelSmall;
 

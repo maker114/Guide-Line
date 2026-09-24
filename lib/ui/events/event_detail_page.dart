@@ -82,6 +82,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
     showToast(context, message, error: error);
   }
 
+  /// 这个任务是否还有未处理的直接子任务（决定状态按钮显不显示锁形）。
+  bool _blocked(Task task) {
+    final ws = app.ws;
+    return ws.liveTasks.any(
+      (t) =>
+          t.eventId == task.eventId &&
+          t.parentId == task.id &&
+          !t.archived &&
+          !isTerminal(t.status),
+    );
+  }
+
   // 下面几个是给同文件里的私有子控件用的：`setState` 是 protected，
   // 子控件不能直接调，所以在这里开几个语义明确的入口。
 
@@ -90,19 +102,21 @@ class _EventDetailPageState extends State<EventDetailPage> {
   void endRename() => setState(() => _renamingTaskId = null);
 
   void beginSubtask(String taskId) => setState(() {
-        _subtaskParentId = taskId;
-        _parallelParentId = null;
-      });
+    _subtaskParentId = taskId;
+    _parallelParentId = null;
+  });
 
   void beginParallel(String taskId) => setState(() {
-        _parallelParentId = taskId;
-        _subtaskParentId = null;
-      });
+    _parallelParentId = taskId;
+    _subtaskParentId = null;
+  });
 
   /// 这条任务在走向上有几个后续（**含隐式链**：还没固化时 `nextIds` 是空的，
   /// 但下一个任务已经接在那儿了，所以必须问 `TaskFlow` 而不是问字段）。
-  int successorCountOf(Task task) =>
-      TaskFlow.of(app.ws.allTasks, eventId: eventId).successorsOf(task.id).length;
+  int successorCountOf(Task task) => TaskFlow.of(
+    app.ws.allTasks,
+    eventId: eventId,
+  ).successorsOf(task.id).length;
 
   /// 「接后续任务…」：挑一个已有任务，或者新建一个接上。
   ///
@@ -115,12 +129,17 @@ class _EventDetailPageState extends State<EventDetailPage> {
     // "还没接过"要按**走向**判，不能按 `nextIds` 判：隐式链（还按 order 排）时
     // `nextIds` 整条都是空的，可下一个任务明明已经接在那儿了 —— 列出来让用户点，
     // 点了什么也不会发生，等于骗人。
-    final successors = flow.successorsOf(task.id).map((each) => each.id).toSet();
+    final successors = flow
+        .successorsOf(task.id)
+        .map((each) => each.id)
+        .toSet();
     final candidates = flow.all
-        .where((candidate) =>
-            candidate.id != task.id &&
-            !successors.contains(candidate.id) &&
-            !flow.wouldCreateCycle(fromId: task.id, toId: candidate.id))
+        .where(
+          (candidate) =>
+              candidate.id != task.id &&
+              !successors.contains(candidate.id) &&
+              !flow.wouldCreateCycle(fromId: task.id, toId: candidate.id),
+        )
         .toList(growable: false);
 
     final picked = await showModalBottomSheet<String>(
@@ -187,7 +206,10 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 「断开后续…」：断开某一条后续边（合流处断掉一条就退回单线）。
   Future<void> beginUnlinkNext(Task task) async {
     final ws = app.ws;
-    final successors = TaskFlow.of(ws.allTasks, eventId: eventId).successorsOf(task.id);
+    final successors = TaskFlow.of(
+      ws.allTasks,
+      eventId: eventId,
+    ).successorsOf(task.id);
     if (successors.isEmpty) return;
 
     final picked = await showModalBottomSheet<String>(
@@ -250,7 +272,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
                 onSelected: (value) async {
                   switch (value) {
                     case 'archive':
-                      final error = app.run(() => ws.setEventArchived(eventId, true));
+                      final error = app.run(
+                        () => ws.setEventArchived(eventId, true),
+                      );
                       if (!context.mounted) return;
                       if (error != null) {
                         showToast(context, error, error: true);
@@ -265,8 +289,14 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   }
                 },
                 itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(value: 'archive', child: Text('归档（含任务线）')),
-                  PopupMenuItem<String>(value: 'delete', child: Text('删除（含任务线）')),
+                  PopupMenuItem<String>(
+                    value: 'archive',
+                    child: Text('归档（含任务线）'),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Text('删除（含任务线）'),
+                  ),
                 ],
               ),
             ],
@@ -323,7 +353,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
   Widget _buildFlowRow(BuildContext context, FlowRow row) {
     final theme = Theme.of(context);
     final branchIndex = row.branchIndex;
-    final color = branchIndex == null ? null : _branchColor(theme.colorScheme, branchIndex);
+    final color = branchIndex == null
+        ? null
+        : _branchColor(theme.colorScheme, branchIndex);
 
     if (row.isBranchHeader) {
       return Padding(
@@ -371,14 +403,16 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   Future<void> _deleteEvent(BuildContext context, Event event) async {
-    final taskCount = app.ws.allTasks.where((t) => t.eventId == event.id && !t.deleted).length;
+    final taskCount = app.ws.allTasks
+        .where((t) => t.eventId == event.id && !t.deleted)
+        .length;
     final ok = await confirmAction(
       context,
       title: '删除事件',
       message: taskCount == 0
           ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
           : '「${event.name}」及其整条任务线（$taskCount 个任务）会被一起删除。'
-              '可在「更多 → 归档区 → 回收站」恢复。',
+                '可在「更多 → 归档区 → 回收站」恢复。',
       confirmLabel: '删除',
       danger: true,
     );
@@ -395,7 +429,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
 /// 事件自身：名字（页内可改）+ 三态 + 主线完成情况。
 class _EventHeader extends StatelessWidget {
-  const _EventHeader({required this.host, required this.event, required this.completion});
+  const _EventHeader({
+    required this.host,
+    required this.event,
+    required this.completion,
+  });
 
   final _EventDetailPageState host;
   final Event event;
@@ -417,26 +455,32 @@ class _EventHeader extends StatelessWidget {
               value: event.name,
               hint: '事件名',
               textStyle: theme.textTheme.titleMedium,
-              onSubmitted: (name) => app.run(() => app.ws.updateEvent(event.id, name: name)),
+              onSubmitted: (name) =>
+                  app.run(() => app.ws.updateEvent(event.id, name: name)),
             ),
             const SizedBox(height: 6),
             Text(
               completion.judgedChildCount == 0
                   ? '主线还没有可判定的任务'
                   : '主线 ${completion.judgedChildCount - completion.unfinishedCount}'
-                      '/${completion.judgedChildCount} 已完成'
-                      '${completion.canComplete ? '（可以标记事件完成）' : ''}',
+                        '/${completion.judgedChildCount} 已完成'
+                        '${completion.canComplete ? '（可以标记事件完成）' : ''}',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
             SegmentedButton<NodeStatus>(
               segments: <ButtonSegment<NodeStatus>>[
                 for (final status in NodeStatus.values)
-                  ButtonSegment<NodeStatus>(value: status, label: Text(nodeStatusLabel(status))),
+                  ButtonSegment<NodeStatus>(
+                    value: status,
+                    label: Text(nodeStatusLabel(status)),
+                  ),
               ],
               selected: <NodeStatus>{event.status},
               onSelectionChanged: (selection) {
-                final error = app.run(() => app.ws.setEventStatus(event.id, selection.first));
+                final error = app.run(
+                  () => app.ws.setEventStatus(event.id, selection.first),
+                );
                 if (error != null) showToast(context, error, error: true);
               },
             ),
@@ -500,8 +544,12 @@ class _TaskBox extends StatelessWidget {
     final app = host.app;
     final eventId = host.eventId;
     final children = app.ws.subtasksOf(task.id, eventId: eventId);
-    final subtasks = children.where((c) => c.taskType != TaskType.parallel).toList(growable: false);
-    final parallels = children.where((c) => c.taskType == TaskType.parallel).toList(growable: false);
+    final subtasks = children
+        .where((c) => c.taskType != TaskType.parallel)
+        .toList(growable: false);
+    final parallels = children
+        .where((c) => c.taskType == TaskType.parallel)
+        .toList(growable: false);
     final theme = Theme.of(context);
     final addingSubtask = host._subtaskParentId == task.id;
     final addingParallel = host._parallelParentId == task.id;
@@ -512,7 +560,8 @@ class _TaskBox extends StatelessWidget {
     // 所以这里是就地缩成一行，而不是重新分组。
     final expanded = app.isExpanded(task.id, defaultExpanded: !isDone);
     final hasChildren = subtasks.isNotEmpty || parallels.isNotEmpty;
-    final accent = accentOverride ??
+    final accent =
+        accentOverride ??
         (isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary);
     final badgeText = badge;
     final isJoinBadge = badgeText != null && badgeText.contains('汇合');
@@ -537,6 +586,7 @@ class _TaskBox extends StatelessWidget {
             task: task,
             indent: 0,
             childSummary: _summarize(children),
+            blocked: host._blocked(task),
             collapsible: hasChildren,
             expanded: expanded,
             onToggle: () => app.setExpanded(task.id, expanded: !expanded),
@@ -568,7 +618,12 @@ class _TaskBox extends StatelessWidget {
             ),
           if (expanded)
             for (final subtask in subtasks)
-              _TaskLine(host: host, task: subtask, indent: 1),
+              _TaskLine(
+                host: host,
+                task: subtask,
+                indent: 1,
+                blocked: host._blocked(subtask),
+              ),
           if (expanded && addingSubtask)
             Padding(
               padding: const EdgeInsets.only(left: 20),
@@ -607,9 +662,16 @@ class _TaskBox extends StatelessWidget {
                 children: <Widget>[
                   Row(
                     children: <Widget>[
-                      Icon(Icons.call_split, size: 14, color: theme.colorScheme.outline),
+                      Icon(
+                        Icons.call_split,
+                        size: 14,
+                        color: theme.colorScheme.outline,
+                      ),
                       const SizedBox(width: 4),
-                      Text('并列 ${parallels.length}', style: theme.textTheme.labelSmall),
+                      Text(
+                        '并列 ${parallels.length}',
+                        style: theme.textTheme.labelSmall,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -618,11 +680,19 @@ class _TaskBox extends StatelessWidget {
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        for (var i = 0; i < parallels.length; i += 1) ...<Widget>[
+                        for (
+                          var i = 0;
+                          i < parallels.length;
+                          i += 1
+                        ) ...<Widget>[
                           if (i > 0) const SizedBox(width: 8),
                           SizedBox(
                             width: 220,
-                            child: _TaskBox(host: host, task: parallels[i], compact: true),
+                            child: _TaskBox(
+                              host: host,
+                              task: parallels[i],
+                              compact: true,
+                            ),
                           ),
                         ],
                       ],
@@ -663,7 +733,9 @@ class _CollapsedChildrenHint extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               '已折叠 $count 个下级',
-              style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
             ),
           ],
         ),
@@ -679,6 +751,7 @@ class _TaskLine extends StatelessWidget {
     required this.task,
     required this.indent,
     this.childSummary,
+    this.blocked = false,
     this.collapsible = false,
     this.expanded = true,
     this.onToggle,
@@ -689,6 +762,9 @@ class _TaskLine extends StatelessWidget {
   final int indent;
   final String? childSummary;
 
+  /// 还有未处理的直接子任务 → 状态按钮显示锁形（灵感 14）
+  final bool blocked;
+
   /// 有下级可折叠时才显示展开/收起按钮
   final bool collapsible;
   final bool expanded;
@@ -698,13 +774,19 @@ class _TaskLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = host.app;
     final theme = Theme.of(context);
-    final due = describeDate(task.dueAt);
     final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status == NodeStatus.done;
     final summary = childSummary;
+    // 有下级汇总时，副标题一行要同时放"绝对日期 + 剩余天数"和「下级 x/y」，
+    // 1.6 倍字体下会顶到行尾；这时只留相对日（"7 天后"），信息不丢、宽度减半。
+    final due = summary == null
+        ? describeDateWithDays(task.dueAt)
+        : describeDate(task.dueAt);
 
     // 层级区分：主任务是 titleSmall（更大更重），子任务降到 bodySmall 并缩进
-    final baseStyle = indent > 0 ? theme.textTheme.bodySmall : theme.textTheme.titleSmall;
+    final baseStyle = indent > 0
+        ? theme.textTheme.bodySmall
+        : theme.textTheme.titleSmall;
     final titleStyle = done
         ? baseStyle?.copyWith(
             decoration: TextDecoration.lineThrough,
@@ -720,7 +802,8 @@ class _TaskLine extends StatelessWidget {
           autofocus: true,
           hint: '任务名',
           textStyle: theme.textTheme.bodyMedium,
-          onSubmitted: (title) => app.run(() => app.ws.updateTask(task.id, title: title)),
+          onSubmitted: (title) =>
+              app.run(() => app.ws.updateTask(task.id, title: title)),
           onEditClosed: host.endRename,
         ),
       );
@@ -735,35 +818,54 @@ class _TaskLine extends StatelessWidget {
           ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35)
           : null,
       contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 0),
-      leading: TaskStatusButton(app: app, task: task),
+      leading: TaskStatusButton(app: app, task: task, blocked: blocked),
+      // 子任务行有缩进 + 三道前缀（竖线/箭头/间距）约 23dp 的固定开销，
+      // 1.6 倍字体下标题的"文字本身宽度 + 固定开销"会差出 2dp。
+      // 用 ClipRect 兜住这点像素级溢出：被裁的只有省略号右侧的空白，
+      // 而 `TextOverflow.ellipsis` 保证文字本身仍然完整可读。
       title: Row(
         children: <Widget>[
-          if (indent > 0) ...<Widget>[
-            // 一道短竖线，配合缩进与浅底，把子任务明确"挂"在主任务下面
-            Container(
-              width: 2,
-              height: 14,
-              color: theme.colorScheme.primary.withValues(alpha: 0.4),
+            if (indent > 0) ...<Widget>[
+              // 一道短竖线，配合缩进与浅底，把子任务明确"挂"在主任务下面
+              Container(
+                width: 2,
+                height: 14,
+                color: theme.colorScheme.primary.withValues(alpha: 0.4),
+              ),
+              const SizedBox(width: 5),
+              Icon(
+                Icons.subdirectory_arrow_right,
+                size: 14,
+                color: theme.colorScheme.outline,
+              ),
+              const SizedBox(width: 2),
+            ],
+            Expanded(
+              child: Text(
+                task.title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: titleStyle,
+              ),
             ),
-            const SizedBox(width: 5),
-            Icon(Icons.subdirectory_arrow_right, size: 14, color: theme.colorScheme.outline),
-            const SizedBox(width: 2),
-          ],
-          Expanded(
-            child: Text(
-              task.title,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: titleStyle,
-            ),
-          ),
-          if (task.taskType == TaskType.parallel)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Icon(Icons.call_split, size: 14, color: theme.colorScheme.outline),
-            ),
+            if (task.taskType == TaskType.parallel)
+              Icon(Icons.call_split, size: 14, color: theme.colorScheme.outline),
+            // 展开/收起留在标题行（它只跟"这行有没有下级"有关）
+            if (collapsible)
+              IconButton(
+                tooltip: expanded ? '收起下级' : '展开下级',
+                visualDensity: VisualDensity.compact,
+                iconSize: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                onPressed: onToggle,
+              ),
         ],
       ),
+      // **不能用 SingleChildScrollView 包副标题**：ListTile 量高度时会给
+      // `maxWidth: Infinity`，横向滚动视图在那种约束下会让里面的 RenderParagraph
+      // 拿不到宽度而炸在布局里。用 Flexible + ellipsis，宽度由父级分配，安全。
       subtitle: (due.isEmpty && summary == null)
           ? null
           : Row(
@@ -775,33 +877,67 @@ class _TaskLine extends StatelessWidget {
                     color: overdue ? theme.colorScheme.error : theme.colorScheme.outline,
                   ),
                   const SizedBox(width: 3),
-                  Text(
-                    due,
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: overdue ? theme.colorScheme.error : null),
+                  Flexible(
+                    child: Text(
+                      due,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: overdue ? theme.colorScheme.error : null,
+                      ),
+                    ),
                   ),
                 ],
                 if (due.isNotEmpty && summary != null) const SizedBox(width: 10),
-                if (summary != null) Text(summary, style: theme.textTheme.labelSmall),
+                if (summary != null)
+                  Flexible(
+                    child: Text(
+                      summary,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall,
+                    ),
+                  ),
               ],
             ),
+      // 两个高频动作（设到期日 / 接后续任务）留在 trailing，与「更多」并列。
+      // 它们**不能**放进 title 行：那个 Row 在 1.6 倍字体下会被标题挤到溢出，
+      // 而 ListTile 的 trailing 宽度是从标题的可伸缩空间里扣的，放这里更稳
+      // （`app_smoke_test.dart` 的"深色 + 1.6 倍字体不溢出"用例在守这条）。
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (collapsible)
-            IconButton(
-              tooltip: expanded ? '收起下级' : '展开下级',
-              icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
-              onPressed: onToggle,
-            ),
+          // 压到 30×30 是有意的：默认 48×48 的 icon 按钮三个就把标题挤没了
+          IconButton(
+            tooltip: task.dueAt == null ? '设到期日' : '改到期日',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            icon: Icon(task.dueAt == null ? Icons.event_outlined : Icons.event_busy_outlined),
+            onPressed: () => _run(context, 'due'),
+          ),
+          IconButton(
+            tooltip: '接后续任务…',
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+            icon: const Icon(Icons.timeline),
+            onPressed: () => _run(context, 'linkNext'),
+          ),
           PopupMenuButton<String>(
             tooltip: '更多',
             onSelected: (value) async {
               await _run(context, value);
             },
             itemBuilder: (_) => <PopupMenuEntry<String>>[
-              for (final action in taskActions(task, successorCount: host.successorCountOf(task)))
-                PopupMenuItem<String>(value: action.value, child: Text(action.label)),
+              for (final action in taskActions(
+                task,
+                successorCount: host.successorCountOf(task),
+              ))
+                PopupMenuItem<String>(
+                  value: action.value,
+                  child: Text(action.label),
+                ),
             ],
           ),
         ],
@@ -865,9 +1001,15 @@ class _TaskLine extends StatelessWidget {
           children: <Widget>[
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: Text(task.title, style: Theme.of(sheetContext).textTheme.titleMedium),
+              child: Text(
+                task.title,
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+              ),
             ),
-            for (final action in taskActions(task, successorCount: host.successorCountOf(task)))
+            for (final action in taskActions(
+              task,
+              successorCount: host.successorCountOf(task),
+            ))
               ListTile(
                 leading: Icon(action.icon),
                 title: Text(action.label),
@@ -898,7 +1040,9 @@ class TaskAction {
 List<TaskAction> taskActions(Task task, {int? successorCount}) {
   final actions = <TaskAction>[];
   if (task.taskType != TaskType.subtask) {
-    actions.add(const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right));
+    actions.add(
+      const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right),
+    );
   }
   if (task.taskType == TaskType.standard) {
     actions.add(const TaskAction('par', '新建并列任务', Icons.call_split));
@@ -911,9 +1055,17 @@ List<TaskAction> taskActions(Task task, {int? successorCount}) {
     }
   }
   actions.add(const TaskAction('rename', '重命名', Icons.edit_outlined));
-  actions.add(TaskAction('due', task.dueAt == null ? '设到期日' : '改到期日', Icons.event_outlined));
+  actions.add(
+    TaskAction(
+      'due',
+      task.dueAt == null ? '设到期日' : '改到期日',
+      Icons.event_outlined,
+    ),
+  );
   if (task.dueAt != null) {
-    actions.add(const TaskAction('clearDue', '清除到期日', Icons.event_busy_outlined));
+    actions.add(
+      const TaskAction('clearDue', '清除到期日', Icons.event_busy_outlined),
+    );
   }
   actions.add(const TaskAction('move', '移到其它事件…', Icons.swap_horiz));
   actions.add(

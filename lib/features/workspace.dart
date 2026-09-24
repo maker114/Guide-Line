@@ -149,6 +149,22 @@ class Workspace {
     );
   }
 
+  /// 任务是否**当前不能勾选**（还有未处理的直接子任务）。
+  ///
+  /// 与 [setTaskStatus] 的拒绝条件同源（都看"参与判定的直接子任务"），
+  /// 但刻意**不建 tree**：任务行每帧都会问一次，`taskTree` 是整棵树重建，代价不对。
+  /// 传 [unfinished] 时用调用方已经算好的下级汇总，连筛选都省掉。
+  bool isTaskBlocked(String taskId, {int? unfinished}) {
+    final task = findTask(taskId);
+    if (task == null) return false;
+    if (unfinished != null) return unfinished > 0;
+    return liveTasks.any((t) =>
+        t.eventId == task.eventId &&
+        t.parentId == taskId &&
+        !t.archived &&
+        !isTerminal(t.status));
+  }
+
   /// 到期聚合视图（Q29 / Q41 / Q48）：`due_at` 早于等于 [date] 且未完成、未归档。
   List<Task> tasksDueOnOrBefore(String date) {
     final list = liveTasks
@@ -239,7 +255,6 @@ class Workspace {
       deleted: false,
     );
     _upsert(DocName.projects, project);
-    _touch(<DocName>[DocName.projects]);
     persist();
     return project;
   }
@@ -281,7 +296,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.projects]);
     persist();
   }
 
@@ -315,7 +329,6 @@ class Workspace {
         }
       }
     }
-    _touch(<DocName>[DocName.projects]);
     persist();
   }
 
@@ -331,7 +344,6 @@ class Workspace {
         _upsert(DocName.projects, p.copyWith(archived: archived, updatedAt: now));
       }
     }
-    _touch(<DocName>[DocName.projects]);
     persist();
   }
 
@@ -367,11 +379,6 @@ class Workspace {
       }
     }
 
-    final touched = <DocName>{DocName.projects};
-    if (plan.inspirationIdsToDelete.isNotEmpty || plan.inspirationIdsToUnassign.isNotEmpty) {
-      touched.add(DocName.inspirations);
-    }
-    _touch(touched);
     persist();
     return plan;
   }
@@ -399,22 +406,8 @@ class Workspace {
       deleted: false,
     );
     _upsert(DocName.inspirations, inspiration);
-    _touch(<DocName>[DocName.inspirations]);
     persist();
     return inspiration;
-  }
-
-  void updateInspirationText(String id, String text) {
-    final inspiration = findInspiration(id);
-    if (inspiration == null) throw const RuleViolation('灵感不存在');
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('灵感内容不能为空');
-    _upsert(
-      DocName.inspirations,
-      inspiration.copyWith(text: trimmed, updatedAt: Ids.nowMillis()),
-    );
-    _touch(<DocName>[DocName.inspirations]);
-    persist();
   }
 
   /// 分配到项目（`projectId = null` 表示解除分配）。
@@ -430,7 +423,6 @@ class Workspace {
       DocName.inspirations,
       inspiration.copyWith(projectId: projectId, updatedAt: Ids.nowMillis()),
     );
-    _touch(<DocName>[DocName.inspirations]);
     persist();
   }
 
@@ -441,7 +433,6 @@ class Workspace {
       DocName.inspirations,
       inspiration.copyWith(status: InspirationStatus.discarded, updatedAt: Ids.nowMillis()),
     );
-    _touch(<DocName>[DocName.inspirations]);
     persist();
   }
 
@@ -458,7 +449,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.inspirations]);
     persist();
   }
 
@@ -489,7 +479,6 @@ class Workspace {
         updatedAt: now,
       ),
     );
-    _touch(<DocName>[DocName.projects, DocName.inspirations]);
     persist();
   }
 
@@ -513,7 +502,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.inspirations]);
     persist();
   }
 
@@ -521,7 +509,6 @@ class Workspace {
     final inspiration = findInspiration(id);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
     _upsert(DocName.inspirations, inspiration.copyWith(deleted: true, updatedAt: Ids.nowMillis()));
-    _touch(<DocName>[DocName.inspirations]);
     persist();
   }
 
@@ -543,7 +530,6 @@ class Workspace {
       deleted: false,
     );
     _upsert(DocName.events, event);
-    _touch(<DocName>[DocName.events]);
     persist();
     return event;
   }
@@ -556,7 +542,6 @@ class Workspace {
       DocName.events,
       event.copyWith(name: name?.trim(), archived: archived, updatedAt: Ids.nowMillis()),
     );
-    _touch(<DocName>[DocName.events]);
     persist();
   }
 
@@ -575,7 +560,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.events]);
     persist();
   }
 
@@ -603,9 +587,6 @@ class Workspace {
       }
     }
 
-    final touched = <DocName>{DocName.events};
-    if (ids.isNotEmpty) touched.add(DocName.tasks);
-    _touch(touched);
     persist();
   }
 
@@ -622,9 +603,6 @@ class Workspace {
       if (t != null) _upsert(DocName.tasks, t.copyWith(deleted: true, updatedAt: now));
     }
 
-    final touched = <DocName>{DocName.events};
-    if (taskIds.isNotEmpty) touched.add(DocName.tasks);
-    _touch(touched);
     persist();
     return taskIds;
   }
@@ -685,7 +663,6 @@ class Workspace {
       deleted: false,
     );
     _upsert(DocName.tasks, task);
-    _touch(<DocName>[DocName.tasks]);
 
     // 主线新任务要接进走向里，否则它会变成"没有前驱的孤立入口"，看起来像凭空多一条线。
     // （按 order 成链的模式不用管：顺序本来就由 order 决定。）
@@ -744,7 +721,6 @@ class Workspace {
       changed = true;
     }
     if (changed) {
-      _touch(<DocName>[DocName.tasks]);
       persist();
     }
   }
@@ -785,7 +761,6 @@ class Workspace {
       DocName.tasks,
       task.copyWith(nextIds: List<String>.unmodifiable(unique), updatedAt: Ids.nowMillis()),
     );
-    _touch(<DocName>[DocName.tasks]);
     persist();
   }
 
@@ -829,7 +804,8 @@ class Workspace {
     return out;
   }
 
-  void updateTask(String id, {String? title, Object? dueAt = _unset, TaskType? taskType}) {    final task = findTask(id);
+  void updateTask(String id, {String? title, Object? dueAt = _unset, TaskType? taskType}) {
+    final task = findTask(id);
     if (task == null) throw const RuleViolation('任务不存在');
     if (title != null && title.trim().isEmpty) throw const RuleViolation('任务名不能为空');
     if (taskType != null && taskType != task.taskType) {
@@ -850,7 +826,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.tasks]);
     persist();
   }
 
@@ -873,7 +848,6 @@ class Workspace {
       ),
     );
 
-    final touched = <DocName>{DocName.tasks};
     if (status == NodeStatus.pending) {
       for (final ancestor in taskTree.ancestorsOf(id)) {
         if (ancestor is Task && ancestor.status == NodeStatus.done) {
@@ -889,10 +863,8 @@ class Workspace {
           DocName.events,
           event.copyWith(status: NodeStatus.pending, completedAt: null, updatedAt: now),
         );
-        touched.add(DocName.events);
       }
     }
-    _touch(touched);
     persist();
   }
 
@@ -905,7 +877,6 @@ class Workspace {
       final t = findTask(tid);
       if (t != null) _upsert(DocName.tasks, t.copyWith(archived: archived, updatedAt: now));
     }
-    _touch(<DocName>[DocName.tasks]);
     persist();
   }
 
@@ -918,7 +889,6 @@ class Workspace {
       final t = findTask(tid);
       if (t != null) _upsert(DocName.tasks, t.copyWith(deleted: true, updatedAt: now));
     }
-    _touch(<DocName>[DocName.tasks]);
     persist();
     return ids;
   }
@@ -965,34 +935,6 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
-    _touch(<DocName>[DocName.tasks]);
-    persist();
-  }
-
-  /// 同一父节点下重排（传入期望顺序的 id 列表）。
-  void reorder(DocName doc, String? parentId, List<String> orderedIds) {
-    final now = Ids.nowMillis();
-    var order = orderStep;
-    for (final id in orderedIds) {
-      switch (doc) {
-        case DocName.projects:
-          final project = findProject(id);
-          if (project != null) _upsert(doc, project.copyWith(order: order, updatedAt: now));
-          break;
-        case DocName.tasks:
-          final task = findTask(id);
-          if (task != null) _upsert(doc, task.copyWith(order: order, updatedAt: now));
-          break;
-        case DocName.events:
-          final event = findEvent(id);
-          if (event != null) _upsert(doc, event.copyWith(order: order, updatedAt: now));
-          break;
-        case DocName.inspirations:
-          break;
-      }
-      order += orderStep;
-    }
-    _touch(<DocName>[doc]);
     persist();
   }
 
@@ -1003,7 +945,6 @@ class Workspace {
     for (final id in ids) {
       _upsert(doc, Tombstone(id: id, purgedAt: now));
     }
-    _touch(<DocName>[doc]);
     persist();
   }
 
@@ -1074,8 +1015,6 @@ class Workspace {
     }
 
     if (restored.isNotEmpty) {
-      _touch(<DocName>[doc]);
-      if (doc == DocName.events) _touch(<DocName>[DocName.tasks]);
       persist();
     }
     return restored;
@@ -1193,13 +1132,6 @@ class Workspace {
       items.add(entity);
     }
     _docs[name] = documentOf(name).copyWith(items: items);
-  }
-
-  /// 单机形态下"触碰"不再需要事务记录：整份数据一次原子写入，
-  /// 跨实体变更（例如合并灵感同时改项目与灵感）天然是全有或全无。
-  void _touch(Iterable<DocName> names) {
-    // 保留该调用点是为了让业务代码的语义（"这次改了哪几类集合"）显式可见；
-    // 单文件存储下无需额外处理。
   }
 }
 

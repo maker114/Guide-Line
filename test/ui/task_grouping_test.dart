@@ -64,7 +64,7 @@ void main() {
 
       expect(
         groups.map((g) => g.label).toList(),
-        <String>['已逾期', '一周以后', '没有到期日', '已完成 / 已搁置'],
+        <String>['已逾期', '7 天后', '没有到期日', '已完成 / 已搁置'],
       );
       expect(groups.first.tone, Urgency.overdue);
     });
@@ -76,7 +76,7 @@ void main() {
         task(id: 'z', title: '早一点', dueAt: '2099-05-01'),
       ]);
 
-      final later = groups.firstWhere((g) => g.label == '一周以后');
+      final later = groups.firstWhere((g) => g.label == '7 天后');
       expect(later.tasks.map((t) => t.title), <String>['早一点', '晚一点']);
     });
 

@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/task.dart';
 import '../common/dialogs.dart';
 import '../common/event_picker.dart';
+import '../common/format.dart';
 
 /// 任务的常用动作：**到期 / 移动 / 归档 / 删除**。
 ///
@@ -24,6 +25,9 @@ Future<void> setTaskDueAction(
     initialDate: initial,
     firstDate: DateTime(now.year - 5),
     lastDate: DateTime(now.year + 20),
+    helpText: task.dueAt == null
+        ? '选择到期日'
+        : '当前：${describeDateWithDays(task.dueAt)}',
   );
   if (picked == null || !context.mounted) return;
   final month = picked.month.toString().padLeft(2, '0');

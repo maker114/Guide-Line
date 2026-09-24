@@ -23,7 +23,7 @@ class _DuePageState extends State<DuePage> {
   String get _cutoff {
     switch (_range) {
       case 1:
-        return dateOffset(6); // 今天 + 6 天 = 一周内
+        return dateOffset(6); // 今天 + 6 天 = 7 天内（含今天共 7 个日历天）
       case 2:
         return dateOffset(-1); // 昨天 → 等价于"严格早于今天"
       default:

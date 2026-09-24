@@ -169,7 +169,7 @@ class _DateField extends StatelessWidget {
       leading: const Icon(Icons.event_outlined),
       title: const Text('日期'),
       subtitle: Text(
-        date == null ? '未设置' : '$date（${describeDate(date)}）',
+        date == null ? '未设置' : describeDateWithDays(date),
         style: date != null && isOverdue(date) && project.status != NodeStatus.done
             ? TextStyle(color: Theme.of(context).colorScheme.error)
             : null,
@@ -201,6 +201,7 @@ class _DateField extends StatelessWidget {
       initialDate: initial,
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 20),
+      helpText: project.date == null ? '选择日期' : '当前：${describeDateWithDays(project.date)}',
     );
     if (picked == null || !context.mounted) return;
     final month = picked.month.toString().padLeft(2, '0');

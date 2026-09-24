@@ -4,16 +4,20 @@ import 'package:flutter/material.dart';
 ///
 /// **没有到期日单独算一档**（`none`），因为"没排期"和"还早"是两件不同的事，
 /// 用户要能一眼区分开。
+///
+/// 档位与标签**必须对得上**：标签写「3 天内」就真的是第 1~3 天。
+/// （早期版本判据是 `days <= 2` 而标签写「3 天内」，只覆盖到第 2 天 —— 已修正。）
 enum Urgency {
   overdue,
   today,
-  soon,
-  week,
+  within3,
+  within5,
+  within7,
   later,
   none,
 }
 
-/// 分档阈值：逾期 / 今天 / 3 天内 / 一周内 / 一周以后 / 没有到期日。
+/// 分档阈值：逾期 / 今天 / 3 天内 / 5 天内 / 7 天内 / 7 天后 / 没有到期日。
 Urgency urgencyOf(String? dueAt, {DateTime? now}) {
   if (dueAt == null || dueAt.isEmpty) return Urgency.none;
   final parsed = DateTime.tryParse(dueAt);
@@ -22,8 +26,9 @@ Urgency urgencyOf(String? dueAt, {DateTime? now}) {
   final days = _daysBetween(parsed, now ?? DateTime.now());
   if (days < 0) return Urgency.overdue;
   if (days == 0) return Urgency.today;
-  if (days <= 2) return Urgency.soon;
-  if (days <= 7) return Urgency.week;
+  if (days <= 3) return Urgency.within3;
+  if (days <= 5) return Urgency.within5;
+  if (days <= 7) return Urgency.within7;
   return Urgency.later;
 }
 
@@ -34,12 +39,14 @@ String urgencyLabel(Urgency urgency) {
       return '已逾期';
     case Urgency.today:
       return '今天';
-    case Urgency.soon:
+    case Urgency.within3:
       return '3 天内';
-    case Urgency.week:
-      return '一周内';
+    case Urgency.within5:
+      return '5 天内';
+    case Urgency.within7:
+      return '7 天内';
     case Urgency.later:
-      return '一周以后';
+      return '7 天后';
     case Urgency.none:
       return '没有到期日';
   }
@@ -63,16 +70,18 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
   const UrgencyColors({
     required this.overdue,
     required this.today,
-    required this.soon,
-    required this.week,
+    required this.within3,
+    required this.within5,
+    required this.within7,
     required this.later,
     required this.none,
   });
 
   final Color overdue;
   final Color today;
-  final Color soon;
-  final Color week;
+  final Color within3;
+  final Color within5;
+  final Color within7;
   final Color later;
   final Color none;
 
@@ -81,8 +90,9 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
   static const UrgencyColors light = UrgencyColors(
     overdue: Color(0xFFC62828),
     today: Color(0xFFE64A19),
-    soon: Color(0xFFEF6C00),
-    week: Color(0xFF9E9D24),
+    within3: Color(0xFFEF6C00),
+    within5: Color(0xFFF9A825),
+    within7: Color(0xFF9E9D24),
     later: Color(0xFF2E7D32),
     none: Color(0xFF8A8A8A),
   );
@@ -90,8 +100,9 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
   static const UrgencyColors dark = UrgencyColors(
     overdue: Color(0xFFFF8A80),
     today: Color(0xFFFFAB91),
-    soon: Color(0xFFFFCC80),
-    week: Color(0xFFDCE775),
+    within3: Color(0xFFFFCC80),
+    within5: Color(0xFFFFE082),
+    within7: Color(0xFFDCE775),
     later: Color(0xFFA5D6A7),
     none: Color(0xFF9E9E9E),
   );
@@ -102,10 +113,12 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
         return overdue;
       case Urgency.today:
         return today;
-      case Urgency.soon:
-        return soon;
-      case Urgency.week:
-        return week;
+      case Urgency.within3:
+        return within3;
+      case Urgency.within5:
+        return within5;
+      case Urgency.within7:
+        return within7;
       case Urgency.later:
         return later;
       case Urgency.none:
@@ -121,16 +134,18 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
   UrgencyColors copyWith({
     Color? overdue,
     Color? today,
-    Color? soon,
-    Color? week,
+    Color? within3,
+    Color? within5,
+    Color? within7,
     Color? later,
     Color? none,
   }) =>
       UrgencyColors(
         overdue: overdue ?? this.overdue,
         today: today ?? this.today,
-        soon: soon ?? this.soon,
-        week: week ?? this.week,
+        within3: within3 ?? this.within3,
+        within5: within5 ?? this.within5,
+        within7: within7 ?? this.within7,
         later: later ?? this.later,
         none: none ?? this.none,
       );
@@ -141,8 +156,9 @@ class UrgencyColors extends ThemeExtension<UrgencyColors> {
     return UrgencyColors(
       overdue: Color.lerp(overdue, other.overdue, t)!,
       today: Color.lerp(today, other.today, t)!,
-      soon: Color.lerp(soon, other.soon, t)!,
-      week: Color.lerp(week, other.week, t)!,
+      within3: Color.lerp(within3, other.within3, t)!,
+      within5: Color.lerp(within5, other.within5, t)!,
+      within7: Color.lerp(within7, other.within7, t)!,
       later: Color.lerp(later, other.later, t)!,
       none: Color.lerp(none, other.none, t)!,
     );
