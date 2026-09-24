@@ -340,8 +340,7 @@ void main() {
       expect(() => ws.assignInspirations(const <String>[], null), returnsNormally);
     });
 
-    test('批量丢弃 / 批量删除：各进各的状态', () {
-      final ids = <String>[
+    test('批量丢弃 / 批量删除：各进各的状态', () {      final ids = <String>[
         ws.captureInspiration('丢弃一').id,
         ws.captureInspiration('丢弃二').id,
       ];
@@ -368,6 +367,47 @@ void main() {
         reason: '删掉的灵感不能还留在实时列表里',
       );
       expect(ws.archiveZone.trashRoots, isEmpty, reason: '灵感不进回收站，这是既有约定');
+    });
+
+    test('改标签：清洗口径与契约一致（去空格、丢空串、按顺序去重），且能落盘', () {
+      final inspiration = ws.captureInspiration('带标签的灵感');
+      ws.updateInspirationTags(inspiration.id, <String>['  工作  ', '', '工作', '生活']);
+
+      expect(
+        ws.findInspiration(inspiration.id)!.tags,
+        <String>['工作', '生活'],
+        reason: 'trim、丢空串、去重（保留首次出现的顺序）',
+      );
+
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.findInspiration(inspiration.id)!.tags, <String>['工作', '生活']);
+    });
+
+    test('改标签：清空是允许的，会回到"没有标签"', () {
+      final inspiration = ws.captureInspiration('先有标签');
+      ws.updateInspirationTags(inspiration.id, <String>['甲']);
+      ws.updateInspirationTags(inspiration.id, const <String>[]);
+      expect(ws.findInspiration(inspiration.id)!.tags, isEmpty);
+    });
+
+    test('项目标识色：只收 #rrggbb，存的是小写；非法值直接拒绝', () {
+      final project = ws.createProject(title: '要上色的项目');
+
+      ws.setProjectColor(project.id, '#2F6FEB');
+      expect(ws.findProject(project.id)!.color, '#2f6feb', reason: '统一成小写');
+
+      expect(
+        () => ws.setProjectColor(project.id, '蓝色'),
+        throwsA(isA<RuleViolation>()),
+        reason: '非法色值要拒绝，不能在库里留下读不出来的值',
+      );
+      expect(ws.findProject(project.id)!.color, '#2f6feb', reason: '被拒绝后保持原值');
+
+      ws.setProjectColor(project.id, null);
+      expect(ws.findProject(project.id)!.color, isNull, reason: '传 null 是清空');
+
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.findProject(project.id)!.color, isNull);
     });
   });
 

@@ -1,4 +1,5 @@
 import '../core/ids.dart';
+import '../core/json/canonical.dart';
 import '../core/json/document.dart';
 import '../core/json/store_file.dart';
 import '../core/models/entity.dart';
@@ -408,6 +409,48 @@ class Workspace {
     _upsert(DocName.inspirations, inspiration);
     persist();
     return inspiration;
+  }
+
+  /// 改标签（灵感整理第 5 条）。传入的内容会按契约口径清洗：去空格、丢空串、去重。
+  void updateInspirationTags(String id, Iterable<String> tags) {
+    final inspiration = findInspiration(id);
+    if (inspiration == null) throw const RuleViolation('灵感不存在');
+    final cleaned = <String>[];
+    for (final tag in tags) {
+      final trimmed = tag.trim();
+      if (trimmed.isEmpty || cleaned.contains(trimmed)) continue;
+      cleaned.add(trimmed);
+    }
+    if (_sameList(cleaned, inspiration.tags)) return; // 没变就不写盘
+    _upsert(
+      DocName.inspirations,
+      inspiration.copyWith(tags: cleaned, updatedAt: Ids.nowMillis()),
+    );
+    persist();
+  }
+
+  static bool _sameList(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i += 1) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  /// 设 / 清项目标识色（灵感整理第 10 条）。传 `null` 或非法值表示清空。
+  void setProjectColor(String id, String? color) {
+    final project = findProject(id);
+    if (project == null) throw const RuleViolation('项目不存在');
+    final normalized = Canonical.normalizeHexColor(color);
+    if (color != null && normalized == null) {
+      throw const RuleViolation('标识色要写成 #rrggbb');
+    }
+    if (normalized == project.color) return;
+    _upsert(
+      DocName.projects,
+      project.copyWith(color: normalized, updatedAt: Ids.nowMillis()),
+    );
+    persist();
   }
 
   /// 分配到项目（`projectId = null` 表示解除分配）。

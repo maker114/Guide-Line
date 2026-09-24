@@ -18,6 +18,7 @@ class Project implements EntityNode {
     required this.createdAt,
     required this.updatedAt,
     required this.deleted,
+    this.color,
     this.extra = const <String, dynamic>{},
   }) : parentId = parentProjectId;
 
@@ -35,6 +36,7 @@ class Project implements EntityNode {
     'created_at',
     'updated_at',
     'deleted',
+    'color',
   };
 
   @override
@@ -70,12 +72,16 @@ class Project implements EntityNode {
   @override
   final bool deleted;
 
+  /// 标识色（灵感整理第 10 条）：`#rrggbb` 小写，未设置为 `null`。
+  ///
+  /// 与 `ui_prefs` 的背景种子用同一套色值口径。**未设置时不写出这个字段**，
+  /// 老数据读进来再写出去仍然逐字节一致，不需要迁移。
+  final String? color;
+
   final Map<String, dynamic> extra;
 
   /// 契约里的字段名（父引用在 JSON 中叫 `parent_project_id`）。
   String? get parentProjectId => parentId;
-
-  bool get isDone => status == NodeStatus.done;
 
   Project copyWith({
     String? title,
@@ -89,6 +95,7 @@ class Project implements EntityNode {
     Object? completedAt = _unset,
     int? updatedAt,
     bool? deleted,
+    Object? color = _unset,
   }) {
     return Project(
       id: id,
@@ -104,6 +111,7 @@ class Project implements EntityNode {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deleted: deleted ?? this.deleted,
+      color: color == _unset ? this.color : color as String?,
       extra: extra,
     );
   }
@@ -125,6 +133,8 @@ class Project implements EntityNode {
       createdAt: Canonical.readInt(json['created_at'], 'project.created_at', issues) ?? 0,
       updatedAt: Canonical.readInt(json['updated_at'], 'project.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'project.deleted', issues) ?? false,
+      // 标识色按 `#rrggbb` 校验，坏值置空（与 `parseHexColor` 的口径一致）
+      color: _readHexColor(json['color'], issues),
       extra: Canonical.readExtra(json, knownKeys),
     );
   }
@@ -146,9 +156,25 @@ class Project implements EntityNode {
       'updated_at': updatedAt,
       'deleted': deleted,
     };
+    // 未设置标识色就不写出：老数据没有这个字段，写出来会破坏"读入→写出"
+    // 的逐字节一致。新字段追加在末尾，不打乱既有字段顺序。
+    if (color != null) out['color'] = color;
     out.addAll(extra);
     return out;
   }
+}
+
+/// `#rrggbb`（小写）之外的值一律置空并记一条 error。
+///
+/// 形态判定复用 `Canonical.normalizeHexColor`，与界面取色是**同一套口径**。
+String? _readHexColor(Object? value, DecodeIssues issues) {
+  if (value == null) return null;
+  if (value is String) {
+    final normalized = Canonical.normalizeHexColor(value);
+    if (normalized != null) return normalized;
+  }
+  issues.error('project.color 不是 "#rrggbb" 形态：$value —— 置为 null');
+  return null;
 }
 
 const Object _unset = Object();

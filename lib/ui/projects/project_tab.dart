@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/project.dart';
+import '../common/color_picker.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
@@ -217,16 +218,35 @@ class _ProjectTile extends StatelessWidget {
               icon: Icon(row.expanded ? Icons.expand_more : Icons.chevron_right),
               onPressed: () => app.setExpanded(project.id, expanded: !row.expanded),
             ),
-      title: Text(
-        project.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: project.status == NodeStatus.done
-            ? theme.textTheme.bodyLarge?.copyWith(
-                decoration: TextDecoration.lineThrough,
-                color: theme.colorScheme.outline,
-              )
-            : null,
+      title: Row(
+        children: <Widget>[
+          // 标识色（灵感整理第 10 条）：一小段色条，扫一眼就能把项目区分开。
+          // 没设标识色就不占位，树不会因此变宽。
+          if (colorOfHex(project.color) != null) ...<Widget>[
+            Container(
+              width: 4,
+              height: 16,
+              decoration: BoxDecoration(
+                color: colorOfHex(project.color),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
+          Expanded(
+            child: Text(
+              project.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: project.status == NodeStatus.done
+                  ? theme.textTheme.bodyLarge?.copyWith(
+                      decoration: TextDecoration.lineThrough,
+                      color: theme.colorScheme.outline,
+                    )
+                  : null,
+            ),
+          ),
+        ],
       ),
       subtitle: _Subtitle(row: row, due: due, overdue: overdue),
       trailing: PopupMenuButton<String>(

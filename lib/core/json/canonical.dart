@@ -14,9 +14,6 @@ class Canonical {
   /// 文档落盘文本：2 空格缩进 + 末尾**恰好一个** LF。
   static String documentText(Object? value) => '${_pretty.convert(value)}\n';
 
-  /// 紧凑形式（仅用于摘要/哈希，不用于落盘）。
-  static String compact(Object? value) => jsonEncode(value);
-
   static Object? decode(String text) => jsonDecode(text);
 
   // ---------- 容错读取（《数据契约》§8） ----------
@@ -97,5 +94,45 @@ class Canonical {
       if (!knownKeys.contains(entry.key)) out[entry.key] = entry.value;
     }
     return out;
+  }
+
+  /// 字符串数组（灵感的 `tags`）：逐项 `trim()`、丢掉空串、**按出现顺序去重**。
+  ///
+  /// 容错口径与其它字段一致 —— 坏值不抛异常、记一条 error 后按能用的部分处理：
+  ///   · 不是数组 → 记错并当作空；
+  ///   · 数组里有非字符串项 → 跳过那一项并记错，不让整条记录废掉。
+  ///
+  /// 去重是有意的：标签是"集合"语义，存了 `["a","a"]` 没有任何好处，
+  /// 而保留首次出现的顺序能让样本与界面稳定，不随 Map 的遍历顺序飘。
+  static List<String> readStringList(Object? value, String field, DecodeIssues issues) {
+    if (value == null) return const <String>[];
+    if (value is! List) {
+      issues.error('$field 期望 array，实际 ${value.runtimeType} —— 按空处理');
+      return const <String>[];
+    }
+    final out = <String>[];
+    for (final item in value) {
+      if (item is! String) {
+        issues.error('$field 里有非字符串项（${item.runtimeType}）—— 跳过该项');
+        continue;
+      }
+      final trimmed = item.trim();
+      if (trimmed.isEmpty) continue;
+      if (!out.contains(trimmed)) out.add(trimmed);
+    }
+    return out;
+  }
+
+  /// 色值形态：`#rrggbb`（小写，六位十六进制）。
+  ///
+  /// 放在 core 而不是界面层，是因为**模型校验与界面取色必须用同一套口径** ——
+  /// 各写一份迟早会出现"界面收下了、模型读不出来"的分歧。
+  static final RegExp hexColorPattern = RegExp(r'^#[0-9a-f]{6}$');
+
+  /// `#RRGGBB`（大小写均可、允许前后空格）→ 规范化的小写 `#rrggbb`；不认识就返回 `null`。
+  static String? normalizeHexColor(String? value) {
+    if (value == null) return null;
+    final normalized = value.trim().toLowerCase();
+    return hexColorPattern.hasMatch(normalized) ? normalized : null;
   }
 }

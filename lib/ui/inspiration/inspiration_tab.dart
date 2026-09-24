@@ -10,6 +10,7 @@ import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
+import '../common/tag_editor.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -373,25 +374,50 @@ class _InspirationTile extends StatelessWidget {
         maxLines: 4,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Row(
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(
-            project == null ? Icons.inbox_outlined : Icons.folder_outlined,
-            size: 14,
-            color: theme.colorScheme.outline,
+          Row(
+            children: <Widget>[
+              Icon(
+                project == null ? Icons.inbox_outlined : Icons.folder_outlined,
+                size: 14,
+                color: theme.colorScheme.outline,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: GestureDetector(
+                  onTap: project == null ? null : () => onFilterProject(project.id),
+                  child: Text(
+                    project?.title ?? '未分配',
+                    style: theme.textTheme.labelSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
+            ],
           ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: GestureDetector(
-              onTap: project == null ? null : () => onFilterProject(project.id),
-              child: Text(
-                project?.title ?? '未分配',
-                style: theme.textTheme.labelSmall,
-                overflow: TextOverflow.ellipsis,
+          // 标签（灵感整理第 5 条）：只在有标签时占位，免得每条都多一行空白
+          if (inspiration.tags.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: <Widget>[
+                  for (final tag in inspiration.tags)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(tag, style: theme.textTheme.labelSmall),
+                    ),
+                ],
               ),
             ),
-          ),
-          Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
         ],
       ),
       selected: selecting && selected,
@@ -448,6 +474,20 @@ class _InspirationTile extends StatelessWidget {
               onTap: () async {
                 Navigator.of(sheetContext).pop();
                 await _merge(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.label_outline),
+              title: Text(inspiration.tags.isEmpty ? '加标签…' : '标签（${inspiration.tags.length}）…'),
+              onTap: () async {
+                Navigator.of(sheetContext).pop();
+                final tags = await editTags(
+                  context,
+                  initial: inspiration.tags,
+                  title: '编辑标签',
+                );
+                if (tags == null || !context.mounted) return;
+                _run(context, () => ws.updateInspirationTags(inspiration.id, tags));
               },
             ),
             ListTile(

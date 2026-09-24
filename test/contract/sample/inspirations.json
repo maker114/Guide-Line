@@ -54,6 +54,21 @@
       "created_at": 1788220800000,
       "updated_at": 1788566400000,
       "deleted": true
+    },
+    {
+      "id": "b36f81ad-e4c6-42fa-9b8b-c64753849511",
+      "text": "带标签的灵感：创建时就归好类。",
+      "project_id": null,
+      "status": "pending",
+      "merged_into": null,
+      "merged_at": null,
+      "created_at": 1788652800000,
+      "updated_at": 1788652800000,
+      "deleted": false,
+      "tags": [
+        "速记",
+        "交互"
+      ]
     }
   ]
 }

@@ -14,6 +14,7 @@ class Inspiration implements Entity {
     required this.createdAt,
     required this.updatedAt,
     required this.deleted,
+    this.tags = const <String>[],
     this.extra = const <String, dynamic>{},
   });
 
@@ -27,6 +28,7 @@ class Inspiration implements Entity {
     'created_at',
     'updated_at',
     'deleted',
+    'tags',
   };
 
   @override
@@ -45,6 +47,12 @@ class Inspiration implements Entity {
 
   @override
   final bool deleted;
+
+  /// 标签（灵感整理第 5 条）：创建灵感时就能直接分类。
+  ///
+  /// **空列表按"没有这个字段"处理**（写出时省略，见 [toJson]）：这样老数据
+  /// 读进来再写出去仍然逐字节一致，不需要迁移。
+  final List<String> tags;
 
   /// 未知字段透传（《数据契约》§8：不因再序列化而丢失）。
   final Map<String, dynamic> extra;
@@ -71,6 +79,7 @@ class Inspiration implements Entity {
     Object? mergedAt = _unset,
     int? updatedAt,
     bool? deleted,
+    List<String>? tags,
   }) {
     return Inspiration(
       id: id,
@@ -82,6 +91,7 @@ class Inspiration implements Entity {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deleted: deleted ?? this.deleted,
+      tags: tags ?? this.tags,
       extra: extra,
     );
   }
@@ -98,6 +108,7 @@ class Inspiration implements Entity {
       createdAt: Canonical.readInt(json['created_at'], 'inspiration.created_at', issues) ?? 0,
       updatedAt: Canonical.readInt(json['updated_at'], 'inspiration.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'inspiration.deleted', issues) ?? false,
+      tags: Canonical.readStringList(json['tags'], 'inspiration.tags', issues),
       extra: Canonical.readExtra(json, knownKeys),
     );
   }
@@ -115,6 +126,9 @@ class Inspiration implements Entity {
       'updated_at': updatedAt,
       'deleted': deleted,
     };
+    // 空标签**不写出**：老数据没有这个字段，写出来会让"读入→写出"多出一行、
+    // 破坏契约样本的逐字节比对。新字段追加在已知字段之后，不打乱既有顺序。
+    if (tags.isNotEmpty) out['tags'] = tags;
     out.addAll(extra);
     return out;
   }

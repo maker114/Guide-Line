@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/json/canonical.dart';
 import '../../core/store/ui_prefs.dart';
 import '../common/urgency.dart';
 import 'shape_tokens.dart';
@@ -53,13 +54,14 @@ Color resolveSeedColor(UiPrefs prefs) {
 }
 
 /// `#RRGGBB` → `Color`；解析不了返回 `null`。
+///
+/// 形态判定复用 `Canonical.normalizeHexColor`（与 `Project.color` 同一套口径），
+/// 免得出现"界面收下了、模型读不出来"的分歧。
 Color? parseHexColor(String? hex) {
-  if (hex == null) return null;
-  final text = hex.trim().replaceFirst('#', '');
-  if (text.length != 6) return null;
-  final value = int.tryParse(text, radix: 16);
-  if (value == null) return null;
-  return Color(0xFF000000 | value);
+  final normalized = Canonical.normalizeHexColor(hex);
+  if (normalized == null) return null;
+  final value = int.tryParse(normalized.substring(1), radix: 16);
+  return value == null ? null : Color(0xFF000000 | value);
 }
 
 /// `Color` → `#rrggbb`（小写，和 `UiPrefs` 的约定一致）。

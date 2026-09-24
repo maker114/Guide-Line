@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
@@ -99,6 +100,7 @@ class ProjectDetailPage extends StatelessWidget {
                 ),
               ),
               _StatusField(app: app, project: project),
+              _ColorField(app: app, project: project),
               _DateField(app: app, project: project),
               _TextField(
                 title: '目的',
@@ -157,6 +159,56 @@ class _StatusField extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 标识色（灵感整理第 10 条）：只在项目树与这里显示，不影响任何规则。
+class _ColorField extends StatelessWidget {
+  const _ColorField({required this.app, required this.project});
+
+  final AppController app;
+  final Project project;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = colorOfHex(project.color);
+    return ListTile(
+      leading: Icon(
+        Icons.palette_outlined,
+        color: color ?? theme.colorScheme.outline,
+      ),
+      title: const Text('标识色'),
+      subtitle: Text(
+        project.color ?? '未设置（在项目树里用主题色）',
+        style: theme.textTheme.labelSmall,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Container(
+            width: 16,
+            height: 16,
+            decoration: BoxDecoration(
+              color: color ?? theme.colorScheme.surfaceContainerHighest,
+              shape: BoxShape.circle,
+              border: Border.all(color: theme.colorScheme.outlineVariant),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Icon(Icons.chevron_right),
+        ],
+      ),
+      onTap: () async {
+        final picked = await pickProjectColor(context, current: project.color);
+        // null = 取消；'' = 明确选了"不用标识色"
+        if (picked == null || !context.mounted) return;
+        final error = app.run(
+          () => app.ws.setProjectColor(project.id, picked.isEmpty ? null : picked),
+        );
+        if (error != null && context.mounted) showToast(context, error, error: true);
+      },
     );
   }
 }
