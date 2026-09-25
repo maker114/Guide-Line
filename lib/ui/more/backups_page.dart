@@ -42,14 +42,6 @@ class BackupsPage extends StatelessWidget {
                 onTap: () => _snapshot(context),
               ),
               const Divider(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text(
-                  '可用备份 ${backups.length} 份（新 → 旧）。恢复前会先把当前数据轮转进备份，'
-                  '所以恢复错了还可以再恢复回来。',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
               if (backups.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(16),

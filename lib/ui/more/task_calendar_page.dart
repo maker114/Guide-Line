@@ -108,13 +108,6 @@ class _TaskCalendarPageState extends State<TaskCalendarPage> {
                       const Divider(height: 1, indent: 16, endIndent: 16),
                     ],
                   ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: Text(
-                  '圆环的颜色 = 任务所属事件的标识色；一天有几条任务，环就分成几段。',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
             ],
           ),
         );

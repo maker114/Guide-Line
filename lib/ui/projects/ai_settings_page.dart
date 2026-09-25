@@ -90,13 +90,6 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   onChanged: (value) => setState(() => widget.app.setAiEnabled(value)),
                 ),
                 const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                  child: Text(
-                    '用于把项目清单整理成一段通顺的实现说明。没配置时这个功能是关着的。',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
                 _Field(
                   label: 'API 地址',
                   hint: AiConfig.defaultBaseUrl,
