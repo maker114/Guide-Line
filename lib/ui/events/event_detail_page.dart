@@ -879,41 +879,37 @@ class _TaskLine extends StatelessWidget {
                   ),
               ],
             ),
-      // 两个高频动作（设到期日 / 接后续任务）留在 trailing，与「更多」并列。
-      // 它们**不能**放进 title 行：那个 Row 在 1.6 倍字体下会被标题挤到溢出，
-      // 而 ListTile 的 trailing 宽度是从标题的可伸缩空间里扣的，放这里更稳
-      // （`app_smoke_test.dart` 的"深色 + 1.6 倍字体不溢出"用例在守这条）。
+      // 行内只留**两个图标**（按实机反馈，去掉行尾的三个点）：
+      //   · 日期图标 —— 点一下设/改到期日，**长按清除**；
+      //   · 折线图标 —— 弹出这个节点的族内动作（新建子任务 / 接后续 / 断开后续）。
+      // 其余动作（重命名 / 移动 / 归档 / 删除）由**点这一行**弹出的动作面板承接，
+      // 所以不需要再有一个"更多"菜单。
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // 压到 30×30 是有意的：默认 48×48 的 icon 按钮三个就把标题挤没了
-          IconButton(
-            tooltip: task.dueAt == null ? '设到期日' : '改到期日',
-            visualDensity: VisualDensity.compact,
-            iconSize: 18,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-            icon: Icon(task.dueAt == null ? Icons.event_outlined : Icons.event_busy_outlined),
-            onPressed: () => _run(context, 'due'),
-          ),
-          IconButton(
-            tooltip: '接后续任务…',
-            visualDensity: VisualDensity.compact,
-            iconSize: 18,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-            icon: const Icon(Icons.timeline),
-            onPressed: () => _run(context, 'linkNext'),
+          // 压到 30×30 是有意的：默认 48×48 的按钮几个就把标题挤没了
+          _TaskIcon(
+            tooltip: task.dueAt == null
+                ? '设到期日'
+                : '到期 ${task.dueAt}（长按清除）',
+            icon: task.dueAt == null ? Icons.event_outlined : Icons.event_available_outlined,
+            color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
+            clearable: task.dueAt != null,
+            onTap: () => _run(context, 'due'),
+            onLongPress: task.dueAt == null ? null : () => _run(context, 'clearDue'),
           ),
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: '族内动作',
+            icon: const Icon(Icons.timeline, size: 20),
             onSelected: (value) async {
               await _run(context, value);
             },
             itemBuilder: (_) => <PopupMenuEntry<String>>[
+              // 只放"这条线上的结构动作"，不放重命名 / 归档 / 删除那些
               for (final action in taskActions(
                 task,
                 successorCount: host.successorCountOf(task),
+                flowOnly: true,
               ))
                 PopupMenuItem<String>(
                   value: action.value,
@@ -1011,13 +1007,73 @@ class TaskAction {
   final IconData icon;
 }
 
+/// 任务行上的一个小图标按钮：**有值时右下角带个小叉**，长按可清除。
+///
+/// 与项目详情页的日期图标是同一套交互（那里叫 `_ClearableIcon`）——
+/// "点一下改、长按清"在两处保持一致，不然用户得分别记。
+class _TaskIcon extends StatelessWidget {
+  const _TaskIcon({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.clearable,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final bool clearable;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Icon(icon, size: 20, color: color),
+              if (clearable)
+                Positioned(
+                  right: -3,
+                  bottom: -3,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.close, size: 10, color: theme.colorScheme.outline),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 一条任务在动作面板里能做的事。
+///
+/// [flowOnly] 为真时**只给"这条线上的结构动作"**（新建子任务 / 接后续 / 断开后续）——
+/// 行内那个折线图标用它；重命名 / 移动 / 归档 / 删除属于"这一条本身"的动作，
+/// 由点整行弹出的动作面板承接。
 ///
 /// `successorCount` 由调用方按**走向**算出来传进来（`nextIds` 在隐式链模式下总是空的，
 /// 拿它当"有没有后续"判会把「断开后续…」藏起来）。
-List<TaskAction> taskActions(Task task, {int? successorCount}) {
+List<TaskAction> taskActions(Task task, {int? successorCount, bool flowOnly = false}) {
   final actions = <TaskAction>[];
-  if (task.taskType != TaskType.subtask) {
+  if (task.taskType != TaskType.subtask && (!flowOnly || task.parentId == null)) {
     actions.add(
       const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right),
     );
@@ -1030,6 +1086,8 @@ List<TaskAction> taskActions(Task task, {int? successorCount}) {
       actions.add(const TaskAction('unlinkNext', '断开后续…', Icons.link_off));
     }
   }
+  if (flowOnly) return actions;
+
   actions.add(const TaskAction('rename', '重命名', Icons.edit_outlined));
   actions.add(
     TaskAction(

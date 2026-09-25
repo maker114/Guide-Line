@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
-import 'package:guideline/core/models/task.dart';
 import 'package:guideline/ui/app_shell.dart';
 
 /// 任务行的两个新入口与"被挡住"的表达（灵感 14 / 15）：
@@ -112,7 +111,7 @@ void main() {
 
     await openEvent(tester, app);
 
-    expect(find.byIcon(Icons.event_busy_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.event_available_outlined), findsOneWidget);
     expect(
       find.textContaining('2099-05-01'),
       findsOneWidget,
