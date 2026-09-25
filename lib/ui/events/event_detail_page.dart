@@ -10,6 +10,7 @@ import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
+import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
 import '../theme/shape_tokens.dart';
 import 'task_actions.dart';
@@ -99,6 +100,30 @@ class _EventDetailPageState extends State<EventDetailPage> {
   void endRename() => setState(() => _renamingTaskId = null);
 
   void beginSubtask(String taskId) => setState(() => _subtaskParentId = taskId);
+
+  /// 「新建后续节点」：建一条新任务并**直接接在这条之后**，然后进入改名。
+  ///
+  /// 与 `beginLinkNext` 里那个「新建一个后续任务」是同一件事，区别只是省掉
+  /// "先开面板再选新建"两步 —— 想连着铺几个节点时这个入口快得多。
+  /// 建完进改名态，与新建子任务 / 并列任务的手感一致（建了立刻命名）。
+  Future<void> createAndLinkNext(Task task) async {
+    final error = app.run(() {
+      final created = app.ws.createTask(eventId: eventId, title: '新节点');
+      app.ws.addTaskNext(task.id, created.id);
+    });
+    if (error != null) {
+      _toast(error, error: true);
+      return;
+    }
+    // 找出刚建的那条（按走向：接在 task 之后、且还没有名字特征的那个最新节点）
+    final flow = TaskFlow.of(app.ws.allTasks, eventId: eventId);
+    final successorIds = flow.successorsOf(task.id).map((each) => each.id).toSet();
+    final fresh = app.ws.liveTasks
+        .where((each) => successorIds.contains(each.id) && each.title == '新节点')
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (fresh.isNotEmpty) beginRename(fresh.first.id);
+  }
 
   /// 这条任务在走向上有几个后续（**含隐式链**：还没固化时 `nextIds` 是空的，
   /// 但下一个任务已经接在那儿了，所以必须问 `TaskFlow` 而不是问字段）。
@@ -457,19 +482,13 @@ class _EventHeader extends StatelessWidget {
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
-            SegmentedButton<NodeStatus>(
-              segments: <ButtonSegment<NodeStatus>>[
-                for (final status in NodeStatus.values)
-                  ButtonSegment<NodeStatus>(
-                    value: status,
-                    label: Text(nodeStatusLabel(status)),
-                  ),
-              ],
-              selected: <NodeStatus>{event.status},
-              onSelectionChanged: (selection) {
-                final error = app.run(
-                  () => app.ws.setEventStatus(event.id, selection.first),
-                );
+            // 与项目详情页同一个控件：胶囊里套小胶囊、无分割线
+            StatusPillSelector<NodeStatus>(
+              values: NodeStatus.values,
+              selected: event.status,
+              labelOf: nodeStatusLabel,
+              onSelected: (status) {
+                final error = app.run(() => app.ws.setEventStatus(event.id, status));
                 if (error != null) showToast(context, error, error: true);
               },
             ),
@@ -939,6 +958,9 @@ class _TaskLine extends StatelessWidget {
       case 'linkNext':
         await host.beginLinkNext(task);
         break;
+      case 'newNext':
+        await host.createAndLinkNext(task);
+        break;
       case 'unlinkNext':
         await host.beginUnlinkNext(task);
         break;
@@ -1082,6 +1104,12 @@ List<TaskAction> taskActions(Task task, {int? successorCount, bool flowOnly = fa
   // 只有主线任务在"走向"上，子任务不参与
   if (task.parentId == null) {
     actions.add(const TaskAction('linkNext', '接后续任务…', Icons.timeline));
+    // 一步造出分叉：直接建一个新节点并接在这条之后。
+    // 删掉「新建并列任务」之后用户反馈"没法创建多节点任务了" ——
+    // 其实「接后续任务…」里也能新建，但要多点两步；给一个直接入口。
+    actions.add(
+      const TaskAction('newNext', '新建后续节点', Icons.call_split),
+    );
     if ((successorCount ?? task.nextIds.length) > 0) {
       actions.add(const TaskAction('unlinkNext', '断开后续…', Icons.link_off));
     }

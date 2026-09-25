@@ -92,13 +92,20 @@ class _AppShellState extends State<AppShell> {
           ),
           floatingActionButton: _index == 0
               ? null
+              // 速记按钮：**胶囊形**（按实机反馈）。
+              // `FloatingActionButton.extended` 的默认圆角是 16，看着仍是个圆角方块；
+              // 这里显式给 StadiumBorder 才是真正的胶囊。
               : FloatingActionButton.extended(
                   onPressed: _goCapture,
+                  shape: const StadiumBorder(),
                   icon: const Icon(Icons.bolt),
                   label: const Text('速记'),
                 ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _index,
+            // 选中态也用**胶囊**，与全应用的形状规范一致
+            // （默认是 16 圆角的方块，和上面的按钮不是一套观感）
+            indicatorShape: const StadiumBorder(),
             onDestinationSelected: (index) {
               setState(() => _index = index);
               app.setLastTab(index);
@@ -144,7 +151,7 @@ class _AppShellState extends State<AppShell> {
   void _showAbout(BuildContext context) {
     showAboutDialog(
       context: context,
-      applicationName: 'Guide Line',
+      applicationName: AppInfo.displayName,
       applicationVersion: AppInfo.versionLabel,
       children: <Widget>[
         const Text('本地优先的个人生活管理工具（单机版）。'),
