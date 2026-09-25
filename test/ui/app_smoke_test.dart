@@ -317,6 +317,18 @@ void main() {
     await tester.pumpAndSettle();
 
     await switchTab(tester, '项目');
+    // 详情页的标题栏也在这条线上：标识色竖条 + 项目名 + 三个点，外加改名时的输入框
+    await tester.tap(find.text('一个名字相当长的项目名').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重命名'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
     await switchTab(tester, '事件');
 
     // 进任务线并打开任务动作面板（项目最多，是最容易溢出的地方）
