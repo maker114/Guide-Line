@@ -7,6 +7,8 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
 
+import 'scroll_finders.dart';
+
 /// 手机端界面冒烟测试：**把四个 Tab 的主干路径真的走一遍**。
 ///
 /// 纯逻辑测试（`test/core/*`）保证规则对，这里保证**接线对**：
@@ -28,6 +30,28 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('逾期提醒是内容区的卡片，不是贴在标题栏下的一条色带', (tester) async {
+    // 实机反馈："顶部标题栏偶尔背景颜色不一样" —— 起因是那条通栏的提醒带
+    // 紧贴标题栏、又用主题色铺满，看着像标题栏自己变了色。
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '一件事');
+    final task = app.ws.createTask(eventId: event.id, title: '过期的任务');
+    app.run(() => app.ws.updateTask(task.id, dueAt: '2020-01-01'));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    final banner = find.text('有 1 条任务已逾期');
+    expect(banner, findsOneWidget);
+    final rect = tester.getRect(banner);
+    expect(rect.left, greaterThan(8), reason: '要有外边距 —— 通栏贴边就成了标题栏的一部分');
+    expect(rect.right, lessThan(tester.view.physicalSize.width / tester.view.devicePixelRatio - 8));
+
+    await tester.tap(banner);
+    await tester.pumpAndSettle();
+    expect(find.text('已逾期'), findsOneWidget, reason: '点它照旧进「到期」');
+  });
 
   /// 走「页面内直接输入」：点开那一行 → 输入 → 点**那一行**的「添加」。
   ///
@@ -133,8 +157,14 @@ void main() {
     await tester.pumpAndSettle();
 
     // 「更多」是一张会变长的列表，靠后的条目在小屏上不会被构建出来 ——
-    // 所以要先滚到它可见再点，不能直接 tap（这里踩过一次）
-    await tester.scrollUntilVisible(find.text('备份与恢复'), 120);
+    // 所以要先滚到它可见再点，不能直接 tap（这里踩过一次）。
+    // 滚动体必须点名：外壳的 `PageView`（左右滑动切页）也是一个 `Scrollable`，
+    // 不指定的话默认那个 finder 会一次找到两个、直接抛 "Too many elements"。
+    await tester.scrollUntilVisible(
+      find.text('备份与恢复'),
+      120,
+      scrollable: verticalScrollable,
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('备份与恢复'));
     await tester.pumpAndSettle();

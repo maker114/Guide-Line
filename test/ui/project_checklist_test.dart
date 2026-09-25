@@ -6,6 +6,8 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
 
+import 'scroll_finders.dart';
+
 /// 项目「实现」清单的界面接线（设计文档 §1.3）：
 ///   · 清单与正文并存，两块的入口都在项目详情页；
 ///   · 加条目、打勾、删条目都真的改了数据；
@@ -39,7 +41,7 @@ void main() {
     await tester.scrollUntilVisible(
       target,
       150,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
     await tester.ensureVisible(target);

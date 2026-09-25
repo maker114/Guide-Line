@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
@@ -10,6 +11,7 @@ import 'inspiration/inspiration_tab.dart';
 import 'more/due_page.dart';
 import 'more/more_tab.dart';
 import 'projects/project_tab.dart';
+import 'theme/shape_tokens.dart';
 
 /// 底部导航的形状参数（自绘，改动时这几个要一起看）。
 ///
@@ -160,66 +162,22 @@ class _NavItem extends StatelessWidget {
 /// 界面上就没有那个类型可找了，而用例要靠"找到底栏 → 点里面的页签"来切页。
 /// 给它一个**自己的公开类型**，测试用 `find.byType(AppBottomNav)` 定位，
 /// 比按文案或图标去猜稳得多。
-class AppBottomNav extends StatefulWidget {
+///
+/// [page] 是**连续**的页位置（`0.0` = 灵感、`1.5` = 项目与事件之间），
+/// 由外层的 `PageController` 驱动 —— 左右滑动切页时指示器就跟着手指走。
+class AppBottomNav extends StatelessWidget {
   const AppBottomNav({
     super.key,
-    required this.index,
+    required this.page,
     required this.onSelect,
     this.overdueCount = 0,
   });
 
-  final int index;
+  final ValueListenable<double> page;
   final ValueChanged<int> onSelect;
   final int overdueCount;
 
-  @override
-  State<AppBottomNav> createState() => _AppBottomNavState();
-}
-
-class _AppBottomNavState extends State<AppBottomNav>
-    with SingleTickerProviderStateMixin {
   static const int _itemCount = 4;
-
-  /// 滑动动画的驱动（`0` = 在旧位置、`1` = 到位）。
-  late final AnimationController _controller;
-
-  /// 这次滑动从哪一格、到哪一格。
-  ///
-  /// 用**下标**而不是像素：格子宽度只有 build 里（`LayoutBuilder`）才知道，
-  /// 存下标就能在旋转 / 分屏后按新宽度重新算，不会停在半个格子上。
-  late int _fromIndex;
-  late int _toIndex;
-
-  @override
-  void initState() {
-    super.initState();
-    // 起始值给 `1`：**首次出现不播动画**，直接停在选中那一格。
-    // 这里必须在 `initState` 里赋值 —— 放到 `late` 字段的惰性初始化里，
-    // 首次读取会发生在 `didUpdateWidget`（此时 `widget` 已经是新的那个），
-    // 于是"新旧一样"、动画永远不会播。
-    _controller = AnimationController(
-      vsync: this,
-      duration: _navSlideDuration,
-    )..value = 1;
-    _fromIndex = widget.index;
-    _toIndex = widget.index;
-  }
-
-  @override
-  void didUpdateWidget(AppBottomNav oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // 只有"真的换页签"才滑：父级因别的原因重建（主题、数据变更）不误播动画
-    if (widget.index == _toIndex) return;
-    _fromIndex = _toIndex;
-    _toIndex = widget.index;
-    _controller.forward(from: 0);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -229,21 +187,29 @@ class _AppBottomNavState extends State<AppBottomNav>
         // 指示器与**一格同宽**：最左那格 left = 0、最右那格 right = 栏宽，
         // 两端圆弧于是与外部胶囊完全重合（圆角半径同为 `_navRadius`）。
         final nominalWidth = constraints.maxWidth / _itemCount;
-        final fromLeft = nominalWidth * _fromIndex;
-        final toLeft = nominalWidth * _toIndex;
 
-        return Stack(
-          children: <Widget>[
-            AnimatedBuilder(
-              animation: _controller,
-              builder: (context, _) {
-                final geometry = navIndicatorGeometry(
-                  t: _controller.value,
-                  fromLeft: fromLeft,
-                  toLeft: toLeft,
-                  nominalWidth: nominalWidth,
-                );
-                return Positioned(
+        // 指示器跟着 **PageView 的连续页位置**走，而不是自己跑一条动画。
+        // 这样"手指拖到一半"与"松手后滑过去"用的是同一个数：
+        // 拖拽时它线性跟手，动画时它自带缓动（`animateToPage` 的曲线），
+        // 指示器永远不会和页面内容错位。
+        return ValueListenableBuilder<double>(
+          valueListenable: page,
+          builder: (context, value, _) {
+            final current = value.clamp(0.0, (_itemCount - 1).toDouble());
+            final fromIndex = current.floor();
+            final toIndex = current.ceil();
+            final geometry = navIndicatorGeometry(
+              t: current - fromIndex,
+              fromLeft: nominalWidth * fromIndex,
+              toLeft: nominalWidth * toIndex,
+              nominalWidth: nominalWidth,
+            );
+            // 图标在过半格时切到"选中"那一版（与页面翻过去同步）
+            final index = current.round();
+
+            return Stack(
+              children: <Widget>[
+                Positioned(
                   // 纵向顶到 0：配合外层零内边距，胶囊与外部胶囊**等高**
                   left: geometry.left,
                   top: 0,
@@ -256,45 +222,45 @@ class _AppBottomNavState extends State<AppBottomNav>
                       borderRadius: BorderRadius.circular(_navRadius),
                     ),
                   ),
-                );
-              },
-            ),
-            Row(
-              children: <Widget>[
-                _NavItem(
-                  icon: Icons.lightbulb_outline,
-                  selectedIcon: Icons.lightbulb,
-                  label: '灵感',
-                  selected: widget.index == 0,
-                  onTap: () => widget.onSelect(0),
                 ),
-                _NavItem(
-                  icon: Icons.account_tree_outlined,
-                  selectedIcon: Icons.account_tree,
-                  label: '项目',
-                  selected: widget.index == 1,
-                  onTap: () => widget.onSelect(1),
-                ),
-                _NavItem(
-                  icon: Icons.timeline_outlined,
-                  selectedIcon: Icons.timeline,
-                  label: '事件',
-                  selected: widget.index == 2,
-                  onTap: () => widget.onSelect(2),
-                ),
-                // 逾期数量挂在「更多」上：到期视图在那一页下面，
-                // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见
-                _NavItem(
-                  icon: Icons.more_horiz,
-                  selectedIcon: Icons.more_horiz,
-                  label: '更多',
-                  selected: widget.index == 3,
-                  badgeCount: widget.overdueCount,
-                  onTap: () => widget.onSelect(3),
+                Row(
+                  children: <Widget>[
+                    _NavItem(
+                      icon: Icons.lightbulb_outline,
+                      selectedIcon: Icons.lightbulb,
+                      label: '灵感',
+                      selected: index == 0,
+                      onTap: () => onSelect(0),
+                    ),
+                    _NavItem(
+                      icon: Icons.account_tree_outlined,
+                      selectedIcon: Icons.account_tree,
+                      label: '项目',
+                      selected: index == 1,
+                      onTap: () => onSelect(1),
+                    ),
+                    _NavItem(
+                      icon: Icons.timeline_outlined,
+                      selectedIcon: Icons.timeline,
+                      label: '事件',
+                      selected: index == 2,
+                      onTap: () => onSelect(2),
+                    ),
+                    // 逾期数量挂在「更多」上：到期视图在那一页下面，
+                    // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见
+                    _NavItem(
+                      icon: Icons.more_horiz,
+                      selectedIcon: Icons.more_horiz,
+                      label: '更多',
+                      selected: index == 3,
+                      badgeCount: overdueCount,
+                      onTap: () => onSelect(3),
+                    ),
+                  ],
                 ),
               ],
-            ),
-          ],
+            );
+          },
         );
       },
     );
@@ -323,12 +289,41 @@ class _AppShellState extends State<AppShell> {
       GlobalKey<InspirationTabState>();
   late int _index = widget.app.prefs.lastTabIndex.clamp(0, 3);
 
+  /// 四个页签的**横向翻页**容器：左右滑动 = 切页（实机反馈）。
+  late final PageController _pages = PageController(initialPage: _index);
+
+  /// **连续**的页位置（`1.5` = 项目与事件之间），给底部导航画指示器用。
+  ///
+  /// 单独用一个 `ValueNotifier` 而不是每次 `setState`：滑动过程中这玩意儿
+  /// 每帧都在变，让整个外壳跟着重建太浪费 —— 只有底栏需要它。
+  final ValueNotifier<double> _pageProgress = ValueNotifier<double>(0);
+
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
 
   @override
   void initState() {
     super.initState();
+    _pageProgress.value = _index.toDouble();
+    _pages.addListener(_syncPageProgress);
     _bindCaptureShortcut();
+  }
+
+  @override
+  void dispose() {
+    _pages
+      ..removeListener(_syncPageProgress)
+      ..dispose();
+    _pageProgress.dispose();
+    super.dispose();
+  }
+
+  /// 把 `PageController` 的像素偏移换算成"第几页 + 小数"，喂给底栏。
+  void _syncPageProgress() {
+    if (!_pages.hasClients) return;
+    final position = _pages.position;
+    if (!position.hasContentDimensions || position.viewportDimension == 0) return;
+    _pageProgress.value =
+        (position.pixels / position.viewportDimension).clamp(0.0, 3.0);
   }
 
   /// 长按桌面图标 → 速记：热启动靠推送，冷启动靠启动时问一次。
@@ -339,8 +334,23 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
-  /// 切换底部页签（底部导航每一项都用它，所以"切页"这件事只有一个入口）。
+  /// 切换底部页签（底部导航每一项都用它，所以"点着切页"只有一个入口）。
+  ///
+  /// 滑动切页走的是另一条路（`onPageChanged`），两条最终都落到 `_index` 与偏好上。
   void _selectTab(int index) {
+    if (index == _index) return;
+    setState(() => _index = index);
+    widget.app.setLastTab(index);
+    // 与指示器同一个时长与曲线：页面滑过去的同时胶囊也滑过去
+    _pages.animateToPage(
+      index,
+      duration: _navSlideDuration,
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// 滑动结束时（或滑过一半时）由 `PageView` 通知：标题、FAB、偏好都跟着走。
+  void _onPageChanged(int index) {
     if (index == _index) return;
     setState(() => _index = index);
     widget.app.setLastTab(index);
@@ -351,6 +361,9 @@ class _AppShellState extends State<AppShell> {
     if (!mounted) return;
     setState(() => _index = 0);
     widget.app.setLastTab(0);
+    // 用 `jumpToPage` 而不是动画：冷启动时输入框还没建出来，动画会让"聚焦"
+    // 晚一帧，抢不到键盘（HyperOS 上实测会被系统丢掉）
+    if (_pages.hasClients) _pages.jumpToPage(0);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _inspirationKey.currentState?.focusCapture();
     });
@@ -380,13 +393,19 @@ class _AppShellState extends State<AppShell> {
               if (app.overdueCount > 0)
                 _DueBanner(count: app.overdueCount, app: app),
               Expanded(
-                child: IndexedStack(
-                  index: _index,
+                // 左右滑动切页：四个页签排成一排，滑动时底栏的胶囊跟着走。
+                // 每页包一层 `_KeepAlivePage`，切过去再切回来不丢状态
+                // （滚动位置、输入到一半的灵感、展开的项目/任务线）。
+                child: PageView(
+                  controller: _pages,
+                  onPageChanged: _onPageChanged,
                   children: <Widget>[
-                    InspirationTab(key: _inspirationKey, app: app),
-                    ProjectTab(app: app),
-                    EventTab(app: app),
-                    MoreTab(app: app),
+                    _KeepAlivePage(
+                      child: InspirationTab(key: _inspirationKey, app: app),
+                    ),
+                    _KeepAlivePage(child: ProjectTab(app: app)),
+                    _KeepAlivePage(child: EventTab(app: app)),
+                    _KeepAlivePage(child: MoreTab(app: app)),
                   ],
                 ),
               ),
@@ -434,7 +453,7 @@ class _AppShellState extends State<AppShell> {
               child: Padding(
                 padding: const EdgeInsets.all(_navOuterPadding),
                 child: AppBottomNav(
-                  index: _index,
+                  page: _pageProgress,
                   overdueCount: app.overdueCount,
                   onSelect: _selectTab,
                 ),
@@ -460,6 +479,37 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
+/// 让 `PageView` 里的一页**活着**。
+///
+/// 换掉 `IndexedStack` 之后，滑走的页面会被销毁 —— 滚动位置、输入到一半的灵感、
+/// 展开的项目树全都丢。`PageView` 支持自动保活，前提是子树里有人要保活，
+/// 所以这里包一层最小的 `AutomaticKeepAliveClientMixin`。
+class _KeepAlivePage extends StatefulWidget {
+  const _KeepAlivePage({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+/// 启动告警条（数据文件损坏、从备份恢复之类）。
+///
+/// 做成**带外边距的卡片**而不是通栏色带（实机反馈："顶部标题栏偶尔背景颜色
+/// 不一样"）：通栏色带紧贴在标题栏下面，看着像是标题栏自己变了色；
+/// 而且满色的 `errorContainer` 违反"底色一律中性灰"这条主题约定。
 class _WarningBanner extends StatelessWidget {
   const _WarningBanner({required this.messages});
 
@@ -468,18 +518,31 @@ class _WarningBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      width: double.infinity,
-      color: theme.colorScheme.errorContainer,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: <Widget>[
-          const Icon(Icons.warning_amber_outlined, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(messages.join('；'), style: theme.textTheme.bodySmall),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: theme.colorScheme.surfaceContainerHigh,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: <Widget>[
+              Icon(
+                Icons.warning_amber_outlined,
+                size: 18,
+                color: theme.colorScheme.error,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  messages.join('；'),
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -489,6 +552,9 @@ class _WarningBanner extends StatelessWidget {
 ///
 /// 设计文档明确不做推送唤醒（ADR-062），所以"提醒"只能在用户打开 App 时发生：
 /// 这条横幅 + 「更多」上的角标，就是这个 App 全部的到期提醒手段。
+///
+/// 与告警条一样做成卡片：**底部色带贴在标题栏下面会被当成标题栏变色**
+/// （实机反馈），而且它的底色也不该跟着主题色跑。
 class _DueBanner extends StatelessWidget {
   const _DueBanner({required this.count, required this.app});
 
@@ -498,36 +564,36 @@ class _DueBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.tertiaryContainer,
-      child: InkWell(
-        onTap: () => Navigator.of(context).push<void>(
-          MaterialPageRoute<void>(builder: (_) => DuePage(app: app)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                Icons.error_outline,
-                size: 18,
-                color: theme.colorScheme.onTertiaryContainer,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '有 $count 条任务已逾期',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onTertiaryContainer,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: theme.colorScheme.surfaceContainerHigh,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+          onTap: () => Navigator.of(context).push<void>(
+            MaterialPageRoute<void>(builder: (_) => DuePage(app: app)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.error_outline, size: 18, color: theme.colorScheme.error),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '有 $count 条任务已逾期',
+                    style: theme.textTheme.bodySmall,
                   ),
                 ),
-              ),
-              Icon(
-                Icons.chevron_right,
-                size: 18,
-                color: theme.colorScheme.onTertiaryContainer,
-              ),
-            ],
+                Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: theme.colorScheme.outline,
+                ),
+              ],
+            ),
           ),
         ),
       ),

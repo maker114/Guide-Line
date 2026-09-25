@@ -154,7 +154,8 @@ void main() {
   });
 
   group('AppBottomNav（实机那一层）', () {
-    /// 一个能改 index 的宿主：真实用法里 index 由 AppShell 传进来，行为一致。
+    /// 一个能改页位置的宿主：真实用法里这个数由 `PageController` 每帧喂进来，
+    /// 这里直接改，等价于"手指把页面拖到某个位置"。
     final hostKey = GlobalKey<_HostState>();
 
     Future<void> pumpNav(WidgetTester tester) async {
@@ -174,54 +175,52 @@ void main() {
       expect(pill().width, closeTo(bar().width / 4, 0.01));
       expect(pill().height, closeTo(48, 0.01));
 
-      // 跳到最后一格：右端与外部胶囊右内缘齐平
-      hostKey.currentState!.select(3);
+      // 到最后一格：右端与外部胶囊右内缘齐平
+      hostKey.currentState!.dragTo(3);
       await tester.pumpAndSettle();
       expect(bar().right - pill().right, closeTo(0, 0.01));
       expect(pill().width, closeTo(bar().width / 4, 0.01));
     });
 
-    testWidgets('切页签时胶囊滑过去、途中被拉长，右边界到位就不再动', (tester) async {
+    testWidgets('拖到一半时胶囊跟着走、被拉长，落位后收回原宽', (tester) async {
       await pumpNav(tester);
 
       final barWidth = tester.getRect(find.byType(AppBottomNav)).width;
       final nominal = barWidth / 4;
-      final targetRight = nominal * 4; // 最后一格的右边界 = 栏宽
 
-      hostKey.currentState!.select(3);
-      await tester.pump(); // 起帧：动画从 0 开始
-
+      // 模拟"手指把页面从第 0 页拖到第 1 页的一半"，逐帧量
       double? previousRight;
       var stretched = false;
-      for (var step = 0; step < 10; step += 1) {
-        await tester.pump(const Duration(milliseconds: 30));
+      for (final page in <double>[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]) {
+        hostKey.currentState!.dragTo(page);
+        await tester.pump();
         final rect = tester.getRect(find.byKey(navIndicatorKey));
-        expect(rect.right, lessThanOrEqualTo(targetRight + 0.01), reason: '右边界越过了目标');
+        expect(rect.right, lessThanOrEqualTo(nominal * 2 + 0.01), reason: '右边界越过了目标');
         if (previousRight != null) {
           expect(rect.right, greaterThanOrEqualTo(previousRight - 0.01),
-              reason: '第 $step 帧右边界往左退了');
+              reason: 'page=$page 右边界往左退了');
         }
         previousRight = rect.right;
         if (rect.width > nominal + 0.5) stretched = true;
       }
-      expect(stretched, isTrue, reason: '途中应当被拉长');
+      expect(stretched, isTrue, reason: '拖拽途中应当被拉长');
 
-      await tester.pumpAndSettle();
       final settled = tester.getRect(find.byKey(navIndicatorKey));
       expect(settled.width, closeTo(nominal, 0.01), reason: '落位后要收回原宽');
-      expect(settled.left, closeTo(nominal * 3, 0.01));
+      expect(settled.left, closeTo(nominal, 0.01));
     });
 
-    testWidgets('只是重建（index 没变）不会重新播动画', (tester) async {
+    testWidgets('超出范围的页位置会被夹住，不会把胶囊画到栏外', (tester) async {
       await pumpNav(tester);
-      hostKey.currentState!.select(2);
-      await tester.pumpAndSettle();
 
-      final before = tester.getRect(find.byKey(navIndicatorKey));
-      hostKey.currentState!.rebuild(); // 父级因别的原因重建
-      await tester.pump();
-      final after = tester.getRect(find.byKey(navIndicatorKey));
-      expect(after, before);
+      final bar = tester.getRect(find.byType(AppBottomNav));
+      for (final page in <double>[-1.0, 3.0, 5.0]) {
+        hostKey.currentState!.dragTo(page);
+        await tester.pump();
+        final pill = tester.getRect(find.byKey(navIndicatorKey));
+        expect(pill.left, greaterThanOrEqualTo(bar.left - 0.01));
+        expect(pill.right, lessThanOrEqualTo(bar.right + 0.01));
+      }
     });
   });
 }
@@ -234,16 +233,21 @@ class _Host extends StatefulWidget {
 }
 
 class _HostState extends State<_Host> {
-  int _index = 0;
+  final ValueNotifier<double> _page = ValueNotifier<double>(0);
 
-  void select(int index) => setState(() => _index = index);
+  /// 把页面拖到 [page]（可以是小数；真实场景里这就是 `PageController` 的进度）。
+  void dragTo(double page) => _page.value = page;
 
-  void rebuild() => setState(() {});
+  @override
+  void dispose() {
+    _page.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => SizedBox(
         width: 320,
         height: 48,
-        child: AppBottomNav(index: _index, onSelect: select),
+        child: AppBottomNav(page: _page, onSelect: (_) {}),
       );
 }
