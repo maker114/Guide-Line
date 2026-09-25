@@ -309,6 +309,30 @@ void main() {
       final trashIds = zone.trashRoots.map((e) => e.id).toSet();
       expect(trashIds.contains('merged'), isFalse);
     });
+
+    test('事件归档 / 删除时，整条任务线都不单独当成根', () {
+      // 主线任务的父引用是空的（归属在 event_id 上），只看 parentId 会把
+      // 「事件已归档」的每条主线任务都列进归档区 —— 而单独取消其中一条没有任何意义
+      final zone = deriveArchiveZone(
+        projects: const <Project>[],
+        events: <Event>[
+          event('eArchived', archived: true),
+          event('eDeleted', deleted: true),
+          event('eLive'),
+        ],
+        tasks: <Task>[
+          task('tArchived', eventId: 'eArchived', archived: true),
+          task('tSub', eventId: 'eArchived', parent: 'tArchived', type: TaskType.subtask, archived: true),
+          task('tDeleted', eventId: 'eDeleted', deleted: true),
+          task('tLive', eventId: 'eLive'),
+          task('tOrphan', eventId: 'eMissing', archived: true),
+        ],
+        inspirations: const <Inspiration>[],
+      );
+
+      expect(zone.archivedRoots.map((e) => e.id).toSet(), <String>{'eArchived', 'tOrphan'});
+      expect(zone.trashRoots.map((e) => e.id).toList(), <String>['eDeleted']);
+    });
   });
 
   group('ID 与日期', () {

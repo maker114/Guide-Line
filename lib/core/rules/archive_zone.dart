@@ -68,16 +68,35 @@ ArchiveZone deriveArchiveZone({
     ...tasks,
   ];
   final index = TreeIndex(nodes);
+  final eventsById = <String, Event>{for (final e in events) e.id: e};
+
+  // 「级联根」判定必须把**主线任务**也算进来：主线任务的 `parent_task_id` 为空，
+  // 它真正的归属是**事件**。只看 `parentId` 会把「事件已归档」的整条任务线
+  // 逐条当成根列出来（归档一个事件，归档区冒出四五条），而单独取消其中一条
+  // 根本没意义 —— 事件还归档着，它就还是看不见。归档 / 删除都以事件为准。
+  bool isCascadeRoot(EntityNode node, bool Function(EntityNode) flagged) {
+    final parentId = node.parentId;
+    if (parentId != null) {
+      final parent = index.byId[parentId];
+      // 父节点不在这批节点里（悬挂引用）时仍按根处理，不让它从界面上消失
+      return parent == null || !flagged(parent);
+    }
+    if (node is Task) {
+      final owner = eventsById[node.eventId];
+      return owner == null || !flagged(owner);
+    }
+    return true;
+  }
 
   final archivedRoots = nodes
       .where((n) => !n.deleted && n.archived)
-      .where((n) => n.parentId == null || !(index.byId[n.parentId]?.archived ?? false))
+      .where((n) => isCascadeRoot(n, (node) => node.archived))
       .toList(growable: false)
     ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
   final trashRoots = nodes
       .where((n) => n.deleted)
-      .where((n) => n.parentId == null || !(index.byId[n.parentId]?.deleted ?? false))
+      .where((n) => isCascadeRoot(n, (node) => node.deleted))
       .toList(growable: false)
     ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
