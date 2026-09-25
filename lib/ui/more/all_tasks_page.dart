@@ -146,7 +146,6 @@ class AllTasksPage extends StatefulWidget {
 }
 
 class _AllTasksPageState extends State<AllTasksPage> {
-  NodeStatus? _filter;
   TaskGrouping _grouping = TaskGrouping.completion;
 
   @override
@@ -154,11 +153,12 @@ class _AllTasksPageState extends State<AllTasksPage> {
     return ListenableBuilder(
       listenable: widget.app,
       builder: (context, _) {
+        final theme = Theme.of(context);
         final ws = widget.app.ws;
-        final all = ws.liveTasks.where((t) => !t.archived).toList(growable: false);
-        final tasks = _filter == null
-            ? List<Task>.from(all)
-            : all.where((t) => t.status == _filter).toList(growable: true);
+        // 顶部那排「全部 / 未完成 / 已完成 / 已搁置」筛选条整行去掉了
+        // （实机反馈：分类不要了）—— 想看某种状态，切「按完成度」就行，
+        // 它天然把三种状态分成三组、顺序固定。
+        final tasks = ws.liveTasks.where((t) => !t.archived).toList(growable: false);
         final rows = _buildRows(tasks);
 
         return Scaffold(
@@ -167,33 +167,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: <Widget>[
-                      FilterChip(
-                        label: Text('全部 ${all.length}'),
-                        selected: _filter == null,
-                        onSelected: (_) => setState(() => _filter = null),
-                      ),
-                      for (final status in NodeStatus.values) ...<Widget>[
-                        const SizedBox(width: 8),
-                        FilterChip(
-                          label: Text(
-                            '${nodeStatusLabel(status)} '
-                            '${all.where((t) => t.status == status).length}',
-                          ),
-                          selected: _filter == status,
-                          onSelected: (_) => setState(() => _filter = status),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
                 // 分组调节栏走全应用统一的胶囊选择器（与「到期」的档位栏、
                 // 项目详情的「状态」同一套观感），不再是 Material 的分段控件
                 child: StatusPillSelector<TaskGrouping>(
@@ -202,6 +176,10 @@ class _AllTasksPageState extends State<AllTasksPage> {
                   labelOf: (value) => value.label,
                   onSelected: (value) => setState(() => _grouping = value),
                 ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                child: Text('共 ${tasks.length} 条（含子任务）', style: theme.textTheme.labelSmall),
               ),
               const Divider(height: 1),
               Expanded(
