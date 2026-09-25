@@ -47,7 +47,7 @@ void main() {
     expect(find.text('共 1 条（含子任务）'), findsOneWidget);
   });
 
-  testWidgets('任务行：左边任务名，右边到期日 + 完成圆钮，没有箭头', (tester) async {
+  testWidgets('任务行：任务名与到期日同一行、日期靠右，完成钮最右，没有箭头', (tester) async {
     final app = await boot();
     final event = app.ws.createEvent(name: '一件事');
     app.run(() => app.ws.createTask(eventId: event.id, title: '写解析层', dueAt: dateOffset(3)));
@@ -58,12 +58,49 @@ void main() {
     final due = tester.getRect(find.textContaining('3 天后'));
     final button = tester.getRect(find.byIcon(Icons.radio_button_unchecked));
 
+    expect(
+      (due.center.dy - title.center.dy).abs(),
+      lessThan(8),
+      reason: '到期日必须和任务名在同一行',
+    );
     expect(title.left, lessThan(due.left), reason: '任务名在左、到期日在它右边');
     expect(due.right, lessThanOrEqualTo(button.left), reason: '完成圆钮在到期日右边（最右）');
     expect(find.byIcon(Icons.chevron_right), findsNothing, reason: '箭头去掉了');
-    // 所属事件仍在名字下面那一行（位置不变）
-    final eventLabel = tester.getRect(find.text('一件事'));
-    expect(eventLabel.top, greaterThan(title.bottom), reason: '事件在名字下面');
+    // 第二行仍是所属事件（小一号的次要信息）
+    expect(find.text('一件事'), findsOneWidget);
+  });
+
+  testWidgets('任务名比下面那行（所属事件）字号大一档', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    app.run(() => app.ws.createTask(eventId: event.id, title: '写解析层'));
+
+    await openAllTasks(tester, app);
+
+    final titleSize = tester.widget<Text>(find.text('写解析层')).style?.fontSize;
+    final eventSize = tester.widget<Text>(find.text('一件事')).style?.fontSize;
+    expect(titleSize, isNotNull);
+    expect(eventSize, isNotNull);
+    expect(titleSize!, greaterThan(eventSize!), reason: '主次靠字号分开');
+  });
+
+  testWidgets('子任务行只显示子任务名，不带父任务名与「子任务」标签', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final main = app.ws.createTask(eventId: event.id, title: '主线任务');
+    app.run(() => app.ws.createTask(
+          eventId: event.id,
+          title: '子任务甲',
+          parentTaskId: main.id,
+          type: TaskType.subtask,
+        ));
+
+    await openAllTasks(tester, app);
+
+    expect(find.text('子任务甲'), findsOneWidget);
+    expect(find.text('主线任务'), findsOneWidget, reason: '父任务自己有自己的一行');
+    expect(find.text('· 主线任务'), findsNothing, reason: '子任务行不该再拖一条父任务名的尾巴');
+    expect(find.text('· 子任务'), findsNothing, reason: '「子任务」这个标签也不再显示');
   });
 
   testWidgets('按完成度分组：三档顺序固定，切到按事件也照常', (tester) async {
