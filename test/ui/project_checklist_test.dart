@@ -175,4 +175,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('整理后的整体说明'), findsOneWidget);
   });
+
+  testWidgets('导出交接说明：菜单入口 → 预览页能看到生成的内容与隐私提醒', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '交接项目');
+    app.run(() => app.ws.updateProject(project.id, purpose: '把状态讲清楚'));
+    app.run(() => app.ws.addProjectItem(project.id, '已做的一条'));
+    app.run(() => app.ws.setProjectItemDone(
+          project.id,
+          app.ws.findProject(project.id)!.items.single.id,
+          true,
+        ));
+
+    await openProject(tester, app, '交接项目');
+
+    // 入口在 AppBar 的「更多」里
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('导出交接说明…'), findsOneWidget);
+    await tester.tap(find.text('导出交接说明…'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('交接说明 · 交接项目'), findsOneWidget);
+    expect(find.textContaining('不想给出去的部分删掉'), findsOneWidget);
+    expect(find.textContaining('文件会离开这台手机'), findsOneWidget, reason: '必须提醒隐私');
+    expect(find.text('导出为 .md'), findsOneWidget);
+
+    // 生成的内容真的在编辑框里（含目的与勾选语法）
+    final controller = tester
+        .widget<TextField>(
+          find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
+        )
+        .controller!;
+    expect(controller.text, contains('# 项目：交接项目'));
+    expect(controller.text, contains('- 目的：把状态讲清楚'));
+    expect(controller.text, contains('- [x] 已做的一条'));
+  });
+
+  testWidgets('预览页内容可编辑（导出前能删掉不想外发的部分）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '可编辑预览');
+    app.run(() => app.ws.updateProject(project.id, purpose: '这句不想给出去'));
+
+    await openProject(tester, app, '可编辑预览');
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('导出交接说明…'));
+    await tester.pumpAndSettle();
+
+    final field = find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first;
+    await tester.enterText(field, '# 只留这一行\n');
+    await tester.pumpAndSettle();
+
+    final controller = tester.widget<TextField>(field).controller!;
+    expect(controller.text, '# 只留这一行\n');
+    expect(controller.text, isNot(contains('不想给出去')));
+    expect(project.id, isNotEmpty);
+  });
 }

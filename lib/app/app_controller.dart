@@ -243,6 +243,38 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 生成某项目的**交接说明**（Markdown）并交给系统分享面板。
+  ///
+  /// 与整库导出分开：这份只含**用户预览过的那一个项目**（目的、实现清单与正文、
+  /// 待处理灵感、相关事件与任务线），用来丢给电脑上的 AI。
+  /// 分享是否成功不影响导出本身 —— 文件已经落在应用私有目录里了。
+  Future<({bool ok, String message})> exportHandoffAndShare({
+    required String projectId,
+    required String markdown,
+  }) async {
+    try {
+      final now = Ids.nowMillis();
+      final project = workspace.findProject(projectId);
+      final file = storage.writeHandoffExport(
+        now,
+        markdown,
+        projectTitle: project?.title,
+      );
+      final name = _fileNameOf(file.path);
+      final shared = await DataTransferPlatform.shareFile(
+        file.path,
+        text: '${project?.title ?? '项目'} · 交接说明',
+        subject: '${project?.title ?? '项目'} · 交接说明',
+      );
+      return (
+        ok: true,
+        message: shared ? '已导出并分享：$name' : '已导出到应用私有目录：$name',
+      );
+    } catch (error) {
+      return (ok: false, message: '导出失败：$error');
+    }
+  }
+
   /// 用导入的数据**整体替换**当前数据。
   ///
   /// 替换前 [AppStorage.save] 会先把当前数据轮转进滚动备份，

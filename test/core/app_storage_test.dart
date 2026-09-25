@@ -265,6 +265,61 @@ void main() {
     });
   });
 
+  group('交接说明导出', () {
+    test('文件名是 handoff-<项目名>-时间戳.md，且项目名里的危险字符被收掉', () {
+      final file = storage.writeHandoffExport(
+        day,
+        '# 项目：示例\n',
+        projectTitle: '重构/知识库: 第二版',
+      );
+
+      final name = file.uri.pathSegments.last;
+      expect(name.startsWith('handoff-'), isTrue);
+      expect(name.endsWith('.md'), isTrue);
+      expect(name, contains('20260906'));
+      expect(name, isNot(contains('/')));
+      expect(name, isNot(contains(':')));
+      expect(name, isNot(contains(' ')));
+      expect(file.readAsStringSync(encoding: utf8), '# 项目：示例\n');
+    });
+
+    test('没有项目名也能导出（文件名只留前缀与时间）', () {
+      final file = storage.writeHandoffExport(day, '内容\n');
+      final name = file.uri.pathSegments.last;
+      expect(name.startsWith('handoff-2'), isTrue, reason: '紧接着就是日期');
+      expect(name.endsWith('.md'), isTrue);
+    });
+
+    test('交接说明**不被导出轮转清理**（它是用户特意生成的）', () {
+      // 先造出超过保留数的整库导出，触发 _pruneExports
+      for (var i = 0; i < AppStorage.exportKeepCount + 3; i += 1) {
+        storage.writeExport(<int>[1, 2, 3], nowMillis: day + i * 1000);
+      }
+      final handoff = storage.writeHandoffExport(day, '# 说明\n');
+
+      // 再写一次整库导出，让清理逻辑跑一遍
+      storage.writeExport(<int>[4, 5, 6], nowMillis: day + 999000);
+
+      expect(
+        handoff.existsSync(),
+        isTrue,
+        reason: 'handoff-* 不在 listExports 的筛选范围内，不该被轮转删掉',
+      );
+      expect(
+        storage.listExports().length,
+        AppStorage.exportKeepCount,
+        reason: '整库导出仍然按保留份数轮转',
+      );
+    });
+
+    test('交接说明写两次是两份不同文件（按秒区分）', () {
+      final a = storage.writeHandoffExport(day, '第一份\n', projectTitle: '甲');
+      final b = storage.writeHandoffExport(day + 1000, '第二份\n', projectTitle: '甲');
+      expect(a.path, isNot(b.path));
+      expect(a.existsSync() && b.existsSync(), isTrue);
+    });
+  });
+
   group('损坏与恢复', () {
     test('主文件损坏 → 隔离现场 + 从备份自动恢复', () {
       storage.save(storeWith('完好版本'), nowMillis: day);

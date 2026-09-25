@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../../core/rules/handoff_export.dart';
 import '../../features/workspace.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
@@ -11,6 +12,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../inspiration/merge_editor_page.dart';
+import 'handoff_preview_page.dart';
 import 'project_actions.dart';
 import 'project_checklist.dart';
 
@@ -57,6 +59,10 @@ class ProjectDetailPage extends StatelessWidget {
                 tooltip: '更多',
                 onSelected: (value) async {
                   switch (value) {
+                    case 'handoff':
+                      if (!context.mounted) return;
+                      await _exportHandoff(context, project);
+                      break;
                     case 'move':
                       await moveProjectAction(context, app, project.id);
                       break;
@@ -71,6 +77,10 @@ class ProjectDetailPage extends StatelessWidget {
                   }
                 },
                 itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                  PopupMenuItem<String>(
+                    value: 'handoff',
+                    child: Text('导出交接说明…'),
+                  ),
                   PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
                   PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                   PopupMenuItem<String>(value: 'delete', child: Text('删除')),
@@ -136,6 +146,30 @@ class ProjectDetailPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  /// 生成并把用户送到**交接说明预览页**（真正写文件在那一步）。
+  Future<void> _exportHandoff(BuildContext context, Project project) async {
+    final markdown = HandoffExport.build(
+      project: project,
+      // 事件与项目没有关联字段，所以带全部事件与任务（设计文档 §3.2）
+      events: app.ws.liveEvents,
+      tasks: app.ws.liveTasks,
+      inspirations: app.ws.liveInspirations
+          .where((i) => i.projectId == project.id)
+          .toList(growable: false),
+      now: DateTime.now(),
+    );
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => HandoffPreviewPage(
+          app: app,
+          projectId: project.id,
+          projectTitle: project.title,
+          markdown: markdown,
+        ),
+      ),
     );
   }
 

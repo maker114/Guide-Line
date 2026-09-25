@@ -375,6 +375,39 @@ class AppStorage {
     }
   }
 
+  /// 写一份**交接说明**（Markdown），返回它。
+  ///
+  /// 与 `guideline-*.json.gz` 的整库导出刻意分开：
+  ///   · 文件名前缀是 `handoff-`，所以**不会被 `_pruneExports` 轮转掉**
+  ///     —— 交接说明是用户特意生成的，删掉就得重新生成，成本比数据备份高；
+  ///     所以它只积累、不自动清理，用户自己清理即可（文件很小，是纯文本）。
+  ///   · 内容也只包含**用户预览过的那一个项目**，不是整库。
+  File writeHandoffExport(int nowMillis, String markdown, {String? projectTitle}) {
+    final dir = ensureExportsDir();
+    final file = File(
+      '${dir.path}${Platform.pathSeparator}${_handoffName(nowMillis, projectTitle)}',
+    );
+    AtomicFile(file).writeText(markdown);
+    return file;
+  }
+
+  /// `handoff-<项目名>-YYYYMMDD-HHmmss.md`；项目名里的路径分隔符与空白会被收掉。
+  String _handoffName(int millis, String? projectTitle) {
+    final d = DateTime.fromMillisecondsSinceEpoch(millis);
+    String two(int v) => v.toString().padLeft(2, '0');
+    final date = '${d.year}${two(d.month)}${two(d.day)}';
+    final time = '${two(d.hour)}${two(d.minute)}${two(d.second)}';
+
+    var slug = (projectTitle ?? '').trim();
+    // 只留安全字符：文件名里出现 / \ 或控制字符会让写入直接失败
+    slug = slug.replaceAll(RegExp(r'[\\/:*?"<>|\s]+'), '-');
+    slug = slug.replaceAll(RegExp(r'-+'), '-');
+    if (slug.length > 30) slug = slug.substring(0, 30);
+    slug = slug.replaceAll(RegExp(r'^-|-$'), '');
+    final middle = slug.isEmpty ? '' : '$slug-';
+    return 'handoff-$middle$date-$time.md';
+  }
+
   /// `guideline-YYYYMMDD-HHmmss.json.gz`
   String _exportName(int millis) {
     final d = DateTime.fromMillisecondsSinceEpoch(millis);
