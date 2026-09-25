@@ -11,9 +11,9 @@ import 'all_tasks_page.dart';
 import 'appearance_page.dart';
 import 'archive_page.dart';
 import 'backups_page.dart';
-import 'due_page.dart';
 import 'export_page.dart';
 import 'search_page.dart';
+import 'upcoming_page.dart';
 
 /// 更多 Tab：**浏览入口 + 数据安全 + 关于**。
 ///
@@ -27,7 +27,9 @@ class MoreTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ws = app.ws;
-    final due = ws.tasksDueOnOrBefore(dateOffset(0)).length;
+    // 「接下来的任务」：还开着的任务（未完成、未搁置、不在已搁置事件下），
+    // 含没排期的 —— 与那个页面的列表同一口径
+    final upcoming = ws.openTasks().length;
     final backups = app.backups;
     final searchable =
         app.projectCount + app.eventCount + app.taskCount + app.inspirationCount;
@@ -37,10 +39,10 @@ class MoreTab extends StatelessWidget {
       children: <Widget>[
         const SectionHeader('浏览'),
         _MoreItem(
-          icon: Icons.event_available_outlined,
-          title: '到期',
-          subtitle: due == 0 ? '今天及之前没有到期的任务' : '今天及之前 $due 条待处理',
-          page: DuePage(app: app),
+          icon: Icons.upcoming_outlined,
+          title: '接下来的任务',
+          subtitle: upcoming == 0 ? '现在没有待办' : '当前 $upcoming 条待办（含没排期的）',
+          page: UpcomingTasksPage(app: app),
         ),
         _MoreItem(
           icon: Icons.checklist_outlined,

@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/task.dart';
 import '../events/event_detail_page.dart';
+import 'color_picker.dart';
 import 'format.dart';
 import 'task_status_button.dart';
 import 'urgency.dart';
@@ -64,8 +65,11 @@ class TaskTile extends StatelessWidget {
           Expanded(
             child: Row(
               children: <Widget>[
-                const Icon(Icons.timeline, size: 13),
-                const SizedBox(width: 3),
+                // 所属事件那颗**标识色小圆点**（与项目树行首同一套标识色系统；
+                // 事件没设色时是灰色空心圆）—— 列表里一眼看出这条属于哪条线，
+                // 也与日历上那圈圆环的颜色对得上。
+                ProjectMarker(color: event?.color, size: 10),
+                const SizedBox(width: 5),
                 Flexible(
                   child: Text(
                     event?.name ?? '（事件已删除）',

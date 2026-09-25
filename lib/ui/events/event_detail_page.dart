@@ -5,6 +5,7 @@ import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../../core/rules/completion.dart';
+import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
@@ -120,6 +121,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
     if (error != null) _toast(error, error: true);
   }
 
+  /// 选事件标识色（`null` = 取消，`''` = 明确不要颜色）。
+  Future<void> _pickColor(BuildContext context, Event event) async {
+    final picked = await pickEventColor(context, current: event.color);
+    if (picked == null || !context.mounted) return;
+    _setColor(context, event, picked.isEmpty ? null : picked);
+  }
+
+  void _setColor(BuildContext context, Event event, String? value) {
+    final error = app.run(() => app.ws.setEventColor(event.id, value));
+    if (error != null && context.mounted) showToast(context, error, error: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -150,8 +163,29 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(event.name, overflow: TextOverflow.ellipsis),
+            // 标题旁立一根事件标识色的竖条（与项目详情页同一个控件、同一套系统）
+            title: Row(
+              children: <Widget>[
+                ProjectColorBar(color: event.color, height: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(event.name, overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
             actions: <Widget>[
+              // 标识色入口：与项目详情页那个调色板图标一致
+              IconButton(
+                tooltip: event.color == null
+                    ? '标识色：点一下选'
+                    : '标识色 ${event.color}（长按清除）',
+                icon: Icon(
+                  Icons.palette_outlined,
+                  color: colorOfHex(event.color) ?? Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                onPressed: () => _pickColor(context, event),
+                onLongPress: event.color == null ? null : () => _setColor(context, event, null),
+              ),
               PopupMenuButton<String>(
                 tooltip: '更多',
                 onSelected: (value) async {

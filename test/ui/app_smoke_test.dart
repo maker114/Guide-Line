@@ -50,7 +50,7 @@ void main() {
 
     await tester.tap(banner);
     await tester.pumpAndSettle();
-    expect(find.text('已逾期'), findsOneWidget, reason: '点它照旧进「到期」');
+    expect(find.text('已逾期'), findsOneWidget, reason: '点它照旧进「接下来的任务」');
   });
 
   /// 走「页面内直接输入」：点开那一行 → 输入 → 点**那一行**的「添加」。
@@ -227,7 +227,7 @@ void main() {
     expect(app.ws.liveProjects.where((p) => !p.archived).length, 1);
   });
 
-  testWidgets('逾期任务会在启动时提醒，并能一键跳到到期页', (tester) async {
+  testWidgets('逾期任务会在启动时提醒，并能一键跳到「接下来的任务」', (tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final event = app.ws.createEvent(name: '带逾期任务的事件');
     app.run(() => app.ws.createTask(
@@ -253,8 +253,16 @@ void main() {
 
     await tester.tap(find.text('有 1 条任务已逾期'));
     await tester.pumpAndSettle();
+
+    // 落点是「接下来的任务」：按紧迫度分组，逾期那一档排在最前
+    expect(find.text('接下来的任务'), findsOneWidget);
     expect(find.text('早就该做的事'), findsOneWidget);
-    expect(find.text('没有到期日的事'), findsNothing, reason: '没设到期日的不该出现在到期页');
+    expect(find.text('已逾期'), findsOneWidget, reason: '逾期是紧迫度里的第一档');
+    expect(
+      find.text('没有到期日的事'),
+      findsOneWidget,
+      reason: '这一页是"还开着的任务"，没排期的也算（在「没有到期日」那一档）',
+    );
   });
 
   testWidgets('已完成的任务默认折叠下级，点一下能展开', (tester) async {

@@ -32,7 +32,7 @@ void main() {
     final collections = raw['collections'] as Map<String, dynamic>;
     final at = DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
     for (final collection in collections.values) {
-      final items = ((collection as Map<String, dynamic>)['items'] as List<dynamic>);
+      final items = (collection as Map<String, dynamic>)['items'] as List<dynamic>;
       for (final item in items.cast<Map<String, dynamic>>()) {
         if (ids.contains(item['id'])) item['updated_at'] = at;
       }

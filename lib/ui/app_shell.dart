@@ -8,8 +8,8 @@ import '../platform/data_directory.dart';
 import '../platform/shortcut_channel.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
-import 'more/due_page.dart';
 import 'more/more_tab.dart';
+import 'more/upcoming_page.dart';
 import 'nav_icon_motion.dart';
 import 'projects/project_tab.dart';
 import 'theme/shape_tokens.dart';
@@ -642,7 +642,7 @@ class _DueBanner extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(AppShapes.cardRadius),
           onTap: () => Navigator.of(context).push<void>(
-            MaterialPageRoute<void>(builder: (_) => DuePage(app: app)),
+            MaterialPageRoute<void>(builder: (_) => UpcomingTasksPage(app: app)),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

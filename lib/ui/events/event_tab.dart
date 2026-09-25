@@ -6,6 +6,7 @@ import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../../core/rules/cascade.dart';
+import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
@@ -265,16 +266,25 @@ class _EventCardHeader extends StatelessWidget {
               ),
               onPressed: () => app.setExpanded(event.id, expanded: !expanded),
             ),
-      title: Text(
-        event.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: event.status == NodeStatus.done
-            ? theme.textTheme.bodyLarge?.copyWith(
-                decoration: TextDecoration.lineThrough,
-                color: theme.colorScheme.outline,
-              )
-            : null,
+      title: Row(
+        children: <Widget>[
+          // 事件标识色的竖条（与项目树行首同一个控件、同一套色板与规则）
+          ProjectColorBar(color: event.color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              event.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: event.status == NodeStatus.done
+                  ? theme.textTheme.bodyLarge?.copyWith(
+                      decoration: TextDecoration.lineThrough,
+                      color: theme.colorScheme.outline,
+                    )
+                  : theme.textTheme.bodyLarge,
+            ),
+          ),
+        ],
       ),
       subtitle: Row(
         children: <Widget>[

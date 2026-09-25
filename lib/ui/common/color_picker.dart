@@ -94,6 +94,31 @@ class ProjectColorBar extends StatelessWidget {
 ///   · `null` —— 用户取消（保持原值）；
 ///   · `''`   —— 用户选择"不用标识色"，调用方据此清空。
 Future<String?> pickProjectColor(BuildContext context, {String? current}) {
+  return _pickMarkerColor(
+    context,
+    current: current,
+    title: '项目标识色',
+    hint: '只在项目树与标题旁显示，不影响状态与完成判定。',
+  );
+}
+
+/// 事件的标识色（与项目同一套色板与口径）。
+Future<String?> pickEventColor(BuildContext context, {String? current}) {
+  return _pickMarkerColor(
+    context,
+    current: current,
+    title: '事件标识色',
+    hint: '任务列表里的小圆点与日历上的圆环都用它；不影响状态与完成判定。',
+  );
+}
+
+/// 取色面板的**唯一实现**（项目 / 事件共用，只有标题与说明不同）。
+Future<String?> _pickMarkerColor(
+  BuildContext context, {
+  required String title,
+  required String hint,
+  String? current,
+}) {
   return showModalBottomSheet<String>(
     context: context,
     builder: (sheetContext) {
@@ -105,12 +130,9 @@ Future<String?> pickProjectColor(BuildContext context, {String? current}) {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text('项目标识色', style: theme.textTheme.titleMedium),
+              Text(title, style: theme.textTheme.titleMedium),
               const SizedBox(height: 4),
-              Text(
-                '只在项目树与标题旁显示，不影响状态与完成判定。',
-                style: theme.textTheme.bodySmall,
-              ),
+              Text(hint, style: theme.textTheme.bodySmall),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 12,
