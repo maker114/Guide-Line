@@ -134,21 +134,26 @@ class _NavItem extends StatefulWidget {
 }
 
 class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin {
-  /// `0 → 1` 走完就是"动一下"。
+  /// 从"静止进度"走到 1 就是"动一下"。
+  ///
+  /// 起始值与结束值都取 `motion.restProgress`：前三种手势是"归于无"（0），
+  /// 折线是"画满"（1）—— 播完落回静止样子，不需要额外的收尾逻辑。
   late final AnimationController _motion = AnimationController(
     vsync: this,
     duration: navIconMotionDuration,
+    value: widget.motion.restProgress,
   )..addStatusListener((status) {
-      // 播完回到 0：四种手势都按"进度 0 = 静止"来画，这样动画结束后
-      // 画布上不会留下任何东西，也省掉了"要不要 reset"的判断
-      if (status == AnimationStatus.completed && mounted) _motion.value = 0;
+      if (status == AnimationStatus.completed && mounted) {
+        _motion.value = widget.motion.restProgress;
+      }
     });
 
   @override
   void didUpdateWidget(_NavItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 选中状态变了（点底栏切页、或者滑动过半格）也动一下
-    if (widget.selected != oldWidget.selected) _motion.forward(from: 0);
+    // **只在"变成选中"时动一下**（实机反馈）：从选中退出去时不用再播一次 ——
+    // 切页时旧的那一项安静退场就好，两个图标一起动反而乱。
+    if (widget.selected && !oldWidget.selected) _motion.forward(from: 0);
   }
 
   @override
@@ -166,11 +171,9 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
 
     return Expanded(
       child: InkWell(
-        onTap: () {
-          // 点**已经选中**的那一项也要有反馈 —— 否则"我点到了吗"只能看页面有没有动
-          _motion.forward(from: 0);
-          widget.onTap();
-        },
+        // 点击本身不再触发动画：触发点只有一个 —— **变成选中**。
+        // （点已经选中的那一项只是回到这一页，没什么可庆祝的。）
+        onTap: widget.onTap,
         // 指示器是胶囊，水波纹也跟着走胶囊 —— 圆形的波纹会溢出到相邻格子
         customBorder: const StadiumBorder(),
         child: SizedBox(
@@ -296,7 +299,7 @@ class AppBottomNav extends StatelessWidget {
                       icon: Icons.timeline_outlined,
                       selectedIcon: Icons.timeline,
                       label: '事件',
-                      motion: NavIconMotion.lineFold,
+                      motion: NavIconMotion.lineTrace,
                       selected: index == 2,
                       onTap: () => onSelect(2),
                     ),

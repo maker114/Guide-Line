@@ -226,9 +226,9 @@ void main() {
       }
     });
 
-    /// 这一项此刻**动起来了没有**：不关心它用的是哪种手势，
-    /// 只要子树里有一个非恒等的 `Transform`、或者灯泡那圈光线正在画，
-    /// 就算"动起来了"。
+    /// 这一项此刻**动起来了没有**：不关心它用的是哪种手势 ——
+    /// 子树里有非恒等的 `Transform`、灯泡那圈光线正在画、或者折线还没走完，
+    /// 都算"动起来了"。
     bool iconIsMoving(WidgetTester tester, String label) {
       final scope = find.byKey(navIconKey(label));
       final transforms = tester.widgetList<Transform>(
@@ -248,6 +248,14 @@ void main() {
         final painter = paint.painter;
         if (painter is NavBulbRays && painter.progress > 0.05) return true;
       }
+      // 折线静止时是"画满"（reveal = 1），所以小于 1 就是还在走
+      final clips = tester.widgetList<ClipRect>(
+        find.descendant(of: scope, matching: find.byType(ClipRect)),
+      );
+      for (final clip in clips) {
+        final clipper = clip.clipper;
+        if (clipper is NavIconRevealClipper && clipper.reveal < 0.99) return true;
+      }
       return false;
     }
 
@@ -262,25 +270,55 @@ void main() {
         await tester.pump(const Duration(milliseconds: 60));
         if (iconIsMoving(tester, label)) moved = true;
       }
+      await tester.pumpAndSettle();
       return moved;
     }
 
-    testWidgets('点某一项：它自己的那一下会播（四种手势都动）', (tester) async {
+    testWidgets('变成选中时才播：四种手势都会动，播完回到静止', (tester) async {
       await pumpNav(tester);
 
-      for (final label in <String>['灵感', '项目', '事件', '更多']) {
+      const order = <String>['灵感', '项目', '事件', '更多'];
+      for (final label in order) {
         expect(iconIsMoving(tester, label), isFalse, reason: '$label 静止时不该在动');
       }
 
-      for (final label in <String>['灵感', '项目', '事件', '更多']) {
-        expect(await tapAndWatch(tester, label), isTrue, reason: '$label 点一下应当动起来');
-
+      for (var i = 0; i < order.length; i += 1) {
+        // 先离开这一项 —— 现在是"变成选中才播"，已经选中的那一项不会重播
+        hostKey.currentState!.dragTo(((i + 1) % order.length).toDouble());
         await tester.pumpAndSettle();
-        expect(iconIsMoving(tester, label), isFalse, reason: '$label 播完要回到静止');
+
+        expect(
+          await tapAndWatch(tester, order[i]),
+          isTrue,
+          reason: '${order[i]} 选中时应当动起来',
+        );
+        expect(iconIsMoving(tester, order[i]), isFalse,
+            reason: '${order[i]} 播完要回到静止');
       }
     });
 
-    testWidgets('灯泡那一下：图标框里确实画出了发散的光线', (tester) async {
+    testWidgets('从选中退出去的那一项**不再**播一次', (tester) async {
+      await pumpNav(tester);
+
+      // 先选中「事件」
+      await tapAndWatch(tester, '事件');
+      expect(iconIsMoving(tester, '事件'), isFalse, reason: '它自己已经播完了');
+
+      // 再选「更多」：只有新选中的那一项动，退出的那一项安静
+      await tester.tap(find.text('更多'));
+      await tester.pump();
+      var exitedMoved = false;
+      var enteredMoved = false;
+      for (var step = 0; step < 5; step += 1) {
+        await tester.pump(const Duration(milliseconds: 60));
+        if (iconIsMoving(tester, '事件')) exitedMoved = true;
+        if (iconIsMoving(tester, '更多')) enteredMoved = true;
+      }
+      expect(enteredMoved, isTrue, reason: '新选中的那一项要动');
+      expect(exitedMoved, isFalse, reason: '退出的那一项不该再播一次');
+    });
+
+    testWidgets('灯泡那一下：只在上半圈画发散的光线', (tester) async {
       await pumpNav(tester);
 
       NavBulbRays? rays() {
@@ -299,6 +337,16 @@ void main() {
 
       expect(rays(), isNotNull, reason: '灯泡那一项要有光线画层');
       expect(rays()!.progress, 0, reason: '静止时不该画');
+      // 屏幕坐标 y 向下：负角度才是"往上"，也就是灯泡的上半圈
+      expect(
+        NavBulbRays.rayAngles.every((angle) => angle < 0),
+        isTrue,
+        reason: '灯座在下半圈，那里不该发光',
+      );
+
+      // 先离开灵感页，这样接下来才是"变成选中"
+      hostKey.currentState!.dragTo(2);
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('灵感'));
       await tester.pump();
@@ -313,14 +361,35 @@ void main() {
       expect(rays()!.progress, 0, reason: '亮完要收干净');
     });
 
-    testWidgets('点已经选中的那一项：照样有反馈', (tester) async {
+    testWidgets('折线那一下：从起点开始连线，走到画满为止', (tester) async {
       await pumpNav(tester);
 
-      // 起点就是第 0 页，再点一次"灵感"
-      expect(await tapAndWatch(tester, '灵感'), isTrue);
+      NavIconRevealClipper? clipper() {
+        final clips = tester.widgetList<ClipRect>(
+          find.descendant(
+            of: find.byKey(navIconKey('事件')),
+            matching: find.byType(ClipRect),
+          ),
+        );
+        for (final clip in clips) {
+          final value = clip.clipper;
+          if (value is NavIconRevealClipper) return value;
+        }
+        return null;
+      }
+
+      expect(clipper(), isNotNull, reason: '折线那一项要有"逐步揭开"的裁剪');
+      expect(clipper()!.reveal, closeTo(1, 1e-9), reason: '静止时是完整图形');
+
+      await tester.tap(find.text('事件'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 90));
+      final midway = clipper()!.reveal;
+      expect(midway, lessThan(0.99), reason: '途中还没走完');
+      expect(midway, greaterThan(0.15), reason: '起点那一小段应当已经出来了');
 
       await tester.pumpAndSettle();
-      expect(iconIsMoving(tester, '灵感'), isFalse);
+      expect(clipper()!.reveal, closeTo(1, 1e-9), reason: '走完就是完整图形');
     });
 
     testWidgets('滑动到别页时，新选中的那一项也会动一下', (tester) async {
@@ -365,6 +434,10 @@ class _HostState extends State<_Host> {
   Widget build(BuildContext context) => SizedBox(
         width: 320,
         height: 48,
-        child: AppBottomNav(page: _page, onSelect: (_) {}),
+        child: AppBottomNav(
+          page: _page,
+          // 与真实外壳一致：点某一项 → 页位置跟着过去 → 选中态变化 → 图标动一下
+          onSelect: (index) => dragTo(index.toDouble()),
+        ),
       );
 }
