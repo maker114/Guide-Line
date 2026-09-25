@@ -172,16 +172,16 @@ void main() {
     await tester.tap(find.text('这条灵感要合并'));
     await tester.pumpAndSettle();
 
-    // 进了合并编辑器：标题带项目名，编辑框里**就是灵感原文** ——
-    // 不改一个字直接保存，等于"原文原样成为清单的新条目"
+    // 进了合并编辑器：标题带项目名，编辑框里**就是当前的「实现计划」**
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
+    expect(find.text('实现计划（可编辑）'), findsOneWidget);
     final field = tester.widget<TextField>(
       find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
     );
-    expect(field.controller!.text, '这条灵感要合并');
+    expect(field.controller!.text, isEmpty, reason: '项目还没写正文 → 编辑框是空的');
   });
 
-  testWidgets('合并保存：灵感成为清单的新条目，「实现计划」正文不动', (tester) async {
+  testWidgets('合并选择一：手改正文 → 保存写回「实现计划」，灵感进归档区', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '项目乙');
     app.run(() => app.ws.updateProject(project.id, implementation: '手写的计划'));
@@ -204,15 +204,22 @@ void main() {
     await tester.tap(find.text('灵感原文'));
     await tester.pumpAndSettle();
 
+    // 编辑框预填当前正文，照着灵感改一版再保存
+    final field = find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first;
+    await tester.enterText(field, '改好的计划：灵感原文');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
 
     final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.items.map((i) => i.text), <String>['灵感原文'], reason: '合并的落点是清单');
-    expect(reloaded.implementation, '手写的计划', reason: '合并不再写正文');
+    expect(reloaded.implementation, '改好的计划：灵感原文');
+    expect(reloaded.items, isEmpty, reason: '走正文这一条就不动清单');
     expect(app.ws.inspirationInbox, isEmpty);
     expect(app.ws.archiveZone.mergedInspirations.length, 1);
-    expect(find.text('灵感原文'), findsOneWidget, reason: '回到详情页就能在清单里看到它');
+    expect(
+      find.textContaining('改好的计划：灵感原文'),
+      findsOneWidget,
+      reason: '回到详情页，「实现计划」里就是刚保存的那段',
+    );
   });
 
   testWidgets('写下来的时候就选好项目：选完「记下」直接就是已分配', (tester) async {

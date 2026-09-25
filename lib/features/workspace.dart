@@ -629,29 +629,55 @@ class Workspace {
     persist();
   }
 
-  /// 合并灵感：把这条灵感**追加成项目实现清单的新条目** + 灵感置 `merged`
-  /// （**跨文档**，ADR-033/037）。
+  /// 把一条灵感**原封不动**追加到项目「实现计划」的末尾（灵感整理第 7 条）。
   ///
-  /// 2026-09-25 实机反馈：合并的落点从「实现计划」正文改成**清单条目** ——
-  /// 合并产出的是一件"要做的事"，不是往一段说明里再添一句。`implementation`
-  /// 因此**不再被合并写入**（它仍然由手写与 AI 整理写入）。
+  /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
+  /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
+  static String appendToImplementation(String implementation, String inspirationText) {
+    final base = implementation.trimRight();
+    final addition = inspirationText.trim();
+    if (addition.isEmpty) return base;
+    if (base.isEmpty) return addition;
+    return '$base\n$addition';
+  }
+
+  /// 合并灵感 · **落点一：写进「实现计划」正文**（跨文档，ADR-033/037）。
   ///
-  /// 与其它跨文档动作一样，两份文档**一次落盘**：要么条目和灵感状态都在，
-  /// 要么都不在。撤销合并只恢复灵感，**不把条目撤回来**（ADR-057 同理：
-  /// 已经写进项目的内容不回滚）。
-  ProjectItem mergeInspiration({
+  /// 合并编辑器里"照着灵感手改正文"与"追加原文后保存"走的都是这一条。
+  /// 空正文拒绝 —— 合并不该把正文清没（要只留清单条目就走
+  /// [mergeInspirationAsItem]）。
+  void mergeInspiration({
+    required String inspirationId,
+    required String projectId,
+    required String newImplementation,
+  }) {
+    final inspiration = _requireMergeable(inspirationId, projectId);
+    final trimmed = newImplementation.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('正文不能是空的');
+    final project = findProject(projectId)!;
+
+    final now = Ids.nowMillis();
+    _upsert(
+      DocName.projects,
+      project.copyWith(implementation: trimmed, updatedAt: now),
+    );
+    _markInspirationMerged(inspiration, projectId, now);
+    persist();
+  }
+
+  /// 合并灵感 · **落点二：追加成「实现清单」的新一条**（合并编辑器里那个
+  /// 「作为清单条目」按钮）。
+  ///
+  /// 不碰 `implementation`：这条灵感的去向是"一件要做的事"，不是往说明里添一句。
+  ProjectItem mergeInspirationAsItem({
     required String inspirationId,
     required String projectId,
     required String itemText,
   }) {
-    final inspiration = findInspiration(inspirationId);
-    if (inspiration == null) throw const RuleViolation('灵感不存在');
-    if (inspiration.isMerged) throw const RuleViolation('该灵感已合并');
-    final project = findProject(projectId);
-    if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
-
+    final inspiration = _requireMergeable(inspirationId, projectId);
     final trimmed = itemText.trim();
     if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+    final project = findProject(projectId)!;
 
     final now = Ids.nowMillis();
     final item = ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false);
@@ -662,6 +688,26 @@ class Workspace {
         updatedAt: now,
       ),
     );
+    _markInspirationMerged(inspiration, projectId, now);
+    persist();
+    return item;
+  }
+
+  /// 两种合并共用的前置检查：灵感在、目标项目在、这条灵感还没合并过。
+  Inspiration _requireMergeable(String inspirationId, String projectId) {
+    final inspiration = findInspiration(inspirationId);
+    if (inspiration == null) throw const RuleViolation('灵感不存在');
+    if (inspiration.isMerged) throw const RuleViolation('该灵感已合并');
+    final project = findProject(projectId);
+    if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
+    return inspiration;
+  }
+
+  /// 两种合并共用的收尾：灵感置 `merged` 并记下合并到哪。
+  ///
+  /// 只 `_upsert` 不 `persist()` —— 由调用方跟项目那次改动**一起落盘**，
+  /// 这样"灵感状态 + 正文/条目"要么都在、要么都不在。
+  void _markInspirationMerged(Inspiration inspiration, String projectId, int now) {
     _upsert(
       DocName.inspirations,
       inspiration.copyWith(
@@ -672,8 +718,6 @@ class Workspace {
         updatedAt: now,
       ),
     );
-    persist();
-    return item;
   }
 
   /// 撤销合并（ADR-057）：**只恢复灵感，不回滚项目正文**。

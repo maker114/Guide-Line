@@ -634,25 +634,13 @@ class _InspirationTile extends StatelessWidget {
     if (project == null) return;
     if (!context.mounted) return;
 
-    final merged = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
+    final result = await Navigator.of(context).push<MergeResult>(
+      MaterialPageRoute<MergeResult>(
         builder: (_) => MergeEditorPage(project: project, inspiration: inspiration),
       ),
     );
-    if (merged == null) return;
-
-    final error = app.run(() => ws.mergeInspiration(
-          inspirationId: inspiration.id,
-          projectId: project.id,
-          itemText: merged,
-        ));
-    if (error != null) {
-      if (context.mounted) showToast(context, error, error: true);
-      return;
-    }
-    if (context.mounted) {
-      showToast(context, '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回');
-    }
+    if (result == null || !context.mounted) return;
+    await applyMergeResult(context, app, project, inspiration, result);
   }
 
   void _run(BuildContext context, void Function() action) {

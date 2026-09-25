@@ -816,7 +816,7 @@ class _InspirationsField extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Text(
-              '点一条即可把它追加进上面的「实现清单」',
+              '点一条即可把它并进「实现计划」，或直接追加成清单的一条',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -825,26 +825,15 @@ class _InspirationsField extends StatelessWidget {
     );
   }
 
-  /// 与灵感页走的是同一个 `MergeEditorPage`，只是入口在项目侧。
+  /// 与灵感页走的是同一个 `MergeEditorPage`（三种选择都在那一页里），
+  /// 只是入口在项目侧。
   Future<void> _merge(BuildContext context, Inspiration inspiration) async {
-    final merged = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
+    final result = await Navigator.of(context).push<MergeResult>(
+      MaterialPageRoute<MergeResult>(
         builder: (_) => MergeEditorPage(project: project, inspiration: inspiration),
       ),
     );
-    if (merged == null || !context.mounted) return;
-
-    final error = app.run(() => app.ws.mergeInspiration(
-          inspirationId: inspiration.id,
-          projectId: project.id,
-          itemText: merged,
-        ));
-    if (error != null) {
-      if (context.mounted) showToast(context, error, error: true);
-      return;
-    }
-    if (context.mounted) {
-      showToast(context, '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回');
-    }
+    if (result == null || !context.mounted) return;
+    await applyMergeResult(context, app, project, inspiration, result);
   }
 }
