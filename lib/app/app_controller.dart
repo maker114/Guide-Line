@@ -4,12 +4,14 @@ import 'package:flutter/foundation.dart';
 
 import '../core/ids.dart';
 import '../core/json/store_file.dart';
+import '../core/models/ai_config.dart';
 import '../core/models/entity.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
 import '../core/store/ui_prefs.dart';
 import '../features/workspace.dart';
+import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
 
@@ -28,10 +30,18 @@ class AppController extends ChangeNotifier {
     required this.workspace,
     required this.dataDirectory,
     required List<String> startupWarnings,
-  }) : startupWarnings = List<String>.unmodifiable(startupWarnings);
+    AiTextGenerator? aiGenerator,
+    AiCredentialStore? credentialStore,
+  })  : startupWarnings = List<String>.unmodifiable(startupWarnings),
+        ai = aiGenerator ?? const HttpAiTextGenerator(),
+        credentials = credentialStore ?? const SecureAiCredentialStore();
 
   /// 从磁盘装配（唯一入口）。
-  static Future<AppController> bootstrap({Directory? dataDirectoryOverride}) async {
+  static Future<AppController> bootstrap({
+    Directory? dataDirectoryOverride,
+    AiTextGenerator? aiGenerator,
+    AiCredentialStore? credentialStore,
+  }) async {
     final dir = await DataDirectory.resolve(override: dataDirectoryOverride);
     final storage = AppStorage(AppPaths(dir));
     final report = storage.load();
@@ -41,6 +51,8 @@ class AppController extends ChangeNotifier {
       workspace: workspace,
       dataDirectory: dir,
       startupWarnings: buildWarnings(report),
+      aiGenerator: aiGenerator,
+      credentialStore: credentialStore,
     ).._loadBackgroundBytes();
   }
 
@@ -52,6 +64,12 @@ class AppController extends ChangeNotifier {
   final Directory dataDirectory;
 
   final List<String> startupWarnings;
+
+  /// AI 联网实现（默认走 HTTP；测试注入假实现）
+  final AiTextGenerator ai;
+
+  /// `apiKey` 的保管处（默认 `flutter_secure_storage`）
+  final AiCredentialStore credentials;
 
   Workspace get ws => workspace;
 
@@ -243,8 +261,7 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 生成某项目的**交接说明**（Markdown）并交给系统分享面板。
-  ///
+  /// 生成某项目的**交接说明**（Markdown）并交给系统分享面板。  ///
   /// 与整库导出分开：这份只含**用户预览过的那一个项目**（目的、实现清单与正文、
   /// 待处理灵感、相关事件与任务线），用来丢给电脑上的 AI。
   /// 分享是否成功不影响导出本身 —— 文件已经落在应用私有目录里了。
@@ -301,6 +318,75 @@ class AppController extends ChangeNotifier {
   static String _fileNameOf(String path) {
     final parts = path.split(Platform.pathSeparator);
     return parts.isEmpty ? path : parts.last;
+  }
+
+  // ---------------------------------------------------------------- AI
+
+  /// 读当前 AI 配置（`apiKey` 从安全存储取，其余从偏好取）。
+  ///
+  /// `apiKey` 读不出来时当作"没配置"，**不报错** ——
+  /// 部分 ROM 上 Keystore 会偶发失败，不该让设置页崩掉。
+  Future<AiConfig> readAiConfig() async {
+    final key = await credentials.readApiKey();
+    return AiConfig(
+      baseUrl: prefs.aiBaseUrl,
+      apiKey: key ?? '',
+      model: prefs.aiModel,
+    );
+  }
+
+  /// 保存 AI 配置：非敏感部分进偏好，`apiKey` 进安全存储。
+  Future<String?> saveAiConfig(AiConfig config) async {
+    final normalized = config.normalized();
+    try {
+      workspace.updatePrefs(
+        prefs.copyWith(aiBaseUrl: normalized.baseUrl, aiModel: normalized.model),
+      );
+      // 空 Key 表示"清掉"，不要把空串写进安全存储
+      if (normalized.apiKey.isEmpty) {
+        await credentials.clearApiKey();
+      } else {
+        await credentials.writeApiKey(normalized.apiKey);
+      }
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '保存失败：$error';
+    }
+  }
+
+  /// 把项目清单交给模型整理成一段通顺说明（**只返回结果，不写库**）。
+  ///
+  /// 分成"生成"与"写回"两步是刻意的：模型可能编造清单里没有的东西，
+  /// 必须让用户**先看到再确认**（设计文档 §2.2）。
+  Future<({String? text, String? error})> summarizeProjectItems(String projectId) async {
+    final project = workspace.findProject(projectId);
+    if (project == null || project.deleted) return (text: null, error: '项目不存在');
+    if (project.items.isEmpty) {
+      return (text: null, error: '清单是空的，先加几条再整理');
+    }
+
+    final config = await readAiConfig();
+    final reason = config.validate();
+    if (reason != null) return (text: null, error: reason);
+
+    try {
+      final text = await ai.summarizeChecklist(
+        config: config.normalized(),
+        input: PromptInput(
+          projectTitle: project.title,
+          purpose: project.purpose,
+          items: <({String text, bool done})>[
+            for (final item in project.items) (text: item.text, done: item.done),
+          ],
+        ),
+      );
+      return (text: text, error: null);
+    } on AiRequestException catch (error) {
+      return (text: null, error: error.message);
+    } catch (error) {
+      return (text: null, error: '整理失败：$error');
+    }
   }
 
   /// 启动告警：把加载报告翻译成人能看懂的话。

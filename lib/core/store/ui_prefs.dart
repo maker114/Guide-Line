@@ -17,6 +17,8 @@ class UiPrefs {
     this.backgroundOpacity = defaultBackgroundOpacity,
     this.backgroundBlur = 0,
     this.backgroundSeedHex,
+    this.aiBaseUrl = defaultAiBaseUrl,
+    this.aiModel = defaultAiModel,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -28,6 +30,18 @@ class UiPrefs {
 
   /// 背景图默认不透明度：够看出图，又不影响读正文。
   static const double defaultBackgroundOpacity = 0.30;
+
+  /// AI 接口地址默认值。
+  ///
+  /// 与 `AiConfig.defaultBaseUrl` 是同一个值，但这里再写一份字面量：
+  /// **core 不认识平台层**，而这份是"偏好文件里存什么"的默认值。
+  static const String defaultAiBaseUrl = 'https://api.deepseek.com';
+
+  /// AI 模型默认名。
+  ///
+  /// 是 `deepseek-flash` 而不是 `deepseek-v4.1-flash` ——
+  /// 官方发布说明写的是"将模型名称更改为 `deepseek-flash`"。
+  static const String defaultAiModel = 'deepseek-flash';
 
   /// 已折叠的节点 id（项目树 / 任务线共用）
   final Set<String> collapsedIds;
@@ -68,6 +82,13 @@ class UiPrefs {
   /// 存下来是为了**不必每次启动都重新解码图片**（"跟随背景图"主题要同步拿到颜色）。
   final String? backgroundSeedHex;
 
+  /// AI 接口地址（**非敏感**）。**apiKey 不在这里** ——
+  /// 那个走 `flutter_secure_storage`，因为这个文件会进滚动备份与整库导出。
+  final String aiBaseUrl;
+
+  /// AI 模型名（**非敏感**，允许自定义以兼容其它 OpenAI 兼容端点）。
+  final String aiModel;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -102,6 +123,8 @@ class UiPrefs {
     double? backgroundOpacity,
     double? backgroundBlur,
     Object? backgroundSeedHex = _unset,
+    String? aiBaseUrl,
+    String? aiModel,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -119,6 +142,8 @@ class UiPrefs {
         backgroundSeedHex: backgroundSeedHex == _unset
             ? this.backgroundSeedHex
             : backgroundSeedHex as String?,
+        aiBaseUrl: aiBaseUrl ?? this.aiBaseUrl,
+        aiModel: aiModel ?? this.aiModel,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -132,6 +157,8 @@ class UiPrefs {
         'backgroundOpacity': backgroundOpacity,
         'backgroundBlur': backgroundBlur,
         'backgroundSeedHex': backgroundSeedHex,
+        'aiBaseUrl': aiBaseUrl,
+        'aiModel': aiModel,
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -151,7 +178,16 @@ class UiPrefs {
       backgroundOpacity: _readUnitDouble(json['backgroundOpacity'], defaultBackgroundOpacity),
       backgroundBlur: _readNonNegativeDouble(json['backgroundBlur'], 0),
       backgroundSeedHex: _readHex(json['backgroundSeedHex']),
+      // 坏值（空串 / 非字符串）收回默认值，与其它偏好字段同一套口径
+      aiBaseUrl: _readNonEmpty(json['aiBaseUrl'], defaultAiBaseUrl),
+      aiModel: _readNonEmpty(json['aiModel'], defaultAiModel),
     );
+  }
+
+  static String _readNonEmpty(Object? value, String fallback) {
+    if (value is! String) return fallback;
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? fallback : trimmed;
   }
 
   static String? _readHex(Object? value) {

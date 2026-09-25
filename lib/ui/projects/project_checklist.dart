@@ -5,6 +5,7 @@ import '../../core/models/project.dart';
 import '../../core/models/project_item.dart';
 import '../common/dialogs.dart';
 import '../common/inline_editor.dart';
+import 'ai_preview_page.dart';
 
 /// 项目「实现」的**待办清单**（设计文档 §1.3）。
 ///
@@ -106,6 +107,19 @@ class ProjectChecklist extends StatelessWidget {
             onCreate: (text) => _run(context, () => app.ws.addProjectItem(project.id, text)),
           ),
         ),
+        // AI 整理：把清单**反向压成**一段通顺的实现正文（设计文档 §2.1）。
+        // 只在有清单时才给入口 —— 空清单没什么可整理的。
+        if (items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+            child: ListTile(
+              dense: true,
+              leading: const Icon(Icons.auto_awesome_outlined, size: 18),
+              title: const Text('AI 整理成正文'),
+              subtitle: const Text('把清单合成一段通顺说明，写进「实现正文」'),
+              onTap: () => startAiSummarize(context, app, project.id, project.title),
+            ),
+          ),
       ],
     );
   }
