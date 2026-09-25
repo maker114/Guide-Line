@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
@@ -11,8 +13,9 @@ import 'projects/project_tab.dart';
 
 /// 底部导航的形状参数（自绘，改动时这几个要一起看）。
 ///
-/// 目标（实机反馈）：选中框是**正圆**、把图标与文字都罩住，
-/// **上下与外部胶囊相切**，切换时**左右滑动**。
+/// 目标（实机反馈的第三版）：选中框是**胶囊**（高度不变、两端各是一个半圆），
+/// 选中最左 / 最右那一格时，它的两端圆弧与**外部胶囊的圆弧完全重合**；
+/// 切换时左右滑动，途中被**短暂拉长**（惯性）。
 ///
 /// **为什么自绘而不用 `NavigationBar`**：试过三版都不对。它的选中指示器
 /// 框尺寸**写死的**（`_kIndicatorWidth = 64`、`_kIndicatorHeight = 32`，
@@ -20,31 +23,65 @@ import 'projects/project_tab.dart';
 /// "在这个框里画什么形状"、改不了框。实机量到的两版：
 ///   · 自绘半径 34 的圆 → 被框裁成 **64×28** 的压扁胶囊；
 ///   · 半径改成 32（框宽的一半）→ 又被高度裁成 **64×56** 的椭圆。
-/// 想要"正圆 + 上下相切 + 能滑动"只能自己画。
-const double _navIndicatorRadius = 24;
+/// 想要"任意宽度 + 两端与外部胶囊同弧 + 能滑动"只能自己画。
+const double _navHeight = 48;
 
-/// 导航内容高度 = 选中圆直径。
-const double _navHeight = _navIndicatorRadius * 2;
+/// 选中胶囊与外部胶囊**共用的圆角半径**。
+///
+/// 两者同值 + 指示器与格子同宽（横向内边距取 0），选中最左那格时左端
+/// left = 0、圆心距胶囊左内缘正好等于半径 —— 两段弧**同心同径、完全重合**；
+/// 最右那格同理（right = 栏宽）。这是"圆弧重叠"的唯一条件。
+const double _navRadius = _navHeight / 2;
 
-/// 外层纵向内边距：**取 0**，好让圆上下与胶囊内缘相切
-/// （实机反馈"圆直径大一点、上下和外部胶囊相切"）。
-/// 再大一点圆就会被胶囊裁掉上下两端，不再是个完整的圆。
+/// 外层内边距：横纵都取 0 —— 横向让指示器能顶到胶囊两端的弧上，
+/// 纵向让指示器与胶囊等高。
 const double _navOuterPadding = 0;
 
-/// 外部胶囊的圆角半径 = 选中圆半径 + 外层内边距。
-///
-/// 于是圆心距胶囊左内缘正好等于圆半径，圆在这点与胶囊左端的弧**相切** ——
-/// 两者同心同径，视觉上完全贴合。
-const double _navRadius = _navIndicatorRadius + _navOuterPadding;
+/// 滑动时长：切换页签时胶囊从旧位置滑到新位置。
+const Duration _navSlideDuration = Duration(milliseconds: 300);
 
-/// 滑动时长：切换页签时圆从旧位置滑到新位置。
-const Duration _navSlideDuration = Duration(milliseconds: 260);
+/// 惯性拉伸的上限（dp）：跳三格也不会拉成一条香肠。
+const double _navStretchMax = 20;
+
+/// 选中指示器的 Key：用例靠它量"滑到哪儿了、此刻多宽"。
+@visibleForTesting
+const Key navIndicatorKey = Key('AppBottomNav.indicator');
+
+/// 选中指示器的几何：进度 [t]（0 → 1）时，宽 [nominalWidth] 的胶囊从 [fromLeft]
+/// 滑到 [toLeft]，返回它此刻的 `left` 与 `width`。
+///
+/// 惯性由两件事叠出来，都是"一次鼓起来"、不是"两边各走各的"：
+///   · **位置**走 `easeOutCubic` —— 起步快、后段慢慢靠上去（滑行的减速）；
+///   · **宽度**加一个 `sin(πt)` 的包络 —— 起步 0、中途最大、落位收回。
+/// 用包络而不是"两条边各用一条缓动"，是因为后者起步就会把宽度顶到上限
+/// （实机上等于"啪"地弹宽 20dp），而这样起步是 0、150ms 前后最宽、落位归位。
+/// 鼓起时前导边会略微越过目标格再收回，这一点点"回弹"正是惯性的观感。
+///
+/// 最后把盒子夹在 `[0, barWidth]` 内：鼓起的那几帧前导边会顶到导航条端点上，
+/// 不夹就会画到胶囊外面去。停稳时宽度正好是一格，夹取是空操作，
+/// 所以最左 / 最右那格的两端圆弧仍然与外部胶囊**完全重合**。
+({double left, double width}) navIndicatorGeometry({
+  required double t,
+  required double fromLeft,
+  required double toLeft,
+  required double nominalWidth,
+  required double barWidth,
+}) {
+  final progress = t.clamp(0.0, 1.0);
+  final fromCenter = fromLeft + nominalWidth / 2;
+  final toCenter = toLeft + nominalWidth / 2;
+  final center =
+      fromCenter + (toCenter - fromCenter) * Curves.easeOutCubic.transform(progress);
+  final width = nominalWidth + _navStretchMax * math.sin(math.pi * progress);
+  final maxLeft = math.max(0.0, barWidth - width);
+  return (left: (center - width / 2).clamp(0.0, maxLeft), width: width);
+}
 
 /// 底部导航的一项：可点的方块（图标在上、文字在下）。
 ///
-/// **不含选中背景**：选中圆是整条导航共用的一个，在 `AppBottomNav` 里
-/// 靠 `Stack` 定位并做滑动动画 —— 每项各画一个圆就只能"淡入淡出"，
-/// 做不到"滑过去"。
+/// **不含选中背景**：选中胶囊是整条导航共用的一个，在 `AppBottomNav` 里
+/// 靠 `Stack` 定位并做滑动动画 —— 每项各画一个就只能"淡入淡出"，
+/// 做不到"滑过去 + 途中拉长"。
 class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
@@ -68,7 +105,8 @@ class _NavItem extends StatelessWidget {
     return Expanded(
       child: InkWell(
         onTap: onTap,
-        customBorder: const CircleBorder(),
+        // 指示器是胶囊，水波纹也跟着走胶囊 —— 圆形的波纹会溢出到相邻格子
+        customBorder: const StadiumBorder(),
         child: SizedBox(
           height: _navHeight,
           child: Column(
@@ -120,22 +158,49 @@ class AppBottomNav extends StatefulWidget {
   State<AppBottomNav> createState() => _AppBottomNavState();
 }
 
-class _AppBottomNavState extends State<AppBottomNav> {
+class _AppBottomNavState extends State<AppBottomNav>
+    with SingleTickerProviderStateMixin {
   static const int _itemCount = 4;
 
-  /// 上一次显示的页签。
+  /// 滑动动画的驱动（`0` = 在旧位置、`1` = 到位）。
+  late final AnimationController _controller;
+
+  /// 这次滑动从哪一格、到哪一格。
   ///
-  /// 用它判断"要不要播滑动动画"：与传进来的 index 比，变了才滑。
-  /// 之所以自己存一份而不是看 `didUpdateWidget` 的 `oldWidget.index`，
-  /// 是为了不依赖"父级一定会传新值"—— 父级因别的原因重建时不会误播动画。
-  /// 对齐发生在 build 里（而不是动画结束后），因为动画起点由
-  /// `AnimatedPositioned` 自己按旧位置接管，这里只负责"这次要不要动"。
-  int _shownIndex = 0;
+  /// 用**下标**而不是像素：格子宽度只有 build 里（`LayoutBuilder`）才知道，
+  /// 存下标就能在旋转 / 分屏后按新宽度重新算，不会停在半个格子上。
+  late int _fromIndex;
+  late int _toIndex;
 
   @override
   void initState() {
     super.initState();
-    _shownIndex = widget.index;
+    // 起始值给 `1`：**首次出现不播动画**，直接停在选中那一格。
+    // 这里必须在 `initState` 里赋值 —— 放到 `late` 字段的惰性初始化里，
+    // 首次读取会发生在 `didUpdateWidget`（此时 `widget` 已经是新的那个），
+    // 于是"新旧一样"、动画永远不会播。
+    _controller = AnimationController(
+      vsync: this,
+      duration: _navSlideDuration,
+    )..value = 1;
+    _fromIndex = widget.index;
+    _toIndex = widget.index;
+  }
+
+  @override
+  void didUpdateWidget(AppBottomNav oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 只有"真的换页签"才滑：父级因别的原因重建（主题、数据变更）不误播动画
+    if (widget.index == _toIndex) return;
+    _fromIndex = _toIndex;
+    _toIndex = widget.index;
+    _controller.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
@@ -143,29 +208,39 @@ class _AppBottomNavState extends State<AppBottomNav> {
     final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
-        final itemWidth = constraints.maxWidth / _itemCount;
-        // 圆在"选中那一格"里居中
-        final target = itemWidth * widget.index + (itemWidth - _navIndicatorRadius * 2) / 2;
-        final animate = _shownIndex != widget.index;
-        _shownIndex = widget.index;
+        // 指示器与**一格同宽**：最左那格 left = 0、最右那格 right = 栏宽，
+        // 两端圆弧于是与外部胶囊完全重合（圆角半径同为 `_navRadius`）。
+        final nominalWidth = constraints.maxWidth / _itemCount;
+        final fromLeft = nominalWidth * _fromIndex;
+        final toLeft = nominalWidth * _toIndex;
 
         return Stack(
           children: <Widget>[
-            AnimatedPositioned(
-              // 首次出现不播动画；之后 index 一变就从旧位置滑到新位置
-              duration: animate ? _navSlideDuration : Duration.zero,
-              curve: Curves.easeOutCubic,
-              left: target,
-              // 纵向顶到 0：配合外层零纵向内边距，圆上下与胶囊内缘**相切**
-              top: 0,
-              child: Container(
-                width: _navIndicatorRadius * 2,
-                height: _navIndicatorRadius * 2,
-                decoration: BoxDecoration(
-                  color: scheme.secondaryContainer,
-                  shape: BoxShape.circle,
-                ),
-              ),
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, _) {
+                final geometry = navIndicatorGeometry(
+                  t: _controller.value,
+                  fromLeft: fromLeft,
+                  toLeft: toLeft,
+                  nominalWidth: nominalWidth,
+                  barWidth: constraints.maxWidth,
+                );
+                return Positioned(
+                  // 纵向顶到 0：配合外层零内边距，胶囊与外部胶囊**等高**
+                  left: geometry.left,
+                  top: 0,
+                  child: Container(
+                    key: navIndicatorKey,
+                    width: geometry.width,
+                    height: _navHeight,
+                    decoration: BoxDecoration(
+                      color: scheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(_navRadius),
+                    ),
+                  ),
+                );
+              },
             ),
             Row(
               children: <Widget>[
@@ -319,10 +394,11 @@ class _AppShellState extends State<AppShell> {
           //     只能决定"在这个框里画什么形状"，改不了框；
           //   · 给 `StadiumBorder` 得到 64×32 的胶囊；自绘半径 34 的圆会被
           //     这个框**裁成椭圆**（实机量出来是 64×28 与 64×56 两次都不是圆）。
-          // 要"正圆 + 半径与外部胶囊一致"就只能自己画。
+          // 要"任意宽度 + 两端与外部胶囊同弧 + 能滑动"就只能自己画。
           //
-          // 自绘之后全是可控的：圆半径 `_navIndicatorRadius`，
-          // 外部圆角 `_navRadius = 圆半径 + 内边距`，选中最左/最右时两者同弧相切。
+          // 自绘之后全是可控的：选中指示器与一格同宽、圆角 `_navRadius`，
+          // 而外部胶囊用的是**同一个** `_navRadius` —— 选中最左 / 最右那格时
+          // 两段圆弧完全重合（等宽等径又对齐），中间几格则是一个纯胶囊。
           bottomNavigationBar: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
             child: DecoratedBox(
