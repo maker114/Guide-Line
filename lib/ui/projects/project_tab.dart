@@ -92,22 +92,51 @@ class _ProjectTabState extends State<ProjectTab> {
                   ),
                 )
               else
-                for (final row in rows) ...<Widget>[
-                  const Divider(height: 1, indent: 16, endIndent: 16),
-                  _buildTile(row),
-                  if (_addingChildOf == row.project.id)
-                    Padding(
-                      padding: EdgeInsets.only(left: 16.0 + row.depth * 16),
-                      child: InlineComposer(
-                        label: '新建子项目',
-                        hint: '子项目名',
-                        leading: Icons.subdirectory_arrow_right,
-                        dense: true,
-                        onCreate: (title) =>
-                            _create(parentId: row.project.id, title: title),
+                // **每个主项目一张卡**（与设置页分组卡同一种观感）：
+                //   · 一张卡里的多行靠"同框"表达归属，不再画分割线
+                //     （分割线会把主项目与它的子项目切成同级的小块）；
+                //   · 卡与卡之间留空隙，这是"这是两个不同的主项目"的唯一线索；
+                //   · 展开 / 收起用 `AnimatedSize` 做**高度过渡** ——
+                //     原来是直接重建列表，行数一变就"跳"一下，看着像动画坏了。
+                for (final group in _groupByRoot(rows))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                    child: Card(
+                      margin: EdgeInsets.zero,
+                      elevation: 1,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _buildTile(group.root),
+                          AnimatedSize(
+                            duration: const Duration(milliseconds: 200),
+                            curve: Curves.easeOutCubic,
+                            alignment: Alignment.topCenter,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                for (final child in group.children) _buildTile(child),
+                                if (_addingChildOf == group.root.project.id)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 40, bottom: 6),
+                                    child: InlineComposer(
+                                      label: '新建子项目',
+                                      hint: '子项目名',
+                                      leading: Icons.subdirectory_arrow_right,
+                                      dense: true,
+                                      onCreate: (title) => _create(
+                                        parentId: group.root.project.id,
+                                        title: title,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                ],
+                  ),
             ],
           ),
         ),
@@ -155,6 +184,42 @@ class _ProjectRow {
   final int depth;
   final int childCount;
   final bool expanded;
+}
+
+/// 一个主项目 + 它当前可见的下级（展开时才有）。
+///
+/// 之所以要分组：渲染成"每张卡一个主项目"需要知道哪些行属于同一个主项目，
+/// 而 `_flatten` 返回的是一维列表。
+class _ProjectGroup {
+  const _ProjectGroup({required this.root, required this.children});
+
+  final _ProjectRow root;
+  final List<_ProjectRow> children;
+}
+
+/// 把一维列表按"根"分组：depth == 0 开新组，后面的 depth > 0 归到它下面。
+List<_ProjectGroup> _groupByRoot(List<_ProjectRow> rows) {
+  final groups = <_ProjectGroup>[];
+  var currentRoot = <_ProjectRow>[];
+  var currentChildren = <_ProjectRow>[];
+
+  void flush() {
+    if (currentRoot.isEmpty) return;
+    groups.add(_ProjectGroup(root: currentRoot.first, children: currentChildren));
+    currentRoot = <_ProjectRow>[];
+    currentChildren = <_ProjectRow>[];
+  }
+
+  for (final row in rows) {
+    if (row.depth == 0) {
+      flush();
+      currentRoot = <_ProjectRow>[row];
+    } else {
+      currentChildren.add(row);
+    }
+  }
+  flush();
+  return groups;
 }
 
 List<_ProjectRow> _flatten(AppController app) {
@@ -214,11 +279,13 @@ class _ProjectTile extends StatelessWidget {
     return ListTile(
       dense: isChild,
       visualDensity: isChild ? VisualDensity.compact : VisualDensity.standard,
-      contentPadding: EdgeInsets.only(left: 4.0 + row.depth * 20, right: 4),
+      // 主项目靠左（4dp 起），子项目明显右移 —— 靠**缩进差**表达主从关系，
+      // 而不是靠字号或分割线（实机反馈：原来的缩进差看不出来）
+      contentPadding: EdgeInsets.only(left: isChild ? 36 : 4, right: 4),
       minLeadingWidth: isChild ? 18 : null,
       leading: row.childCount == 0
           ? Padding(
-              padding: EdgeInsets.only(left: isChild ? 2 : 12),
+              padding: EdgeInsets.only(left: isChild ? 0 : 12),
               child: isChild
                   // 子项目用标识色小圆点：比状态图标轻，色点本身也表达归属
                   ? ProjectMarker(color: project.color, size: 12)

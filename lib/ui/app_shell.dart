@@ -106,15 +106,16 @@ class _AppShellState extends State<AppShell> {
                   label: const Text('速记'),
                 ),
           // 底部导航做成**悬浮的长条胶囊**（按实机反馈）：
-          // 原来 `NavigationBar` 铺满整条底边、底色占满整个区域，看着是一大片灰。
-          // 现在把它放进一条有内边距、圆角、轻阴影的容器里，
-          // 选中项是里面**再套一个**小胶囊（`indicatorShape`）。
+          //   · 原来 `NavigationBar` 铺满底边、底色占满整个区域，看着是一大片灰；
+          //   · 现在高度收到 56、左右外边距加到 20，视觉上更"窄"；
+          //   · 底部留 18dp 避开系统手势条 —— 原来只留 10dp，胶囊会压在那条系统栏上；
+          //   · 图标与文字在胶囊内垂直居中由 `NavigationBar` 保证，高度给够即可。
           bottomNavigationBar: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 16),
+                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 12),
                 boxShadow: <BoxShadow>[
                   BoxShadow(
                     color: Theme.of(context).colorScheme.shadow
@@ -125,11 +126,11 @@ class _AppShellState extends State<AppShell> {
                 ],
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 16),
+                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 12),
                 child: NavigationBar(
                   backgroundColor: Colors.transparent,
                   elevation: 0,
-                  height: 60,
+                  height: 56,
                   labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
                   selectedIndex: _index,
                   indicatorShape: const StadiumBorder(),

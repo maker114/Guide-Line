@@ -12,6 +12,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
 import '../common/tag_editor.dart';
+import '../theme/shape_tokens.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -193,50 +194,58 @@ class InspirationTabState extends State<InspirationTab> {
 
   /// 速记书写区。
   ///
-  /// 按实机反馈**去掉卡片与标题、也去掉输入框自己的边框**：
-  /// 整块就是一片"随手写"的区域，只留一行淡灰提示文字。
-  /// 加外框与标题会让它看起来像个表单，反而拦住了"先扔进来再说"这件事。
+  /// 按实机反馈：**要外框**（一眼能看出"这里是个输入区"，深色主题下同样成立），
+  /// 但**不要卡片标题**，也不要阅读型输入框那种重边框 ——
+  /// 所以用一个 1px 描边 + 大圆角的容器（`shapeCard` 那一档），无阴影。
   Widget _buildCaptureArea() {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          TextField(
-            controller: _capture,
-            focusNode: _focus,
-            minLines: 2,
-            maxLines: 8,
-            textInputAction: TextInputAction.newline,
-            style: theme.textTheme.bodyLarge,
-            decoration: InputDecoration(
-              hintText: '「灵感」在此钉下一个锚点……',
-              hintStyle: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.outline,
-              ),
-              // 无边框：只用提示文字表达"这里能写"
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(vertical: 8),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: FilledButton.tonalIcon(
-              onPressed: _save,
-              icon: const Icon(Icons.send, size: 18),
-              label: const Text('记下'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                shape: const StadiumBorder(),
-                visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerLowest,
+          borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            TextField(
+              controller: _capture,
+              focusNode: _focus,
+              minLines: 2,
+              maxLines: 8,
+              textInputAction: TextInputAction.newline,
+              style: theme.textTheme.bodyLarge,
+              decoration: InputDecoration(
+                hintText: '「灵感」在此钉下一个锚点……',
+                hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+                // 外框由外层容器给，输入框自己不再画一遍
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
             ),
-          ),
-        ],
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                onPressed: _save,
+                icon: const Icon(Icons.send, size: 18),
+                label: const Text('记下'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  shape: const StadiumBorder(),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
