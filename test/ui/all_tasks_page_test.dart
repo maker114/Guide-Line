@@ -65,7 +65,7 @@ void main() {
       lessThan(8),
       reason: '到期日和所属事件在第二行',
     );
-    expect(due.top, greaterThan(title.bottom), reason: '它在任务名那一行的下面');
+    expect(due.top, greaterThanOrEqualTo(title.bottom), reason: '它在任务名那一行的下面');
     expect(due.left, greaterThan(eventLabel.left), reason: '到期日靠右');
     expect(find.byIcon(Icons.chevron_right), findsNothing, reason: '箭头去掉了');
   });
@@ -125,6 +125,24 @@ void main() {
     await tester.tap(find.text('按事件'));
     await tester.pumpAndSettle();
     expect(find.text('一件事'), findsWidgets, reason: '按事件分组时组头是事件名');
+  });
+
+  testWidgets('两行任务之间的间距够紧凑（实机反馈：再小一点）', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    app.run(() => app.ws.createTask(eventId: event.id, title: '第一条', dueAt: dateOffset(3)));
+    app.run(() => app.ws.createTask(eventId: event.id, title: '第二条', dueAt: dateOffset(4)));
+
+    await openAllTasks(tester, app);
+
+    final first = tester.getRect(find.text('第一条'));
+    final second = tester.getRect(find.text('第二条'));
+    final pitch = second.center.dy - first.center.dy;
+    expect(pitch, lessThan(66), reason: '任务行比 Material 默认的两行列表（72）更紧');
   });
 
   testWidgets('深色 + 1.6 倍字体、窄屏下这一行不溢出（右边是要挤在一起的东西）', (tester) async {

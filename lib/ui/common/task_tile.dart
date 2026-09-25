@@ -40,6 +40,11 @@ class TaskTile extends StatelessWidget {
     final labelStyle = theme.textTheme.labelSmall;
 
     return ListTile(
+      // 行与行之间收紧（实机反馈：任务之间的间距再小一点）：
+      // `dense` 把两行列表的最小高度从 72 降到 64，`compact` 再各轴收 8 ——
+      // 文字样式仍由下面显式给（`bodyLarge` / `labelSmall`），不受 `dense` 影响。
+      dense: true,
+      visualDensity: VisualDensity.compact,
       leading: TaskStatusButton(app: app, task: task),
       title: Text(
         task.title,
