@@ -8,6 +8,7 @@ import 'inspiration/inspiration_tab.dart';
 import 'more/due_page.dart';
 import 'more/more_tab.dart';
 import 'projects/project_tab.dart';
+import 'theme/shape_tokens.dart';
 
 /// 手机端外壳：**底部四 Tab + 速记优先**（对应归档设计 §3.1.1 的手机端定位）。
 ///
@@ -27,7 +28,8 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  final GlobalKey<InspirationTabState> _inspirationKey = GlobalKey<InspirationTabState>();
+  final GlobalKey<InspirationTabState> _inspirationKey =
+      GlobalKey<InspirationTabState>();
   late int _index = widget.app.prefs.lastTabIndex.clamp(0, 3);
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
@@ -75,8 +77,10 @@ class _AppShellState extends State<AppShell> {
           ),
           body: Column(
             children: <Widget>[
-              if (app.startupWarnings.isNotEmpty) _WarningBanner(messages: app.startupWarnings),
-              if (app.overdueCount > 0) _DueBanner(count: app.overdueCount, app: app),
+              if (app.startupWarnings.isNotEmpty)
+                _WarningBanner(messages: app.startupWarnings),
+              if (app.overdueCount > 0)
+                _DueBanner(count: app.overdueCount, app: app),
               Expanded(
                 child: IndexedStack(
                   index: _index,
@@ -101,47 +105,73 @@ class _AppShellState extends State<AppShell> {
                   icon: const Icon(Icons.bolt),
                   label: const Text('速记'),
                 ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _index,
-            // 选中态也用**胶囊**，与全应用的形状规范一致
-            // （默认是 16 圆角的方块，和上面的按钮不是一套观感）
-            indicatorShape: const StadiumBorder(),
-            onDestinationSelected: (index) {
-              setState(() => _index = index);
-              app.setLastTab(index);
-            },
-            destinations: <NavigationDestination>[
-              const NavigationDestination(
-                icon: Icon(Icons.lightbulb_outline),
-                selectedIcon: Icon(Icons.lightbulb),
-                label: '灵感',
+          // 底部导航做成**悬浮的长条胶囊**（按实机反馈）：
+          // 原来 `NavigationBar` 铺满整条底边、底色占满整个区域，看着是一大片灰。
+          // 现在把它放进一条有内边距、圆角、轻阴影的容器里，
+          // 选中项是里面**再套一个**小胶囊（`indicatorShape`）。
+          bottomNavigationBar: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 16),
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: Theme.of(context).colorScheme.shadow
+                        .withValues(alpha: 0.10),
+                    blurRadius: 12,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              const NavigationDestination(
-                icon: Icon(Icons.account_tree_outlined),
-                selectedIcon: Icon(Icons.account_tree),
-                label: '项目',
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.timeline_outlined),
-                selectedIcon: Icon(Icons.timeline),
-                label: '事件',
-              ),
-              // 逾期任务的数量挂在「更多」上：到期视图在那一页下面，
-              // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见。
-              NavigationDestination(
-                icon: Badge.count(
-                  count: app.overdueCount,
-                  isLabelVisible: app.overdueCount > 0,
-                  child: const Icon(Icons.more_horiz),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppShapes.pillRadius + 16),
+                child: NavigationBar(
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  height: 60,
+                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                  selectedIndex: _index,
+                  indicatorShape: const StadiumBorder(),
+                  onDestinationSelected: (index) {
+                    setState(() => _index = index);
+                    app.setLastTab(index);
+                  },
+                  destinations: <NavigationDestination>[
+                    const NavigationDestination(
+                      icon: Icon(Icons.lightbulb_outline),
+                      selectedIcon: Icon(Icons.lightbulb),
+                      label: '灵感',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.account_tree_outlined),
+                      selectedIcon: Icon(Icons.account_tree),
+                      label: '项目',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.timeline_outlined),
+                      selectedIcon: Icon(Icons.timeline),
+                      label: '事件',
+                    ),
+                    // 逾期任务的数量挂在「更多」上：到期视图在那一页下面，
+                    // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见。
+                    NavigationDestination(
+                      icon: Badge.count(
+                        count: app.overdueCount,
+                        isLabelVisible: app.overdueCount > 0,
+                        child: const Icon(Icons.more_horiz),
+                      ),
+                      selectedIcon: Badge.count(
+                        count: app.overdueCount,
+                        isLabelVisible: app.overdueCount > 0,
+                        child: const Icon(Icons.more_horiz),
+                      ),
+                      label: '更多',
+                    ),
+                  ],
                 ),
-                selectedIcon: Badge.count(
-                  count: app.overdueCount,
-                  isLabelVisible: app.overdueCount > 0,
-                  child: const Icon(Icons.more_horiz),
-                ),
-                label: '更多',
               ),
-            ],
+            ),
           ),
         );
       },
@@ -178,7 +208,9 @@ class _WarningBanner extends StatelessWidget {
         children: <Widget>[
           const Icon(Icons.warning_amber_outlined, size: 18),
           const SizedBox(width: 8),
-          Expanded(child: Text(messages.join('；'), style: theme.textTheme.bodySmall)),
+          Expanded(
+            child: Text(messages.join('；'), style: theme.textTheme.bodySmall),
+          ),
         ],
       ),
     );
@@ -208,16 +240,25 @@ class _DueBanner extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Row(
             children: <Widget>[
-              Icon(Icons.error_outline, size: 18, color: theme.colorScheme.onTertiaryContainer),
+              Icon(
+                Icons.error_outline,
+                size: 18,
+                color: theme.colorScheme.onTertiaryContainer,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   '有 $count 条任务已逾期',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onTertiaryContainer),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onTertiaryContainer,
+                  ),
                 ),
               ),
-              Icon(Icons.chevron_right, size: 18, color: theme.colorScheme.onTertiaryContainer),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: theme.colorScheme.onTertiaryContainer,
+              ),
             ],
           ),
         ),

@@ -61,7 +61,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // ---- 1. 速记（默认 Tab）
-    expect(find.text('想到什么就先扔进来…'), findsOneWidget);
+    expect(find.text('「灵感」在此钉下一个锚点……'), findsOneWidget);
     await tester.enterText(find.byType(TextField).first, '把灵感线做成一条链');
     await tester.tap(find.byIcon(Icons.send));
     await tester.pumpAndSettle();

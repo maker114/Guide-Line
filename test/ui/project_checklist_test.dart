@@ -119,38 +119,44 @@ void main() {
     expect(find.text('1/1'), findsWidgets);
   });
 
-  testWidgets('编辑条目：弹窗改完写回数据', (tester) async {
+  testWidgets('编辑条目：点文本就地改，改完写回数据', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目戊');
     app.run(() => app.ws.addProjectItem(project.id, '原来的条目'));
 
     await openProject(tester, app, '清单项目戊');
     await scrollTo(tester, find.text('原来的条目'));
+    // 点一下就地变成输入框（不再弹对话框）
     await tester.tap(find.text('原来的条目'));
     await tester.pumpAndSettle();
 
-    expect(find.text('编辑条目'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).last, '改过的条目');
-    await tester.tap(find.text('保存'));
+    final field = find.byType(TextField).last;
+    await tester.enterText(field, '改过的条目');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.items.single.text, '改过的条目');
   });
 
-  testWidgets('删除条目不弹确认，直接删掉', (tester) async {
+  testWidgets('长按条目弹出操作，删除不弹确认', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目己');
     app.run(() => app.ws.addProjectItem(project.id, '要删的条目'));
 
     await openProject(tester, app, '清单项目己');
     await scrollTo(tester, find.text('要删的条目'));
-    // 页面上有好几个「更多」（清单工具条、条目、正文），要精确定位到**条目那一行**的
-    final itemMenu = find.byWidgetPredicate(
-      (w) => w is PopupMenuButton<String> && w.tooltip == '条目操作',
+    // 行尾不再挂三个点：编辑靠点、其余操作靠长按
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is PopupMenuButton<String> && w.tooltip == '条目操作',
+      ),
+      findsNothing,
+      reason: '条目行上的三个点已去掉（实机反馈"意义不明"）',
     );
-    expect(itemMenu, findsOneWidget);
-    await tester.tap(find.descendant(of: itemMenu, matching: find.byIcon(Icons.more_vert)));
+    await tester.longPress(find.text('要删的条目'));
     await tester.pumpAndSettle();
+    expect(find.text('删除'), findsOneWidget);
+
     await tester.tap(find.text('删除'));
     await tester.pumpAndSettle();
 

@@ -154,9 +154,12 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      onTap: () => _edit(context),
+      // 点文本**就地改**（与「目的」等字段一样用 `InlineTextField`），
+      // **长按**才弹出条目操作。原来行尾挂了一个三个点，实机反馈"意义不明" ——
+      // 编辑本来是最常用的动作，直接点就行，不必先开菜单。
+      onLongPress: () => _showActions(context),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 2, 4, 2),
+        padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
         child: Row(
           children: <Widget>[
             Checkbox(
@@ -169,32 +172,73 @@ class _ItemRow extends StatelessWidget {
               },
             ),
             Expanded(
-              child: Text(
-                item.text,
-                style: item.done
+              child: InlineTextField(
+                value: item.text,
+                hint: '这条要做什么',
+                maxLines: 3,
+                textStyle: item.done
                     ? theme.textTheme.bodyMedium?.copyWith(
                         decoration: TextDecoration.lineThrough,
                         color: theme.colorScheme.outline,
                       )
                     : theme.textTheme.bodyMedium,
+                onSubmitted: (text) {
+                  final error =
+                      app.run(() => app.ws.updateProjectItemText(projectId, item.id, text));
+                  if (error != null && context.mounted) {
+                    showToast(context, error, error: true);
+                  }
+                },
               ),
-            ),
-            PopupMenuButton<String>(
-              tooltip: '条目操作',
-              onSelected: (value) => _act(context, value),
-              itemBuilder: (_) => <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(value: 'edit', child: Text('编辑')),
-                if (!isFirst)
-                  const PopupMenuItem<String>(value: 'up', child: Text('上移')),
-                if (!isLast)
-                  const PopupMenuItem<String>(value: 'down', child: Text('下移')),
-                const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
-              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// 条目操作：长按弹出（删除 / 上移 / 下移）。
+  ///
+  /// 删除**不弹二次确认**：条目是轻量内容，误删重打一句就好。
+  Future<void> _showActions(BuildContext context) async {
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                item.text,
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (!isFirst)
+              ListTile(
+                leading: const Icon(Icons.arrow_upward),
+                title: const Text('上移'),
+                onTap: () => Navigator.of(sheetContext).pop('up'),
+              ),
+            if (!isLast)
+              ListTile(
+                leading: const Icon(Icons.arrow_downward),
+                title: const Text('下移'),
+                onTap: () => Navigator.of(sheetContext).pop('down'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('删除'),
+              onTap: () => Navigator.of(sheetContext).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (value == null || !context.mounted) return;
+    _act(context, value);
   }
 
   Future<void> _edit(BuildContext context) async {

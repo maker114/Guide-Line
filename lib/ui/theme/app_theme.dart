@@ -107,6 +107,15 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
     bottomSheetTheme: const BottomSheetThemeData(shape: AppShapes.sheet),
     popupMenuTheme: PopupMenuThemeData(shape: AppShapes.chip),
     snackBarTheme: SnackBarThemeData(shape: AppShapes.chip),
+    // **滚动时标题栏不要变色**（实机反馈"有滚动内容时顶栏会变深"）。
+    // 那是 Material 3 AppBar 的默认行为：内容滚到它下面时抬 elevation，
+    // 并在底色上叠一层 surfaceTint，看起来就"变深/发脏"。
+    // 这个应用的标题栏本来就与页面同底，所以直接关掉抬升与着色。
+    appBarTheme: const AppBarTheme(
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+    ),
   );
   if (!prefs.hasBackground) return base;
 

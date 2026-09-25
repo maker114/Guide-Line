@@ -193,58 +193,50 @@ class InspirationTabState extends State<InspirationTab> {
 
   /// 速记书写区。
   ///
-  /// 按实机反馈改成**与项目「目的」栏同一种设计风格**：外面一张带轻阴影的卡片，
-  /// 上面一行小标题，里面是输入区。以前它是一个裸露的多行 `TextField`，
-  /// 与页面其它块不是一套观感。
+  /// 按实机反馈**去掉卡片与标题、也去掉输入框自己的边框**：
+  /// 整块就是一片"随手写"的区域，只留一行淡灰提示文字。
+  /// 加外框与标题会让它看起来像个表单，反而拦住了"先扔进来再说"这件事。
   Widget _buildCaptureArea() {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Card(
-        margin: EdgeInsets.zero,
-        elevation: 1,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('速记', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Stack(
-                children: <Widget>[
-                  TextField(
-                    controller: _capture,
-                    focusNode: _focus,
-                    minLines: 2,
-                    maxLines: 8,
-                    textInputAction: TextInputAction.newline,
-                    decoration: const InputDecoration(
-                      hintText: '想到什么就先扔进来…',
-                      border: OutlineInputBorder(),
-                      // 给右下角的「记下」留位置，别让文字钻到按钮底下
-                      contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 44),
-                    ),
-                  ),
-                  Positioned(
-                    right: 6,
-                    bottom: 6,
-                    // 保存键做成**胶囊**（按实机反馈）
-                    child: FilledButton.tonalIcon(
-                      onPressed: _save,
-                      icon: const Icon(Icons.send, size: 18),
-                      label: const Text('记下'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        shape: const StadiumBorder(),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    ),
-                  ),
-                ],
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          TextField(
+            controller: _capture,
+            focusNode: _focus,
+            minLines: 2,
+            maxLines: 8,
+            textInputAction: TextInputAction.newline,
+            style: theme.textTheme.bodyLarge,
+            decoration: InputDecoration(
+              hintText: '「灵感」在此钉下一个锚点……',
+              hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                color: theme.colorScheme.outline,
               ),
-            ],
+              // 无边框：只用提示文字表达"这里能写"
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            ),
           ),
-        ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonalIcon(
+              onPressed: _save,
+              icon: const Icon(Icons.send, size: 18),
+              label: const Text('记下'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                shape: const StadiumBorder(),
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

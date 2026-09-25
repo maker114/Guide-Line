@@ -36,7 +36,9 @@ class _ProjectTabState extends State<ProjectTab> {
   AppController get _app => widget.app;
 
   void _create({String? parentId, required String title}) {
-    final error = _app.run(() => _app.ws.createProject(title: title, parentId: parentId));
+    final error = _app.run(
+      () => _app.ws.createProject(title: title, parentId: parentId),
+    );
     if (error != null) {
       _toast(error, error: true);
       return;
@@ -51,7 +53,9 @@ class _ProjectTabState extends State<ProjectTab> {
     messenger?.showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: error ? Theme.of(context).colorScheme.errorContainer : null,
+        backgroundColor: error
+            ? Theme.of(context).colorScheme.errorContainer
+            : null,
       ),
     );
   }
@@ -200,29 +204,45 @@ class _ProjectTile extends StatelessWidget {
     final theme = Theme.of(context);
     final project = row.project;
     final due = describeDate(project.date);
-    final overdue = isOverdue(project.date) && project.status != NodeStatus.done;
+    final overdue =
+        isOverdue(project.date) && project.status != NodeStatus.done;
+    // 子项目（depth > 0）用**更紧凑**的一档样式：
+    // 原来只缩进了 16dp、字号仍是 `bodyLarge`，看起来和顶层项目一样重，
+    // 既没体现层级、又白占一块纵向空间（实机反馈）。
+    final isChild = row.depth > 0;
 
     return ListTile(
-      contentPadding: EdgeInsets.only(left: 4.0 + row.depth * 16, right: 4),
+      dense: isChild,
+      visualDensity: isChild ? VisualDensity.compact : VisualDensity.standard,
+      contentPadding: EdgeInsets.only(left: 4.0 + row.depth * 20, right: 4),
+      minLeadingWidth: isChild ? 18 : null,
       leading: row.childCount == 0
           ? Padding(
-              padding: const EdgeInsets.only(left: 12),
-              child: Icon(
-                nodeStatusIcon(project.status),
-                size: 20,
-                color: nodeStatusColor(project.status, theme.colorScheme),
-              ),
+              padding: EdgeInsets.only(left: isChild ? 2 : 12),
+              child: isChild
+                  // 子项目用标识色小圆点：比状态图标轻，色点本身也表达归属
+                  ? ProjectMarker(color: project.color, size: 12)
+                  : Icon(
+                      nodeStatusIcon(project.status),
+                      size: 20,
+                      color: nodeStatusColor(project.status, theme.colorScheme),
+                    ),
             )
           : IconButton(
               tooltip: row.expanded ? '收起' : '展开',
-              icon: Icon(row.expanded ? Icons.expand_more : Icons.chevron_right),
-              onPressed: () => app.setExpanded(project.id, expanded: !row.expanded),
+              visualDensity: isChild ? VisualDensity.compact : null,
+              iconSize: isChild ? 18 : null,
+              icon: Icon(
+                row.expanded ? Icons.expand_more : Icons.chevron_right,
+              ),
+              onPressed: () =>
+                  app.setExpanded(project.id, expanded: !row.expanded),
             ),
       title: Row(
         children: <Widget>[
           // 标识色（灵感整理第 10 条）：一小段色条，扫一眼就能把项目区分开。
-          // 没设标识色就不占位，树不会因此变宽。
-          if (colorOfHex(project.color) != null) ...<Widget>[
+          // 没设标识色就不占位，树不会因此变宽。子项目已有色点，不再画色条。
+          if (!isChild && colorOfHex(project.color) != null) ...<Widget>[
             Container(
               width: 4,
               height: 16,
@@ -238,17 +258,30 @@ class _ProjectTile extends StatelessWidget {
               project.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: project.status == NodeStatus.done
-                  ? theme.textTheme.bodyLarge?.copyWith(
-                      decoration: TextDecoration.lineThrough,
-                      color: theme.colorScheme.outline,
+              // 子项目降一档字号，层级靠字号与缩进一起表达
+              style: isChild
+                  ? theme.textTheme.bodyMedium?.copyWith(
+                      decoration: project.status == NodeStatus.done
+                          ? TextDecoration.lineThrough
+                          : null,
+                      color: project.status == NodeStatus.done
+                          ? theme.colorScheme.outline
+                          : null,
                     )
-                  : null,
+                  : (project.status == NodeStatus.done
+                        ? theme.textTheme.bodyLarge?.copyWith(
+                            decoration: TextDecoration.lineThrough,
+                            color: theme.colorScheme.outline,
+                          )
+                        : null),
             ),
           ),
         ],
       ),
-      subtitle: _Subtitle(row: row, due: due, overdue: overdue),
+      // 子项目的副标题只留必要信息（日期 / 子项目数），目的那一长串不再重复显示
+      subtitle: isChild
+          ? _childSubtitle(theme, project, row, due, overdue)
+          : _Subtitle(row: row, due: due, overdue: overdue),
       trailing: PopupMenuButton<String>(
         tooltip: '更多',
         onSelected: (value) async {
@@ -295,8 +328,41 @@ class _ProjectTile extends StatelessWidget {
   }
 }
 
+/// 子项目的副标题：**只留必要信息**，没有就不显示。
+///
+/// 顶层项目的副标题会带「目的」那一长串；子项目在树里已经缩进一层了，
+/// 再抄一遍目的只会把行撑高、层级更糊（实机反馈"间距过大"）。
+Widget? _childSubtitle(
+  ThemeData theme,
+  Project project,
+  _ProjectRow row,
+  String due,
+  bool overdue,
+) {
+  final style = theme.textTheme.labelSmall;
+  final parts = <Widget>[];
+  if (due.isNotEmpty) {
+    parts.add(
+      Text(
+        due,
+        style: style?.copyWith(color: overdue ? theme.colorScheme.error : null),
+      ),
+    );
+  }
+  if (row.childCount > 0) {
+    if (parts.isNotEmpty) parts.add(const SizedBox(width: 8));
+    parts.add(Text('${row.childCount} 个子项目', style: style));
+  }
+  if (parts.isEmpty) return null;
+  return Row(children: parts);
+}
+
 class _Subtitle extends StatelessWidget {
-  const _Subtitle({required this.row, required this.due, required this.overdue});
+  const _Subtitle({
+    required this.row,
+    required this.due,
+    required this.overdue,
+  });
 
   final _ProjectRow row;
   final String due;
@@ -313,10 +379,17 @@ class _Subtitle extends StatelessWidget {
           Icon(
             Icons.event,
             size: 13,
-            color: overdue ? theme.colorScheme.error : theme.colorScheme.outline,
+            color: overdue
+                ? theme.colorScheme.error
+                : theme.colorScheme.outline,
           ),
           const SizedBox(width: 3),
-          Text(due, style: style?.copyWith(color: overdue ? theme.colorScheme.error : null)),
+          Text(
+            due,
+            style: style?.copyWith(
+              color: overdue ? theme.colorScheme.error : null,
+            ),
+          ),
           const SizedBox(width: 10),
         ],
         if (row.childCount > 0) ...<Widget>[
