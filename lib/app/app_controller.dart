@@ -46,7 +46,7 @@ class AppController extends ChangeNotifier {
     final storage = AppStorage(AppPaths(dir));
     final report = storage.load();
     final workspace = Workspace.fromLoad(storage, report);
-    return AppController(
+    final controller = AppController(
       storage: storage,
       workspace: workspace,
       dataDirectory: dir,
@@ -54,7 +54,25 @@ class AppController extends ChangeNotifier {
       aiGenerator: aiGenerator,
       credentialStore: credentialStore,
     ).._loadBackgroundBytes();
+    controller._purgeExpiredTrash();
+    return controller;
   }
+
+  /// 启动时清一次回收站（墓碑只留 `trashRetentionDays` 天）。
+  ///
+  /// 失败**不打断启动**：清理是"维护动作"，写盘失败时下次启动会再试一次，
+  /// 比在启动路径上抛异常（用户看到白屏）合理得多。清理条数记在
+  /// [lastTrashPurgedCount] 里，设置页 / 用例可以看。
+  void _purgeExpiredTrash() {
+    try {
+      lastTrashPurgedCount = workspace.purgeExpiredTrash();
+    } on FileSystemException {
+      lastTrashPurgedCount = 0;
+    }
+  }
+
+  /// 上次启动清理掉了几条过期墓碑（0 = 没清）。
+  int lastTrashPurgedCount = 0;
 
   final AppStorage storage;
 
@@ -321,6 +339,17 @@ class AppController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------- AI
+
+  /// AI 整理的总开关（偏好里的那个）。
+  bool get aiEnabled => prefs.aiEnabled;
+
+  /// 开 / 关 AI 整理。**只改"显不显示"**：地址、模型、Key 一律原样留着 ——
+  /// 关掉是为了让界面清爽，不是"卸载功能"。
+  void setAiEnabled(bool enabled) {
+    if (enabled == prefs.aiEnabled) return;
+    workspace.updatePrefs(prefs.copyWith(aiEnabled: enabled));
+    notifyListeners();
+  }
 
   /// 读当前 AI 配置（`apiKey` 从安全存储取，其余从偏好取）。
   ///

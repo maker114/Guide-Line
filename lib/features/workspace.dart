@@ -183,7 +183,15 @@ class Workspace {
   /// 再让它里面的任务天天出现在「到期」和逾期角标里，等于把已经放下的东西
   /// 又拽回来催一遍。语义上它仍是一条待处理任务（`status = pending`），
   /// 只是不再参与"到期"这件事。
-  List<Task> tasksDueOnOrBefore(String date) {
+  List<Task> tasksDueOnOrBefore(String date) => _scheduledTasks(cutoff: date);
+
+  /// **所有排了期**的待处理任务（不管有多远）——「到期」页的「全部排期」档。
+  ///
+  /// 与 [tasksDueOnOrBefore] 同一套口径，只是不设截止日。加它的原因是一条实机
+  /// 反馈：默认停在「今天」时，任务都排在更远的将来，整页看着就是空的。
+  List<Task> tasksScheduled() => _scheduledTasks();
+
+  List<Task> _scheduledTasks({String? cutoff}) {
     final mutedEventIds = allEvents
         .where((e) => e.status == NodeStatus.ignored)
         .map((e) => e.id)
@@ -194,7 +202,7 @@ class Workspace {
             t.status == NodeStatus.pending &&
             t.dueAt != null &&
             !mutedEventIds.contains(t.eventId) &&
-            t.dueAt!.compareTo(date) <= 0)
+            (cutoff == null || t.dueAt!.compareTo(cutoff) <= 0))
         .toList(growable: false);
     list.sort((a, b) {
       final byDate = a.dueAt!.compareTo(b.dueAt!);
@@ -1210,12 +1218,62 @@ class Workspace {
 
   /// 彻底删除（ADR-052）：把墓碑**骨架化** —— 只保留 id / deleted / purged_at。
   void purge(DocName doc, Iterable<String> ids) {
-    if (doc == DocName.inspirations && ids.isEmpty) return;
-    final now = Ids.nowMillis();
-    for (final id in ids) {
-      _upsert(doc, Tombstone(id: id, purgedAt: now));
+    final count = _skeletonize(doc, ids);
+    if (count > 0) persist();
+  }
+
+  /// 清掉**超过 [trashRetentionDays] 天**的墓碑（骨架化），返回清掉的记录条数。
+  ///
+  /// 在启动时调用一次（`AppController.bootstrap`）：回收站不能无限增长，
+  /// 也没人会专门去点"清理"。
+  ///
+  /// 口径：**所有墓碑**都只留 30 天 —— 包括灵感。灵感删除后不进回收站
+  /// （它是扁平实体，见 `deriveArchiveZone`），但它的墓碑同样只在文件里留 30 天，
+  /// 否则"删除的数据只保存 30 天"这条口径就有个看不见的例外。
+  ///
+  /// 只抹墓碑、不碰活着的节点：子树里若真有活节点（理论上不会），留着不动。
+  int purgeExpiredTrash({DateTime? now}) {
+    final expired = <DocName, Set<String>>{};
+
+    void collect(DocName doc, Iterable<Entity> nodes, Entity? Function(String id) find) {
+      final ids = <String>{};
+      for (final node in nodes) {
+        if (!node.deleted) continue;
+        if (trashDaysLeft(node.updatedAt, now: now) > 0) continue; // 还没到期
+        for (final id in purgeIdsFor(doc, node.id)) {
+          final target = find(id);
+          if (target == null || target.deleted) ids.add(id);
+        }
+      }
+      if (ids.isNotEmpty) expired[doc] = ids;
+    }
+
+    collect(DocName.projects, allProjects, findProject);
+    collect(DocName.events, allEvents, findEvent);
+    collect(DocName.tasks, allTasks, findTask);
+    collect(DocName.inspirations, allInspirations, findInspiration);
+
+    if (expired.isEmpty) return 0;
+
+    final purgedAt = Ids.nowMillis();
+    var count = 0;
+    for (final entry in expired.entries) {
+      // 四个集合的清理**一次落盘**：中途失败不该留下"清了一半"的状态
+      count += _skeletonize(entry.key, entry.value, purgedAt: purgedAt);
     }
     persist();
+    return count;
+  }
+
+  /// 把一个集合里的这些 id 换成墓碑（不落盘，由调用方决定什么时候 persist）。
+  int _skeletonize(DocName doc, Iterable<String> ids, {int? purgedAt}) {
+    final now = purgedAt ?? Ids.nowMillis();
+    var count = 0;
+    for (final id in ids) {
+      _upsert(doc, Tombstone(id: id, purgedAt: now));
+      count += 1;
+    }
+    return count;
   }
 
   /// 归档区里「彻底删除」需要一起抹掉的 id。

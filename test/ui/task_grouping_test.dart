@@ -35,6 +35,42 @@ void main() {
         deleted: false,
       );
 
+  group('按完成度分组', () {
+    test('组序固定：未完成 → 已搁置 → 已完成', () {
+      final groups = groupByCompletion(<Task>[
+        task(id: 'd', title: '做完了', status: NodeStatus.done),
+        task(id: 'i', title: '搁置了', status: NodeStatus.ignored),
+        task(id: 'p', title: '还欠着', status: NodeStatus.pending),
+      ]);
+
+      expect(
+        groups.map((g) => g.label).toList(),
+        <String>['未完成', '已搁置', '已完成'],
+        reason: '「不分组」被这一档取代：未完成排最前、已完成最后',
+      );
+      expect(groups.first.tasks.single.title, '还欠着');
+      expect(groups.last.tasks.single.title, '做完了');
+    });
+
+    test('组内按到期日排，没排期的垫底', () {
+      final groups = groupByCompletion(<Task>[
+        task(id: 'n', title: '没日期'),
+        task(id: 'l', title: '晚一点', dueAt: '2099-05-05'),
+        task(id: 'e', title: '早一点', dueAt: '2099-05-01'),
+      ]);
+
+      expect(groups.single.label, '未完成');
+      expect(groups.single.tasks.map((t) => t.title), <String>['早一点', '晚一点', '没日期']);
+    });
+
+    test('某一档没有任务就不产生空分组', () {
+      final groups = groupByCompletion(<Task>[task(id: 'p', title: '只有未完成')]);
+      expect(groups.map((g) => g.label), <String>['未完成']);
+
+      expect(groupByCompletion(<Task>[]), isEmpty);
+    });
+  });
+
   group('按紧迫度分组', () {
     test('有日期的已完成任务不会混进「没有到期日」', () {
       final groups = groupByUrgency(<Task>[

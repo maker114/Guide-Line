@@ -9,6 +9,7 @@ import '../common/empty_state.dart';
 import '../common/labels.dart';
 import '../events/event_detail_page.dart';
 import '../projects/project_detail_page.dart';
+import '../theme/shape_tokens.dart';
 
 /// 全局搜索（设计文档 Q42）：**只搜未归档、未删除；灵感只搜待处理的**。
 class SearchPage extends StatefulWidget {
@@ -32,56 +33,89 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return ListenableBuilder(
       listenable: widget.app,
       builder: (context, _) {
         final hits = widget.app.ws.search(_query);
+        final hasQuery = _query.trim().isNotEmpty;
         return Scaffold(
-          appBar: AppBar(
-            title: TextField(
-              controller: _controller,
-              autofocus: true,
-              textInputAction: TextInputAction.search,
-              decoration: const InputDecoration(
-                hintText: '项目 / 事件 / 任务 / 灵感',
-                border: InputBorder.none,
-              ),
-              onChanged: (value) => setState(() => _query = value),
-            ),
-            actions: <Widget>[
-              if (_query.isNotEmpty)
-                IconButton(
-                  tooltip: '清空',
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    _controller.clear();
-                    setState(() => _query = '');
-                  },
+          appBar: AppBar(title: const Text('搜索')),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              // 搜索框做成**页面上一个明显的框**（实机反馈）：
+              // 原来是标题栏里一个没有边框的输入框，看着像一行说明文字，
+              // 第一眼根本认不出"这里能打字"。
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: TextField(
+                  controller: _controller,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: '搜项目 / 事件 / 任务 / 灵感',
+                    // 能点的用胶囊（《界面规范》§4）
+                    border: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(
+                        Radius.circular(AppShapes.pillRadius),
+                      ),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: theme.colorScheme.surfaceContainerHighest,
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: hasQuery
+                        ? IconButton(
+                            tooltip: '清空',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _controller.clear();
+                              setState(() => _query = '');
+                            },
+                          )
+                        : null,
+                  ),
+                  onChanged: (value) => setState(() => _query = value),
                 ),
+              ),
+              if (hasQuery)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+                  child: Text(
+                    hits.isEmpty ? '没有匹配的结果' : '命中 ${hits.length} 条',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                ),
+              Expanded(
+                child: !hasQuery
+                    ? const EmptyState(
+                        icon: Icons.search,
+                        title: '输入关键词开始搜索',
+                        hint: '搜索范围：未归档的项目 / 事件 / 任务，以及待处理的灵感',
+                      )
+                    : hits.isEmpty
+                        ? const EmptyState(
+                            icon: Icons.search_off,
+                            title: '没有匹配的结果',
+                            hint: '换个词试试；已归档与已丢弃的内容不参与搜索',
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.only(bottom: 24),
+                            itemCount: hits.length,
+                            separatorBuilder: (_, _) => const Divider(
+                              height: 1,
+                              indent: 16,
+                              endIndent: 16,
+                            ),
+                            itemBuilder: (context, index) => _HitTile(
+                              app: widget.app,
+                              hit: hits[index],
+                            ),
+                          ),
+              ),
             ],
           ),
-          body: _query.trim().isEmpty
-              ? const EmptyState(
-                  icon: Icons.search,
-                  title: '输入关键词开始搜索',
-                  hint: '搜索范围：未归档的项目 / 事件 / 任务，以及待处理的灵感',
-                )
-              : hits.isEmpty
-                  ? const EmptyState(
-                      icon: Icons.search_off,
-                      title: '没有匹配的结果',
-                      hint: '换个词试试；已归档与已丢弃的内容不参与搜索',
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.only(bottom: 24),
-                      itemCount: hits.length,
-                      separatorBuilder: (_, _) =>
-                          const Divider(height: 1, indent: 16, endIndent: 16),
-                      itemBuilder: (context, index) => _HitTile(
-                        app: widget.app,
-                        hit: hits[index],
-                      ),
-                    ),
         );
       },
     );

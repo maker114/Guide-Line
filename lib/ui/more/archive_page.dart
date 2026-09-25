@@ -7,6 +7,7 @@ import '../../core/models/event.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
 import '../../core/models/task.dart';
+import '../../core/rules/archive_zone.dart';
 import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
@@ -259,12 +260,13 @@ class _TrashPane extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return _Pane(
-        note: '删除是「置墓碑」，数据还在文件里，随时可以恢复。',
+        note: '删除是「置墓碑」，数据还在文件里，$trashRetentionDays 天内随时可以恢复。',
         child: _empty('回收站是空的', '删除的项目 / 事件 / 任务会先落到这里'),
       );
     }
     return _Pane(
-      note: '只列「级联根」——恢复会连同被一起删掉的下级一起回来。「彻底删除」不可撤销。',
+      note: '只列「级联根」——恢复会连同被一起删掉的下级一起回来。'
+          '每条只保留 $trashRetentionDays 天，到期后自动清掉（「彻底删除」不可撤销）。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -275,7 +277,8 @@ class _TrashPane extends StatelessWidget {
             leading: Icon(entityTypeIcon(entity)),
             title: Text(entityTitle(entity), maxLines: 2, overflow: TextOverflow.ellipsis),
             subtitle: Text(
-              '${entityTypeLabel(entity)} · ${_updatedLabel(entity.updatedAt)}',
+              '${entityTypeLabel(entity)} · '
+              '${describeTrashCountdown(trashDaysLeft(entity.updatedAt))}',
               style: Theme.of(context).textTheme.labelSmall,
             ),
             trailing: PopupMenuButton<String>(

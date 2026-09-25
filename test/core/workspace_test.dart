@@ -9,6 +9,7 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/models/project_item.dart';
 import 'package:guideline/core/models/project_palette.dart';
+import 'package:guideline/core/rules/archive_zone.dart';
 import 'package:guideline/core/rules/completion.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
@@ -1066,6 +1067,61 @@ void main() {
       expect(entity, isA<Tombstone>());
       expect(entity.toJson().keys.toList(), <String>['id', 'deleted', 'purged_at']);
       expect(entity.toJson().containsKey('title'), isFalse);
+    });
+
+    test('「全部排期」含所有排了期的任务，不受截止日限制', () {
+      final event = ws.createEvent(name: '事件');
+      final old = ws.createTask(eventId: event.id, title: '逾期', dueAt: '2026-01-01');
+      final far = ws.createTask(eventId: event.id, title: '很久以后', dueAt: '2027-01-01');
+      ws.createTask(eventId: event.id, title: '没排期');
+      final done = ws.createTask(eventId: event.id, title: '做完了', dueAt: '2026-02-02');
+      ws.setTaskStatus(done.id, NodeStatus.done);
+
+      expect(
+        ws.tasksScheduled().map((t) => t.id).toList(),
+        <String>[old.id, far.id],
+        reason: '所有排了期的待处理任务，按日期升序；没排期的与已完成的不算',
+      );
+      expect(ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(), <String>[old.id]);
+    });
+
+    test('启动清理：满 30 天才清，活着的与没到期的一条都不动', () {
+      final stale = ws.createProject(title: '删了很久了');
+      final fresh = ws.createProject(title: '刚删的');
+      final alive = ws.createProject(title: '活得好好的');
+      final staleInspiration = ws.captureInspiration('删了很久的灵感');
+      final freshInspiration = ws.captureInspiration('刚删的灵感');
+      ws.deleteProject(stale.id);
+      ws.deleteProject(fresh.id);
+      ws.deleteInspiration(staleInspiration.id);
+      ws.deleteInspiration(freshInspiration.id);
+
+      // 单机形态下没有别的办法造"40 天前删的"：直接改盘上那份文件的 `updated_at`，
+      // 再按正式启动路径重新加载 —— 与真机上"放了一个多月"走的是同一条路。
+      final staleAt = DateTime.now()
+          .subtract(const Duration(days: trashRetentionDays + 10))
+          .millisecondsSinceEpoch;
+      final raw = jsonDecode(storeTextOnDisk()) as Map<String, dynamic>;
+      final collections = raw['collections'] as Map<String, dynamic>;
+      for (final name in <String>['projects', 'inspirations']) {
+        final items = ((collections[name] as Map<String, dynamic>)['items'] as List<dynamic>);
+        for (final item in items.cast<Map<String, dynamic>>()) {
+          if (item['id'] == stale.id || item['id'] == staleInspiration.id) {
+            item['updated_at'] = staleAt;
+          }
+        }
+      }
+      storage.paths.storeFile.writeAsStringSync(jsonEncode(raw), encoding: utf8);
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+
+      final purged = reloaded.purgeExpiredTrash();
+
+      expect(purged, 2, reason: '一个项目 + 一条灵感（灵感不进回收站，但墓碑同样只留 30 天）');
+      expect(reloaded.findProject(stale.id), isNull, reason: '骨架化之后不再是 Project');
+      expect(reloaded.findInspiration(staleInspiration.id), isNull);
+      expect(reloaded.findProject(fresh.id)!.deleted, isTrue, reason: '没到期的不清');
+      expect(reloaded.findInspiration(freshInspiration.id)!.deleted, isTrue);
+      expect(reloaded.findProject(alive.id)!.deleted, isFalse, reason: '活着的节点一个字不动');
     });
   });
 

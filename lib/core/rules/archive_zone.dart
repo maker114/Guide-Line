@@ -56,6 +56,25 @@ class ArchiveZone {
       trashRoots.length;
 }
 
+/// 回收站**保留天数**：墓碑超过它就自动清掉（实机反馈：回收站不能无限增长）。
+///
+/// 清理由 `Workspace.purgeExpiredTrash()` 在**启动时**做一次 —— 没人会专门去点
+/// "清理回收站"，而墓碑长期堆着只会让数据文件越来越大。
+const int trashRetentionDays = 30;
+
+/// 一条墓碑**还剩几天**被自动清掉（0 或负数 = 这次启动就该清了）。
+///
+/// 按**日历天**算（与界面上的日期口径一致），不是按 24 小时的整数倍：
+/// 23:59 删的与次日 00:01 删的，界面上都该被看成"隔了一天"。
+int trashDaysLeft(int deletedAtMillis, {DateTime? now}) {
+  final deleted = DateTime.fromMillisecondsSinceEpoch(deletedAtMillis);
+  final current = now ?? DateTime.now();
+  final elapsed = DateTime.utc(current.year, current.month, current.day)
+      .difference(DateTime.utc(deleted.year, deleted.month, deleted.day))
+      .inDays;
+  return trashRetentionDays - elapsed;
+}
+
 ArchiveZone deriveArchiveZone({
   required Iterable<Project> projects,
   required Iterable<Event> events,

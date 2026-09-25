@@ -77,6 +77,42 @@ void main() {
     });
   });
 
+  group('AI 总开关', () {
+    test('默认是开着的', () {
+      expect(UiPrefs.empty.aiEnabled, isTrue);
+    });
+
+    test('关掉之后 JSON 往返还记得住', () {
+      const original = UiPrefs(aiEnabled: false, aiBaseUrl: 'https://example.com', aiModel: 'm');
+
+      final restored = UiPrefs.fromJson(original.toJson());
+
+      expect(restored.aiEnabled, isFalse);
+      expect(restored.aiBaseUrl, 'https://example.com', reason: '关开关不动已经填好的配置');
+      expect(restored.aiModel, 'm');
+    });
+
+    test('老偏好文件里没有这个键 → 当作开着，不把功能悄悄关掉', () {
+      final restored = UiPrefs.fromJson(<String, dynamic>{'lastTabIndex': 1});
+      expect(restored.aiEnabled, isTrue);
+    });
+
+    test('copyWith 能单独翻这个开关，且不弄丢其它字段', () {
+      const original = UiPrefs(
+        lastTabIndex: 2,
+        aiBaseUrl: 'https://example.com',
+        aiModel: 'm',
+      );
+
+      final off = original.copyWith(aiEnabled: false);
+
+      expect(off.aiEnabled, isFalse);
+      expect(off.lastTabIndex, 2);
+      expect(off.aiBaseUrl, 'https://example.com');
+      expect(off.aiModel, 'm');
+    });
+  });
+
   test('withExpanded 不会顺手弄丢别的字段', () {
     const original = UiPrefs(
       lastTabIndex: 1,

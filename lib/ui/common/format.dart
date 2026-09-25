@@ -85,6 +85,16 @@ int _daysBetween(DateTime a, DateTime b) => DateTime.utc(
   a.day,
 ).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
 
+/// 回收站条目的倒计时文案（配合 `core/rules/archive_zone.dart` 的 `trashDaysLeft`）。
+///
+/// 界面上要让人一眼看出"这条还能待多久"，所以按剩余天数换说法：
+/// 还剩一天说「明天」，今天该清的说「即将」，其余给具体天数。
+String describeTrashCountdown(int daysLeft) {
+  if (daysLeft <= 0) return '即将自动清除';
+  if (daysLeft == 1) return '明天自动清除';
+  return '还有 $daysLeft 天自动清除';
+}
+
 /// 相对今天偏移 [days] 个日历天的 `YYYY-MM-DD`（`DateTime` 会自动进位到相邻月份）。
 String dateOffset(int days, {DateTime? now}) {
   final d = now ?? DateTime.now();

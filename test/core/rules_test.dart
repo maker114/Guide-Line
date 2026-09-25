@@ -333,6 +333,28 @@ void main() {
       expect(zone.archivedRoots.map((e) => e.id).toSet(), <String>{'eArchived', 'tOrphan'});
       expect(zone.trashRoots.map((e) => e.id).toList(), <String>['eDeleted']);
     });
+
+    group('回收站保留期（30 天）', () {
+      final now = DateTime(2026, 9, 25, 23, 30);
+      int at(DateTime when) => when.millisecondsSinceEpoch;
+
+      test('刚删的还能待满 30 天', () {
+        expect(trashDaysLeft(at(now), now: now), trashRetentionDays);
+        expect(trashDaysLeft(at(DateTime(2026, 9, 24, 0, 5)), now: now), 29);
+      });
+
+      test('按**日历天**算：昨天 23:59 删的与今天 00:01 删的差一天', () {
+        // 按 24 小时的整数倍算的话，这两个都"还不到一天"，界面上会显示成同一行
+        expect(trashDaysLeft(at(DateTime(2026, 9, 24, 0, 1)), now: now), 29);
+        expect(trashDaysLeft(at(DateTime(2026, 9, 24, 23, 59)), now: now), 29);
+        expect(trashDaysLeft(at(DateTime(2026, 9, 23, 23, 59)), now: now), 28);
+      });
+
+      test('满 30 天时为 0（这次启动就该清掉），更早的是负数', () {
+        expect(trashDaysLeft(at(DateTime(2026, 8, 26, 12)), now: now), 0);
+        expect(trashDaysLeft(at(DateTime(2026, 1, 1)), now: now), lessThan(0));
+      });
+    });
   });
 
   group('ID 与日期', () {

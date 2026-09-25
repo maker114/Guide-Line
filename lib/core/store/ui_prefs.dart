@@ -19,6 +19,7 @@ class UiPrefs {
     this.backgroundSeedHex,
     this.aiBaseUrl = defaultAiBaseUrl,
     this.aiModel = defaultAiModel,
+    this.aiEnabled = true,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -89,6 +90,14 @@ class UiPrefs {
   /// AI 模型名（**非敏感**，允许自定义以兼容其它 OpenAI 兼容端点）。
   final String aiModel;
 
+  /// AI 整理功能的**总开关**（默认开）。
+  ///
+  /// 关掉之后，界面上凡是"AI 整理"的入口都不再出现（清单里的那一条、以及
+  /// 相关提示），但**已经填好的地址 / 模型 / Key 一个都不清**：
+  /// 开关只决定"显不显示"，不决定"记不记得住"。`apiKey` 本来就在安全存储里，
+  /// 与这个字段无关。
+  final bool aiEnabled;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -125,6 +134,7 @@ class UiPrefs {
     Object? backgroundSeedHex = _unset,
     String? aiBaseUrl,
     String? aiModel,
+    bool? aiEnabled,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -144,6 +154,7 @@ class UiPrefs {
             : backgroundSeedHex as String?,
         aiBaseUrl: aiBaseUrl ?? this.aiBaseUrl,
         aiModel: aiModel ?? this.aiModel,
+        aiEnabled: aiEnabled ?? this.aiEnabled,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -159,6 +170,7 @@ class UiPrefs {
         'backgroundSeedHex': backgroundSeedHex,
         'aiBaseUrl': aiBaseUrl,
         'aiModel': aiModel,
+        'aiEnabled': aiEnabled,
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -181,6 +193,8 @@ class UiPrefs {
       // 坏值（空串 / 非字符串）收回默认值，与其它偏好字段同一套口径
       aiBaseUrl: _readNonEmpty(json['aiBaseUrl'], defaultAiBaseUrl),
       aiModel: _readNonEmpty(json['aiModel'], defaultAiModel),
+      // 老偏好文件里没有这个键 → 保持默认开（加了开关不该把功能悄悄关掉）
+      aiEnabled: json['aiEnabled'] != false,
     );
   }
 

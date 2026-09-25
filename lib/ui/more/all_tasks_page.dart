@@ -7,12 +7,17 @@ import '../../core/models/event.dart';
 import '../../core/models/task.dart';
 import '../common/empty_state.dart';
 import '../common/labels.dart';
+import '../common/status_selector.dart';
 import '../common/task_tile.dart';
 import '../common/urgency.dart';
 
 /// 任务的显示方式。
+///
+/// 「不分组」已被「按完成度」取代（实机反馈）：平铺列表里已完成的任务混在
+/// 未完成中间，扫一列看不出还有多少欠着。三个选项现在都是**分组**：
+/// 完成度 / 事件 / 紧迫度。
 enum TaskGrouping {
-  none('不分组'),
+  completion('按完成度'),
   event('按事件'),
   urgency('按紧迫度');
 
@@ -31,6 +36,22 @@ class TaskGroup {
   final Urgency? tone;
 
   final List<Task> tasks;
+}
+
+/// 按完成度分组：**未完成 → 已搁置 → 已完成**（实机反馈给的固定顺序）。
+///
+/// 取代了原来的「不分组」：平铺列表把三种状态混在一起，看不出还剩多少。
+/// 组内仍按到期日排（近的在前、没排期的垫底）。
+List<TaskGroup> groupByCompletion(List<Task> tasks) {
+  const order = <NodeStatus>[NodeStatus.pending, NodeStatus.ignored, NodeStatus.done];
+  final groups = <TaskGroup>[];
+  for (final status in order) {
+    final group = tasks.where((Task t) => t.status == status).toList(growable: false)
+      ..sort(byDueThenOrder);
+    if (group.isEmpty) continue;
+    groups.add(TaskGroup(label: nodeStatusLabel(status), tone: null, tasks: group));
+  }
+  return groups;
 }
 
 /// 按紧迫度分组。
@@ -111,7 +132,7 @@ int byOrderOfTask(Task a, Task b) => compareByOrder(a.order, a.id, b.order, b.id
 /// 全部任务：**跨事件的任务总表**。
 ///
 /// 事件层级在手机上层层点进去太慢，这里给一个"平铺"的入口：
-/// 可以按状态筛，也可以按事件 / 紧迫度分组。
+/// 可以按状态筛，也可以按完成度 / 事件 / 紧迫度分组。
 ///
 /// 注：任务在数据上挂在**事件**下、不属于项目，所以分组维度是事件与紧迫度，
 /// 没有"按项目"这一项。
@@ -126,7 +147,7 @@ class AllTasksPage extends StatefulWidget {
 
 class _AllTasksPageState extends State<AllTasksPage> {
   NodeStatus? _filter;
-  TaskGrouping _grouping = TaskGrouping.none;
+  TaskGrouping _grouping = TaskGrouping.completion;
 
   @override
   Widget build(BuildContext context) {
@@ -173,18 +194,13 @@ class _AllTasksPageState extends State<AllTasksPage> {
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-                child: SegmentedButton<TaskGrouping>(
-                  showSelectedIcon: false,
-                  segments: <ButtonSegment<TaskGrouping>>[
-                    for (final grouping in TaskGrouping.values)
-                      ButtonSegment<TaskGrouping>(
-                        value: grouping,
-                        label: Text(grouping.label),
-                      ),
-                  ],
-                  selected: <TaskGrouping>{_grouping},
-                  onSelectionChanged: (selection) =>
-                      setState(() => _grouping = selection.first),
+                // 分组调节栏走全应用统一的胶囊选择器（与「到期」的档位栏、
+                // 项目详情的「状态」同一套观感），不再是 Material 的分段控件
+                child: StatusPillSelector<TaskGrouping>(
+                  values: TaskGrouping.values,
+                  selected: _grouping,
+                  labelOf: (value) => value.label,
+                  onSelected: (value) => setState(() => _grouping = value),
                 ),
               ),
               const Divider(height: 1),
@@ -232,9 +248,11 @@ class _AllTasksPageState extends State<AllTasksPage> {
     final app = widget.app;
 
     switch (_grouping) {
-      case TaskGrouping.none:
-        tasks.sort(byDueThenOrder);
-        rows.addAll(tasks.map(_Row.task));
+      case TaskGrouping.completion:
+        for (final group in groupByCompletion(tasks)) {
+          rows.add(_Row.header(group.label, group.tasks.length));
+          rows.addAll(group.tasks.map(_Row.task));
+        }
 
       case TaskGrouping.event:
         final groups = groupByEvent(

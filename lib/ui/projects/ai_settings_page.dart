@@ -75,6 +75,21 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: <Widget>[
+                // 总开关：**只决定"显不显示"**，不动已经填好的地址 / 模型 / Key。
+                // 关掉之后，清单里那条「AI 整理成计划」入口就不再出现；
+                // 这一页本身要留着 —— 不然关掉之后就再也打不开了。
+                SwitchListTile(
+                  value: widget.app.aiEnabled,
+                  title: const Text('启用 AI 整理'),
+                  subtitle: Text(
+                    widget.app.aiEnabled
+                        ? '关掉后项目里不再出现 AI 整理入口；地址、模型与 Key 都保留'
+                        : '已关闭：项目里不显示 AI 整理入口（地址、模型与 Key 仍然保留）',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  onChanged: (value) => setState(() => widget.app.setAiEnabled(value)),
+                ),
+                const Divider(height: 1),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   child: Text(

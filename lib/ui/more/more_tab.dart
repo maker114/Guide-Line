@@ -129,7 +129,13 @@ class MoreTab extends StatelessWidget {
   /// `apiKey` 在安全存储里，只能异步读；用一个 `FutureBuilder` 局部处理，
   /// **不**把 Key 拉进控制器状态 —— 这个副标题只是装饰，
   /// 不该为了它让整页在启动时多一次异步依赖。
+  ///
+  /// 总开关关着时这一行**仍然留着**：它是回去把开关打开的唯一下口，
+  /// 藏掉它就等于"关掉之后再也没法打开"。
   Widget _aiSubtitle(BuildContext context) {
+    if (!app.aiEnabled) {
+      return Text('已关闭 · 项目里不再显示 AI 整理入口', style: Theme.of(context).textTheme.bodySmall);
+    }
     return FutureBuilder<AiConfig>(
       future: app.readAiConfig(),
       builder: (context, snapshot) {

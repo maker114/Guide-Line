@@ -134,6 +134,13 @@ Future<void> startAiSummarize(
   String projectId,
   String projectTitle,
 ) async {
+  // 总开关关着时不该走到这里（入口已经藏了），但别把"点了没反应"留成可能：
+  // 真被调到就明说去哪儿打开。
+  if (!app.aiEnabled) {
+    showToast(context, 'AI 整理已关闭（在「更多 → AI 整理」里打开）', error: true);
+    return;
+  }
+
   final config = await app.readAiConfig();
   final reason = config.validate();
   if (reason != null && context.mounted) {

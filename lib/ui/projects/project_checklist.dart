@@ -81,8 +81,9 @@ class ProjectChecklist extends StatelessWidget {
           ),
         ),
         // AI 整理：把清单**反向压成**一段通顺的实现说明（设计文档 §2.1）。
-        // 只在有清单时才给入口 —— 空清单没什么可整理的。
-        if (items.isNotEmpty)
+        // 只在有清单**且 AI 总开关开着**时才给入口 —— 关掉 AI 之后，
+        // 项目里不该再出现任何"AI 整理"的字样（实机反馈）。
+        if (items.isNotEmpty && app.aiEnabled)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
             child: ListTile(
