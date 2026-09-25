@@ -50,31 +50,36 @@ const Key navIndicatorKey = Key('AppBottomNav.indicator');
 /// 选中指示器的几何：进度 [t]（0 → 1）时，宽 [nominalWidth] 的胶囊从 [fromLeft]
 /// 滑到 [toLeft]，返回它此刻的 `left` 与 `width`。
 ///
-/// 惯性由两件事叠出来，都是"一次鼓起来"、不是"两边各走各的"：
-///   · **位置**走 `easeOutCubic` —— 起步快、后段慢慢靠上去（滑行的减速）；
-///   · **宽度**加一个 `sin(πt)` 的包络 —— 起步 0、中途最大、落位收回。
-/// 用包络而不是"两条边各用一条缓动"，是因为后者起步就会把宽度顶到上限
-/// （实机上等于"啪"地弹宽 20dp），而这样起步是 0、150ms 前后最宽、落位归位。
-/// 鼓起时前导边会略微越过目标格再收回，这一点点"回弹"正是惯性的观感。
+/// 惯性 = **前导边先走、尾随边落后**，两条边都只朝目标方向走：
+///   · **前导边**（运动方向那一侧）走 `easeOutCubic` —— 起步快、后段慢慢靠上去，
+///     而且**正好停在目标格边界上，不越过去**；
+///   · **宽度**加一个 `sin(πt)` 的包络 —— 起步 0、中途最宽（+[_navStretchMax]）、
+///     落位收回；拉出来的这部分全部长在**尾随边**那一侧。
 ///
-/// 最后把盒子夹在 `[0, barWidth]` 内：鼓起的那几帧前导边会顶到导航条端点上，
-/// 不夹就会画到胶囊外面去。停稳时宽度正好是一格，夹取是空操作，
-/// 所以最左 / 最右那格的两端圆弧仍然与外部胶囊**完全重合**。
+/// 为什么不是"把中心放到缓动位置上、宽度对称地鼓"：那样前导边会先冲过目标格
+/// 再退回来 —— 实机上看着就是"右边界到位之后又往左挪了一下"（用户反馈的原话），
+/// 不像惯性，像没对准。让尾随边单独落后，前导边就是单调到位，
+/// 拉伸感一点没少，却不会有回弹。
+///
+/// 因为前导边始终落在起点与终点之间、尾随边落在它后面，胶囊**不会越出导航条**
+/// （最左 / 最右那格起步时正好贴边，之后只会更靠里），所以这里不需要夹取。
 ({double left, double width}) navIndicatorGeometry({
   required double t,
   required double fromLeft,
   required double toLeft,
   required double nominalWidth,
-  required double barWidth,
 }) {
   final progress = t.clamp(0.0, 1.0);
-  final fromCenter = fromLeft + nominalWidth / 2;
-  final toCenter = toLeft + nominalWidth / 2;
-  final center =
-      fromCenter + (toCenter - fromCenter) * Curves.easeOutCubic.transform(progress);
+  final eased = Curves.easeOutCubic.transform(progress);
   final width = nominalWidth + _navStretchMax * math.sin(math.pi * progress);
-  final maxLeft = math.max(0.0, barWidth - width);
-  return (left: (center - width / 2).clamp(0.0, maxLeft), width: width);
+
+  if (toLeft >= fromLeft) {
+    // 向右：前导边是右边，先到位；宽度长在左边（尾随边落后再追平）
+    final right = fromLeft + nominalWidth + (toLeft - fromLeft) * eased;
+    return (left: right - width, width: width);
+  }
+  // 向左：前导边是左边，先到位；宽度长在右边
+  return (left: fromLeft + (toLeft - fromLeft) * eased, width: width);
 }
 
 /// 底部导航的一项：可点的方块（图标在上、文字在下）。
@@ -224,7 +229,6 @@ class _AppBottomNavState extends State<AppBottomNav>
                   fromLeft: fromLeft,
                   toLeft: toLeft,
                   nominalWidth: nominalWidth,
-                  barWidth: constraints.maxWidth,
                 );
                 return Positioned(
                   // 纵向顶到 0：配合外层零内边距，胶囊与外部胶囊**等高**

@@ -19,7 +19,6 @@ void main() {
           fromLeft: from,
           toLeft: to,
           nominalWidth: nominal,
-          barWidth: barWidth,
         );
 
     test('进度 0 / 1 停在起点与终点，宽度正好一格', () {
@@ -67,6 +66,56 @@ void main() {
           expect(geometry.left + geometry.width, lessThanOrEqualTo(barWidth + 1e-9),
               reason: 't=$t 越出右边界');
         }
+      }
+    });
+
+    test('往右移时右边界只朝右走，到位就停住、不越过也不回退', () {
+      // 用户反馈的原话：往右移动时右边界到位之后还会略微往左挪一下。
+      // 那是"把中心放在缓动位置上、宽度对称地鼓"造成的回弹；现在拉长全部长在
+      // 尾随边上，前导边（右边）就该是单调到位。
+      const jumps = <List<double>>[
+        <double>[0, 80],
+        <double>[80, 160],
+        <double>[0, 240], // 跨三格
+        <double>[80, 240],
+      ];
+      for (final jump in jumps) {
+        final targetRight = jump[1] + nominal;
+        double? previous;
+        for (var step = 0; step <= 60; step += 1) {
+          final geometry = at(step / 60, from: jump[0], to: jump[1]);
+          final right = geometry.left + geometry.width;
+          expect(right, lessThanOrEqualTo(targetRight + 1e-9),
+              reason: 't=${step / 60} 右边界越过了目标格');
+          if (previous != null) {
+            expect(right, greaterThanOrEqualTo(previous - 1e-9),
+                reason: 't=${step / 60} 右边界往左退了');
+          }
+          previous = right;
+        }
+        expect(previous, closeTo(targetRight, 1e-9), reason: '最后要正好停在目标格边界');
+      }
+    });
+
+    test('往左移时左边界同样只朝左走，到位就停住', () {
+      const jumps = <List<double>>[
+        <double>[80, 0],
+        <double>[240, 0],
+        <double>[240, 160],
+      ];
+      for (final jump in jumps) {
+        double? previous;
+        for (var step = 0; step <= 60; step += 1) {
+          final left = at(step / 60, from: jump[0], to: jump[1]).left;
+          expect(left, greaterThanOrEqualTo(jump[1] - 1e-9),
+              reason: 't=${step / 60} 左边界越过了目标格');
+          if (previous != null) {
+            expect(left, lessThanOrEqualTo(previous + 1e-9),
+                reason: 't=${step / 60} 左边界往右退了');
+          }
+          previous = left;
+        }
+        expect(previous, closeTo(jump[1], 1e-9));
       }
     });
 
@@ -125,19 +174,30 @@ void main() {
       expect(pill().width, closeTo(bar().width / 4, 0.01));
     });
 
-    testWidgets('切页签时胶囊滑过去，途中被拉长', (tester) async {
+    testWidgets('切页签时胶囊滑过去、途中被拉长，右边界到位就不再动', (tester) async {
       await pumpNav(tester);
 
-      final startLeft = tester.getRect(find.byKey(navIndicatorKey)).left;
+      final barWidth = tester.getRect(find.byType(AppBottomNav)).width;
+      final nominal = barWidth / 4;
+      final targetRight = nominal * 4; // 最后一格的右边界 = 栏宽
+
       hostKey.currentState!.select(3);
       await tester.pump(); // 起帧：动画从 0 开始
-      await tester.pump(const Duration(milliseconds: 90));
 
-      final mid = tester.getRect(find.byKey(navIndicatorKey));
-      final nominal = tester.getRect(find.byType(AppBottomNav)).width / 4;
-      expect(mid.left, greaterThan(startLeft), reason: '应当已经在向右滑');
-      expect(mid.width, greaterThan(nominal), reason: '途中应当被拉长');
-      expect(mid.width - nominal, lessThanOrEqualTo(20 + 0.01), reason: '拉伸超过上限');
+      double? previousRight;
+      var stretched = false;
+      for (var step = 0; step < 10; step += 1) {
+        await tester.pump(const Duration(milliseconds: 30));
+        final rect = tester.getRect(find.byKey(navIndicatorKey));
+        expect(rect.right, lessThanOrEqualTo(targetRight + 0.01), reason: '右边界越过了目标');
+        if (previousRight != null) {
+          expect(rect.right, greaterThanOrEqualTo(previousRight - 0.01),
+              reason: '第 $step 帧右边界往左退了');
+        }
+        previousRight = rect.right;
+        if (rect.width > nominal + 0.5) stretched = true;
+      }
+      expect(stretched, isTrue, reason: '途中应当被拉长');
 
       await tester.pumpAndSettle();
       final settled = tester.getRect(find.byKey(navIndicatorKey));
