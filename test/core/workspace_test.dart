@@ -319,6 +319,47 @@ void main() {
     });
   });
 
+  group('事件标识色（与项目同一套系统）', () {
+    test('新建事件自动拿到一个色板里的颜色，且前几条不撞色', () {
+      final colors = <String>[];
+      for (var i = 0; i < 4; i += 1) {
+        colors.add(ws.createEvent(name: '事件$i').color!);
+      }
+      expect(colors.toSet().length, 4, reason: '前几个不该撞色');
+      for (final color in colors) {
+        expect(ProjectPalette.hexes, contains(color));
+      }
+    });
+
+    test('事件与项目**各算各的**（同一份色板，互不干扰）', () {
+      final project = ws.createProject(title: '项目');
+      final event = ws.createEvent(name: '事件');
+      expect(event.color, project.color, reason: '两边都从"用得最少"开始，第一支色相同');
+      expect(ws.nextEventColor(), isNot(project.color), reason: '第二个事件要换一支');
+    });
+
+    test('设 / 清事件标识色：规范化小写，坏值拒绝，值没变不写盘', () {
+      final event = ws.createEvent(name: '事件');
+
+      ws.setEventColor(event.id, '#78D2CA');
+      expect(ws.findEvent(event.id)!.color, '#78d2ca', reason: '统一成小写');
+
+      expect(
+        () => ws.setEventColor(event.id, '蓝色'),
+        throwsA(isA<RuleViolation>()),
+      );
+      expect(ws.findEvent(event.id)!.color, '#78d2ca', reason: '被拒绝后保持原值');
+
+      ws.setEventColor(event.id, null);
+      expect(ws.findEvent(event.id)!.color, isNull, reason: '传 null 是"不用标识色"');
+
+      // 清掉之后写盘里也不该再有这个字段（老数据逐字节一致的前提）
+      final onDisk = storeFileOnDisk().documentOf(DocName.events).eventItems.single;
+      expect(onDisk.color, isNull);
+      expect(onDisk.toJson().containsKey('color'), isFalse, reason: 'null 不写出');
+    });
+  });
+
   group('灵感：改正文 / 一键追加 / 批量（灵感整理第 2、6、7 条）', () {
     test('改正文：改得掉、能落盘读回', () {
       final inspiration = ws.captureInspiration('原来的内容');
@@ -1104,7 +1145,7 @@ void main() {
       final raw = jsonDecode(storeTextOnDisk()) as Map<String, dynamic>;
       final collections = raw['collections'] as Map<String, dynamic>;
       for (final name in <String>['projects', 'inspirations']) {
-        final items = ((collections[name] as Map<String, dynamic>)['items'] as List<dynamic>);
+        final items = (collections[name] as Map<String, dynamic>)['items'] as List<dynamic>;
         for (final item in items.cast<Map<String, dynamic>>()) {
           if (item['id'] == stale.id || item['id'] == staleInspiration.id) {
             item['updated_at'] = staleAt;

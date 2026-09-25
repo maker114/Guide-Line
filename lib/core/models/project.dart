@@ -151,7 +151,7 @@ class Project implements EntityNode {
       updatedAt: Canonical.readInt(json['updated_at'], 'project.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'project.deleted', issues) ?? false,
       // 标识色按 `#rrggbb` 校验，坏值置空（与 `parseHexColor` 的口径一致）
-      color: _readHexColor(json['color'], issues),
+      color: Canonical.readHexColor(json['color'], 'project.color', issues),
       items: readProjectItems(json['items'], 'project.items', issues),
       extra: Canonical.readExtra(json, knownKeys),
     );
@@ -184,19 +184,6 @@ class Project implements EntityNode {
     out.addAll(extra);
     return out;
   }
-}
-
-/// `#rrggbb`（小写）之外的值一律置空并记一条 error。
-///
-/// 形态判定复用 `Canonical.normalizeHexColor`，与界面取色是**同一套口径**。
-String? _readHexColor(Object? value, DecodeIssues issues) {
-  if (value == null) return null;
-  if (value is String) {
-    final normalized = Canonical.normalizeHexColor(value);
-    if (normalized != null) return normalized;
-  }
-  issues.error('project.color 不是 "#rrggbb" 形态：$value —— 置为 null');
-  return null;
 }
 
 const Object _unset = Object();

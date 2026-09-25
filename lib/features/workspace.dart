@@ -191,11 +191,29 @@ class Workspace {
   /// 反馈：默认停在「今天」时，任务都排在更远的将来，整页看着就是空的。
   List<Task> tasksScheduled() => _scheduledTasks();
 
+  /// 「接下来的任务」用的一览：**还开着**的任务 —— 未完成、未归档、不在已搁置
+  /// 事件下，**不管有没有排到期日**。
+  ///
+  /// 与 [tasksScheduled] 只差一条：不要求 `due_at`。页面自己按紧迫度分档，
+  /// "没有到期日"本来就是其中一档。
+  List<Task> openTasks() {
+    final muted = _mutedEventIds();
+    return liveTasks
+        .where((t) =>
+            !t.archived &&
+            t.status == NodeStatus.pending &&
+            !muted.contains(t.eventId))
+        .toList(growable: false);
+  }
+
+  /// 不再参与"到期 / 接下来的任务"的事件 id（已搁置就是"这条线先不做了"）。
+  Set<String> _mutedEventIds() => allEvents
+      .where((e) => e.status == NodeStatus.ignored)
+      .map((e) => e.id)
+      .toSet();
+
   List<Task> _scheduledTasks({String? cutoff}) {
-    final mutedEventIds = allEvents
-        .where((e) => e.status == NodeStatus.ignored)
-        .map((e) => e.id)
-        .toSet();
+    final mutedEventIds = _mutedEventIds();
     final list = liveTasks
         .where((t) =>
             !t.archived &&
@@ -434,10 +452,18 @@ class Workspace {
   ///
   /// 色板只有一份（`ProjectPalette.hexes`）—— 界面的取色器与这里的自动分配共用，
   /// 不各写一份（放在 core 是因为 features 不能依赖 ui）。
-  String nextProjectColor() {
+  String nextProjectColor() => _leastUsedColor(liveProjects.map((p) => p.color));
+
+  /// 事件标识色：同一个算法，统计的是事件。
+  ///
+  /// 事件与项目共用一份色板 —— 它们从不出现在同一个列表里，不需要两套色，
+  /// 而共用能让"这根竖条是什么颜色 = 什么东西"的印象保持一致。
+  String nextEventColor() => _leastUsedColor(liveEvents.map((e) => e.color));
+
+  /// 取**用得最少**的那个色板色：删掉几条之后颜色会自然让出来，不会一直往下轮。
+  String _leastUsedColor(Iterable<String?> colors) {
     final used = <String, int>{};
-    for (final project in liveProjects) {
-      final color = project.color;
+    for (final color in colors) {
       if (color == null) continue;
       used[color] = (used[color] ?? 0) + 1;
     }
@@ -912,10 +938,28 @@ class Workspace {
       createdAt: now,
       updatedAt: now,
       deleted: false,
+      // 与项目一样自动分配一个标识色（"用得最少"的那个）
+      color: nextEventColor(),
     );
     _upsert(DocName.events, event);
     persist();
     return event;
+  }
+
+  /// 设 / 清事件标识色（与 [setProjectColor] 同一套口径）。
+  void setEventColor(String id, String? color) {
+    final event = findEvent(id);
+    if (event == null) throw const RuleViolation('事件不存在');
+    final normalized = Canonical.normalizeHexColor(color);
+    if (color != null && normalized == null) {
+      throw const RuleViolation('标识色要写成 #rrggbb');
+    }
+    if (normalized == event.color) return;
+    _upsert(
+      DocName.events,
+      event.copyWith(color: normalized, updatedAt: Ids.nowMillis()),
+    );
+    persist();
   }
 
   void updateEvent(String id, {String? name, bool? archived}) {

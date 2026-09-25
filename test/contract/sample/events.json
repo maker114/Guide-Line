@@ -9,7 +9,8 @@
       "completed_at": null,
       "created_at": 1788220800000,
       "updated_at": 1788307200000,
-      "deleted": false
+      "deleted": false,
+      "color": "#78d2ca"
     },
     {
       "id": "c47a92be-f5d7-430b-a2ac-d75864950622",

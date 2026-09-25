@@ -135,4 +135,18 @@ class Canonical {
     final normalized = value.trim().toLowerCase();
     return hexColorPattern.hasMatch(normalized) ? normalized : null;
   }
+
+  /// 标识色字段（项目 / 事件共用）：不是 `#rrggbb` 就置空并记一条 error。
+  ///
+  /// 与 [normalizeHexColor] 是同一套口径 —— 界面取色、模型校验、写入侧校验
+  /// 共用一份，免得出现"界面收下了、模型读不出来"的分歧。
+  static String? readHexColor(Object? value, String field, DecodeIssues issues) {
+    if (value == null) return null;
+    if (value is String) {
+      final normalized = normalizeHexColor(value);
+      if (normalized != null) return normalized;
+    }
+    issues.error('$field 不是 "#rrggbb" 形态：$value —— 置为 null');
+    return null;
+  }
 }

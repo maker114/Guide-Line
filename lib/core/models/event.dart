@@ -14,6 +14,7 @@ class Event implements EntityNode {
     required this.createdAt,
     required this.updatedAt,
     required this.deleted,
+    this.color,
     this.extra = const <String, dynamic>{},
   });
 
@@ -27,6 +28,7 @@ class Event implements EntityNode {
     'created_at',
     'updated_at',
     'deleted',
+    'color',
   };
 
   @override
@@ -56,6 +58,13 @@ class Event implements EntityNode {
   @override
   final bool deleted;
 
+  /// 标识色（与项目同一套系统）：`#rrggbb` 小写，未设置为 `null`。
+  ///
+  /// 用途：任务列表里一眼看出"这条任务属于哪条线"，以及「接下来的任务」的
+  /// 日历上按事件色画圆环。**未设置时不写出这个字段** —— 老数据读进来再写出去
+  /// 仍然逐字节一致，不需要迁移（与 `Project.color` 同一套规则）。
+  final String? color;
+
   final Map<String, dynamic> extra;
 
   /// 事件永远是任务线的根。
@@ -70,6 +79,7 @@ class Event implements EntityNode {
     Object? completedAt = _unset,
     int? updatedAt,
     bool? deleted,
+    Object? color = _unset,
   }) {
     return Event(
       id: id,
@@ -81,6 +91,7 @@ class Event implements EntityNode {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deleted: deleted ?? this.deleted,
+      color: color == _unset ? this.color : color as String?,
       extra: extra,
     );
   }
@@ -96,6 +107,7 @@ class Event implements EntityNode {
       createdAt: Canonical.readInt(json['created_at'], 'event.created_at', issues) ?? 0,
       updatedAt: Canonical.readInt(json['updated_at'], 'event.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'event.deleted', issues) ?? false,
+      color: Canonical.readHexColor(json['color'], 'event.color', issues),
       extra: Canonical.readExtra(json, knownKeys),
     );
   }
@@ -113,6 +125,9 @@ class Event implements EntityNode {
       'updated_at': updatedAt,
       'deleted': deleted,
     };
+    // 未设置标识色就不写出：老数据没有这个字段，写出来会破坏"读入→写出"
+    // 的逐字节一致。新字段追加在末尾，不打乱既有字段顺序。
+    if (color != null) out['color'] = color;
     out.addAll(extra);
     return out;
   }

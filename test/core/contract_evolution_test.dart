@@ -49,6 +49,21 @@ void main() {
     };
   }
 
+  Map<String, dynamic> eventJson({Object? color}) {
+    return <String, dynamic>{
+      'id': '33333333-4444-4555-8666-777777777777',
+      'name': '一件事',
+      'status': 'pending',
+      'archived': false,
+      'order': 1000,
+      'completed_at': null,
+      'created_at': 1788652800000,
+      'updated_at': 1788652800000,
+      'deleted': false,
+      'color': ?color,
+    };
+  }
+
   group('灵感 tags', () {
     test('老数据没有 tags：读成空列表，且写出去**不带**这个字段', () {
       final issues = DecodeIssues();
@@ -188,6 +203,73 @@ void main() {
 
       expect(project.copyWith().color, '#2f6feb', reason: '不传就保持原值');
       expect(project.copyWith(color: null).color, isNull, reason: '显式传 null 才是清空');
+    });
+  });
+
+  group('事件 color（与项目同一套标识色系统）', () {
+    test('老数据没有 color：读成 null，写出去不带这个字段', () {
+      final issues = DecodeIssues();
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[eventJson()],
+      });
+      final document = Document.parse(DocName.events, text, issues);
+
+      expect(issues.errors, isEmpty);
+      expect(document.eventItems.single.color, isNull);
+      expect(document.toCanonicalText(), text, reason: '没写出这个字段才会逐字节一致');
+    });
+
+    test('有 color：读入后规范化成小写，写出去逐字节一致', () {
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[eventJson(color: '#78d2ca')],
+      });
+      final issues = DecodeIssues();
+      final document = Document.parse(DocName.events, text, issues);
+
+      expect(issues.errors, isEmpty);
+      expect(document.eventItems.single.color, '#78d2ca');
+      expect(document.toCanonicalText(), text);
+
+      // 大写 / 带空格也认得，但**规范化成小写**（否则同一个颜色会有两种写法）
+      final upper = Document.parse(
+        DocName.events,
+        Canonical.documentText(<String, dynamic>{
+          'items': <Map<String, dynamic>>[eventJson(color: '  #78D2CA  ')],
+        }),
+        DecodeIssues(),
+      );
+      expect(upper.eventItems.single.color, '#78d2ca');
+    });
+
+    test('坏色值置 null 并记错', () {
+      for (final bad in <Object>['蓝', '#12345', '#1234567', '#GGGGGG', 7, '']) {
+        final issues = DecodeIssues();
+        final document = Document.parse(
+          DocName.events,
+          Canonical.documentText(<String, dynamic>{
+            'items': <Map<String, dynamic>>[eventJson(color: bad)],
+          }),
+          issues,
+        );
+        expect(document.eventItems.single.color, isNull, reason: '坏值：$bad');
+        expect(issues.errors, isNotEmpty, reason: '坏值必须记进 issues：$bad');
+      }
+    });
+
+    test('copyWith(color: null) 能把标识色清掉（与"没传"区分开）', () {
+      final issues = DecodeIssues();
+      final document = Document.parse(
+        DocName.events,
+        Canonical.documentText(<String, dynamic>{
+          'items': <Map<String, dynamic>>[eventJson(color: '#78d2ca')],
+        }),
+        issues,
+      );
+      final event = document.eventItems.single;
+
+      expect(event.copyWith().color, '#78d2ca', reason: '不传就保持原值');
+      expect(event.copyWith(color: null).color, isNull, reason: '显式传 null 才是清空');
+      expect(event.copyWith(name: '改了名').color, '#78d2ca', reason: '改别的字段不受影响');
     });
   });
 
