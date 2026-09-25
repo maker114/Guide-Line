@@ -180,7 +180,7 @@ void main() {
     expect(text.contains('Guide Line'), isTrue);
     expect(text.contains('完成四个 Tab'), isTrue);
     expect(text.contains('子任务甲'), isTrue);
-    expect(text.contains('"schemaVersion": 2'), isTrue);
+    expect(text.contains('"schemaVersion": 3'), isTrue);
   });
 
   testWidgets('搜索能跨四类实体命中', (tester) async {
@@ -324,8 +324,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('一条名字相当长的主线任务'));
     await tester.pumpAndSettle();
-    // 「新建并列任务」已删除（并列走向改由「接后续任务…」表达），改断言仍在的项
-    expect(find.text('接后续任务…'), findsOneWidget);
+    // 动作面板打开了，且只剩"加一条 / 改这一条"的动作 ——
+    // 走向类动作（接后续 / 断开后续 / 新建后续节点）已随分叉 / 合流一起删除
+    expect(find.text('新建子任务'), findsOneWidget);
+    expect(find.textContaining('接后续'), findsNothing);
     await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉面板
     await tester.pumpAndSettle();
     await tester.pageBack();

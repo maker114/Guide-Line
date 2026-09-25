@@ -56,7 +56,6 @@ void main() {
       id: id,
       eventId: eventId,
       parentTaskId: parentId,
-      nextIds: const <String>[],
       taskType: type,
       title: title,
       dueAt: dueAt,

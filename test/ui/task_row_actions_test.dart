@@ -6,10 +6,10 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
 
-/// 任务行的两个新入口与"被挡住"的表达（灵感 14 / 15）：
+/// 任务行的入口与"被挡住"的表达（灵感 14 / 15）：
 ///   · 还有未处理子任务时，状态按钮换**锁形**，点它不改变状态、只解释原因；
 ///   · 子任务没勾完时，父任务不能被直接完成；
-///   · 「设到期日」「接后续任务…」两个图标按钮直接落在任务行上。
+///   · 任务行上只留一个图标按钮「设到期日」，其余动作走点整行弹出的面板。
 void main() {
   late Directory tempDir;
 
@@ -91,17 +91,32 @@ void main() {
     expect(app.ws.liveTasks.single.status, NodeStatus.done);
   });
 
-  testWidgets('任务行上有「设到期日」与「接后续任务…」两个入口', (tester) async {
+  testWidgets('任务行上只留「设到期日」一个图标入口', (tester) async {
     final app = await appWithTask(withSubtask: false);
     await openEvent(tester, app);
 
     expect(find.byIcon(Icons.event_outlined), findsOneWidget, reason: '没排期时是"设到期日"');
-    expect(find.byIcon(Icons.timeline), findsOneWidget, reason: '接后续任务的入口');
+    // 「接后续任务…」那个折线入口跟着分叉 / 合流一起删了：链上不再有"走向"
+    expect(find.byIcon(Icons.timeline), findsNothing);
 
     // 设到期日：点开的是日期选择器（不再走"更多"菜单）
     await tester.tap(find.byIcon(Icons.event_outlined));
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsOneWidget);
+  });
+
+  testWidgets('动作面板里只剩下"加一条 / 改这一条"的动作，没有走向类入口', (tester) async {
+    final app = await appWithTask(withSubtask: true);
+    await openEvent(tester, app);
+
+    await tester.tap(find.text('主线任务'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('新建子任务'), findsOneWidget);
+    expect(find.text('往上挪一格'), findsOneWidget, reason: '链上节点可以调先后');
+    expect(find.textContaining('接后续'), findsNothing);
+    expect(find.textContaining('断开后续'), findsNothing);
+    expect(find.textContaining('新建后续节点'), findsNothing);
   });
 
   testWidgets('设过到期日后图标换成"改到期日"，且任务行显示日期与剩余天数', (tester) async {

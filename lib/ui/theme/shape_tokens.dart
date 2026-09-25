@@ -44,7 +44,7 @@ abstract final class AppShapes {
     borderRadius: BorderRadius.all(Radius.circular(nestedRadius)),
   );
 
-  /// 支路徽标、色块这类小东西。
+  /// 徽标、色块这类小东西。
   static const RoundedRectangleBorder badge = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(8)),
   );

@@ -714,7 +714,7 @@ void main() {
       expect(
         () => ws.updateTask(standard.id, taskType: TaskType.parallel),
         throwsA(
-          predicate<RuleViolation>((e) => e.message.contains('接后续任务')),
+          predicate<RuleViolation>((e) => e.message.contains('开两个「事件」')),
         ),
       );
       expect(TaskType.parallel.isCreatable, isFalse);
@@ -761,6 +761,37 @@ void main() {
             .readAsStringSync()
             .contains('"task_type": "parallel"'),
         isTrue,
+      );
+    });
+
+    test('链上的先后可以调：上移 / 下移 = 交换相邻两个节点的 order', () {
+      final event = ws.createEvent(name: '事件 1');
+      final a = ws.createTask(eventId: event.id, title: '第一');
+      final b = ws.createTask(eventId: event.id, title: '第二');
+      final c = ws.createTask(eventId: event.id, title: '第三');
+      List<String> line() =>
+          ws.mainLineOf(event.id).map((t) => t.title).toList(growable: false);
+
+      expect(line(), <String>['第一', '第二', '第三']);
+
+      ws.moveTaskWithinLine(c.id, up: true);
+      expect(line(), <String>['第一', '第三', '第二']);
+
+      // 已经在最前 / 最后就是空操作，不报错
+      ws.moveTaskWithinLine(a.id, up: true);
+      ws.moveTaskWithinLine(b.id, up: false);
+      expect(line(), <String>['第一', '第三', '第二']);
+
+      // 子任务不在链上，不参与顺序
+      final sub = ws.createTask(
+        eventId: event.id,
+        title: '子任务',
+        parentTaskId: b.id,
+        type: TaskType.subtask,
+      );
+      expect(
+        () => ws.moveTaskWithinLine(sub.id, up: true),
+        throwsA(isA<RuleViolation>()),
       );
     });
 

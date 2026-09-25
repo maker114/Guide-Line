@@ -85,7 +85,8 @@ void main() {
       expect(text.contains('\r'), isFalse);
       expect(text.endsWith('\n'), isTrue);
       expect(text.endsWith('\n\n'), isFalse);
-      expect(text.contains('"schemaVersion": 2'), isTrue);
+      expect(text.contains('"schemaVersion": 3'), isTrue,
+          reason: 'v3 起任务表不再写 next_task_ids（《数据契约》§7）');
     });
   });
 

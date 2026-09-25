@@ -5,7 +5,7 @@ import '../models/entity.dart';
 /// 规范化 JSON（《数据契约》§2 / §8）。
 ///
 /// 这是全项目**唯一**的序列化出口：任何绕过它去 `jsonEncode` 的写法都会破坏
-/// 「逐字节可比」的契约，进而造成两端静默分叉。
+/// 「逐字节可比」的契约，进而造成两端静默走偏。
 class Canonical {
   static const JsonEncoder _pretty = JsonEncoder.withIndent('  ');
 

@@ -7,7 +7,7 @@ import 'document.dart';
 ///
 /// ```json
 /// {
-///   "schemaVersion": 2,
+///   "schemaVersion": 3,
 ///   "savedAt": 1788652800000,
 ///   "collections": {
 ///     "projects":     { "items": [ ... ] },
@@ -28,7 +28,10 @@ class StoreFile {
   const StoreFile({required this.documents, required this.savedAt});
 
   /// 当前 schema 版本。改动文件结构时必须递增，并在 [parse] 里保留旧版读取路径。
-  static const int currentSchemaVersion = 2;
+  ///
+  /// v3（破坏性）：任务表删掉 `next_task_ids`（分叉 / 合流整套删掉，见《数据契约》§3.4.1）。
+  /// 读取 v2 文件时那个字段被丢弃、**不再写出**；任务顺序回到 `order` 这一条链。
+  static const int currentSchemaVersion = 3;
 
   factory StoreFile.empty() => StoreFile(
         documents: <DocName, Document>{

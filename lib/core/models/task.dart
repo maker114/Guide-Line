@@ -4,17 +4,18 @@ import 'enums.dart';
 
 /// 任务（《数据契约》§3.4）。
 ///
-/// 两种关系**分开表达**：
-///   · `parent_task_id` —— **归属**（子任务挂在主任务框内）；
-///   · `next_task_ids`  —— **走向**（主线上下一步接到哪些任务，可多可合）。
+/// **一条任务线 = 一条链**：事件下的主线节点按 `order` 依次往下走，
+/// 每个节点可以挂若干子任务（`parent_task_id`）。就这么多。
 ///
-/// 原来只有前者，于是主线只能是一条兄弟链、并列出来的几条只能"分叉不能合流"。
+/// 这里删掉过一整套「走向边」（`next_task_ids`）：它当年用来表达分叉 / 合流，
+/// 让人得同时理解"支路""分叉点""合流点"三个概念 —— 与"快速理清一件事的脉络"
+/// 这条初心是冲突的。**并行两条线请开两个事件**，或者把两条并成同一节点下的
+/// 两条子任务。细节见《数据契约》§3.4.1 与 §7 的 v3 说明。
 class Task implements EntityNode {
   const Task({
     required this.id,
     required this.eventId,
     required String? parentTaskId,
-    this.nextIds = const <String>[],
     required this.taskType,
     required this.title,
     required this.dueAt,
@@ -32,7 +33,6 @@ class Task implements EntityNode {
     'id',
     'event_id',
     'parent_task_id',
-    'next_task_ids',
     'task_type',
     'title',
     'due_at',
@@ -45,6 +45,10 @@ class Task implements EntityNode {
     'deleted',
   };
 
+  /// v3 删掉的字段：读老文件时**丢掉**，并且不再透传（`extra`）——
+  /// 否则那个键会跟着用户的数据永远活下去，等于没删。
+  static const Set<String> droppedKeys = <String>{'next_task_ids'};
+
   @override
   final String id;
 
@@ -53,12 +57,6 @@ class Task implements EntityNode {
 
   @override
   final String? parentId;
-
-  /// **后续边**：这条任务往下接到哪些主线任务。
-  ///
-  /// 空列表 = 没有显式后续（老数据都是这样，按 `order` 顺序成链，见 `TaskFlow`）。
-  /// 两条以上 = 分叉；被两条以上任务指向 = 合流。
-  final List<String> nextIds;
 
   final TaskType taskType;
   final String title;
@@ -113,7 +111,6 @@ class Task implements EntityNode {
   Task copyWith({
     String? eventId,
     Object? parentId = _unset,
-    List<String>? nextIds,
     TaskType? taskType,
     String? title,
     Object? dueAt = _unset,
@@ -128,7 +125,6 @@ class Task implements EntityNode {
       id: id,
       eventId: eventId ?? this.eventId,
       parentTaskId: parentId == _unset ? this.parentId : parentId as String?,
-      nextIds: nextIds ?? this.nextIds,
       taskType: taskType ?? this.taskType,
       title: title ?? this.title,
       dueAt: dueAt == _unset ? this.dueAt : dueAt as String?,
@@ -144,11 +140,14 @@ class Task implements EntityNode {
   }
 
   factory Task.fromJson(Map<String, dynamic> json, DecodeIssues issues) {
+    final extra = Canonical.readExtra(json, knownKeys);
+    // v3 删掉的字段从这里丢掉（见 [droppedKeys]）：留着会被透传、写回去，
+    // 那个字段就永远活下来了，等于没删
+    extra.removeWhere((key, _) => droppedKeys.contains(key));
     return Task(
       id: Canonical.readString(json['id'], 'task.id', issues) ?? '',
       eventId: Canonical.readString(json['event_id'], 'task.event_id', issues) ?? '',
       parentTaskId: Canonical.readString(json['parent_task_id'], 'task.parent_task_id', issues),
-      nextIds: _readIdList(json['next_task_ids']),
       taskType: TaskType.fromWire(json['task_type'], issues.error),
       title: Canonical.readString(json['title'], 'task.title', issues) ?? '',
       dueAt: Canonical.readDate(json['due_at'], 'task.due_at', issues),
@@ -159,19 +158,8 @@ class Task implements EntityNode {
       createdAt: Canonical.readInt(json['created_at'], 'task.created_at', issues) ?? 0,
       updatedAt: Canonical.readInt(json['updated_at'], 'task.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'task.deleted', issues) ?? false,
-      extra: Canonical.readExtra(json, knownKeys),
+      extra: extra,
     );
-  }
-
-  /// 容错读取后续边：不是列表就当空，列表里非字符串的项直接丢掉。
-  /// 按契约 §8，**绝不因为一个字段畸形就让整条记录失败**。
-  static List<String> _readIdList(Object? raw) {
-    if (raw is! List) return const <String>[];
-    final out = <String>[];
-    for (final item in raw) {
-      if (item is String && item.isNotEmpty) out.add(item);
-    }
-    return List<String>.unmodifiable(out);
   }
 
   @override
@@ -180,7 +168,6 @@ class Task implements EntityNode {
       'id': id,
       'event_id': eventId,
       'parent_task_id': parentTaskId,
-      'next_task_ids': nextIds,
       'task_type': taskType.wire,
       'title': title,
       'due_at': dueAt,

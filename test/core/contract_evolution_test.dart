@@ -387,4 +387,97 @@ void main() {
       expect(store.documentOf(DocName.projects).projectItems.single.color, '#2f6feb');
     });
   });
+
+  group('v3 破坏性变更：删掉 next_task_ids', () {
+    String taskJson({Object? nextTaskIds}) => Canonical.documentText(<String, dynamic>{
+          'items': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': '33333333-4444-4555-8666-777777777777',
+              'event_id': '44444444-5555-4666-8777-888888888888',
+              'parent_task_id': null,
+              'next_task_ids': ?nextTaskIds,
+              'task_type': 'standard',
+              'title': '老文件里的一条任务',
+              'due_at': null,
+              'status': 'pending',
+              'archived': false,
+              'order': 1000,
+              'completed_at': null,
+              'created_at': 1788652800000,
+              'updated_at': 1788652800000,
+              'deleted': false,
+            },
+          ],
+        });
+
+    test('老文件里的走向边读得进来，但**写出时不再有**这个字段', () {
+      final issues = DecodeIssues();
+      final document = Document.parse(
+        DocName.tasks,
+        taskJson(nextTaskIds: <String>['55555555-6666-4777-8888-999999999999']),
+        issues,
+      );
+
+      expect(issues.errors, isEmpty, reason: '多出来的老字段不该让整条记录失败');
+      expect(document.taskItems.single.title, '老文件里的一条任务');
+
+      final written = document.toCanonicalText();
+      expect(written.contains('next_task_ids'), isFalse, reason: 'v3 起这个字段彻底不写');
+      expect(
+        written.contains('"task_type": "standard"'),
+        isTrue,
+        reason: '除被删的字段之外，其余字段照旧',
+      );
+    });
+
+    test('老文件里没有这个字段也一样（版本号只升不降）', () {
+      final issues = DecodeIssues();
+      final document = Document.parse(DocName.tasks, taskJson(), issues);
+      expect(issues.errors, isEmpty);
+      expect(document.toCanonicalText().contains('next_task_ids'), isFalse);
+    });
+
+    test('单文件信封把 schemaVersion 升到 3，v2 文件仍读得进来', () {
+      expect(StoreFile.currentSchemaVersion, 3);
+
+      final v2 = jsonEncode(<String, dynamic>{
+        'schemaVersion': 2,
+        'savedAt': 1788652800000,
+        'collections': <String, dynamic>{
+          'projects': <String, dynamic>{'items': <dynamic>[]},
+          'inspirations': <String, dynamic>{'items': <dynamic>[]},
+          'events': <String, dynamic>{'items': <dynamic>[]},
+          'tasks': <String, dynamic>{
+            'items': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': '66666666-7777-4888-8999-aaaaaaaaaaaa',
+                'event_id': '44444444-5555-4666-8777-888888888888',
+                'parent_task_id': null,
+                'next_task_ids': <String>['77777777-8888-4999-8aaa-bbbbbbbbbbbb'],
+                'task_type': 'standard',
+                'title': 'v2 里的分叉点',
+                'due_at': null,
+                'status': 'pending',
+                'archived': false,
+                'order': 1000,
+                'completed_at': null,
+                'created_at': 1788652800000,
+                'updated_at': 1788652800000,
+                'deleted': false,
+              },
+            ],
+          },
+        },
+      });
+
+      final issues = DecodeIssues();
+      final store = StoreFile.parse(v2, issues);
+      expect(issues.errors, isEmpty);
+      expect(store.documentOf(DocName.tasks).taskItems.single.title, 'v2 里的分叉点');
+      // 再写出时按 v3 写：那个字段没了，版本号是 3
+      final written = store.toCanonicalText();
+      expect(written.contains('"schemaVersion": 3'), isTrue);
+      expect(written.contains('next_task_ids'), isFalse);
+    });
+  });
 }
