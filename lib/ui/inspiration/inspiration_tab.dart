@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
+import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
@@ -379,10 +380,11 @@ class _InspirationTile extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(
-                project == null ? Icons.inbox_outlined : Icons.folder_outlined,
+              // 项目标识色也体现在这里：灵感列表里就能按颜色认项目
+              ProjectMarker(
+                color: project?.color,
+                fallbackIcon: project == null ? Icons.inbox_outlined : Icons.folder_outlined,
                 size: 14,
-                color: theme.colorScheme.outline,
               ),
               const SizedBox(width: 4),
               Expanded(

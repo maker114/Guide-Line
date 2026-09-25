@@ -5,6 +5,7 @@ import '../../core/models/enums.dart';
 import '../../core/models/task.dart';
 import 'dialogs.dart';
 import 'labels.dart';
+import 'status_selector.dart';
 
 /// 任务状态按钮：**点按 = 完成 / 取消完成**，长按 = 三态菜单。
 ///
@@ -64,6 +65,9 @@ class TaskStatusButton extends StatelessWidget {
 }
 
 /// 三态选择面板（未完成 / 已完成 / 已搁置）。
+///
+/// 内容是三项状态，所以外观统一走 [StatusPillSelector] ——
+/// 与项目详情页的「状态」是同一套观感（胶囊里套小胶囊、无分割线）。
 Future<void> pickTaskStatus(
   BuildContext context,
   AppController app,
@@ -73,24 +77,22 @@ Future<void> pickTaskStatus(
     context: context,
     isScrollControlled: true,
     builder: (sheetContext) => SafeArea(
-      child: ListView(
-        shrinkWrap: true,
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              task.title,
-              style: Theme.of(sheetContext).textTheme.titleMedium,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(task.title, style: Theme.of(sheetContext).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            StatusPillSelector<NodeStatus>(
+              values: NodeStatus.values,
+              selected: task.status,
+              labelOf: nodeStatusLabel,
+              onSelected: (status) => Navigator.of(sheetContext).pop(status),
             ),
-          ),
-          for (final status in NodeStatus.values)
-            ListTile(
-              leading: Icon(nodeStatusIcon(status)),
-              title: Text(nodeStatusLabel(status)),
-              selected: status == task.status,
-              onTap: () => Navigator.of(sheetContext).pop(status),
-            ),
-        ],
+          ],
+        ),
       ),
     ),
   );

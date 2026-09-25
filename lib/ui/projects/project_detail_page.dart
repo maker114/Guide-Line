@@ -11,6 +11,7 @@ import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
+import '../common/status_selector.dart';
 import '../inspiration/merge_editor_page.dart';
 import 'handoff_preview_page.dart';
 import 'project_actions.dart';
@@ -290,14 +291,11 @@ class _StatusField extends StatelessWidget {
         children: <Widget>[
           Text('状态', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 8),
-          SegmentedButton<NodeStatus>(
-            segments: <ButtonSegment<NodeStatus>>[
-              for (final status in NodeStatus.values)
-                ButtonSegment<NodeStatus>(value: status, label: Text(nodeStatusLabel(status))),
-            ],
-            selected: <NodeStatus>{project.status},
-            onSelectionChanged: (selection) {
-              final status = selection.first;
+          StatusPillSelector<NodeStatus>(
+            values: NodeStatus.values,
+            selected: project.status,
+            labelOf: nodeStatusLabel,
+            onSelected: (status) {
               final error = app.run(() => app.ws.setProjectStatus(project.id, status));
               if (error != null) showToast(context, error, error: true);
             },

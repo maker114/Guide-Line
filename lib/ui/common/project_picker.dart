@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/project.dart';
+import 'color_picker.dart';
 
 /// [pickProject] 中「不选 / 移到根」这一项的值。
 ///
@@ -69,7 +70,12 @@ Future<String?> pickProject(
                   for (final entry in flat)
                     ListTile(
                       contentPadding: EdgeInsets.only(left: 16.0 + entry.value * 20, right: 16),
-                      leading: const Icon(Icons.folder_outlined, size: 18),
+                      // 标识色也带到这里：分配灵感时能按颜色认项目，
+                      // 与项目树上是同一套视觉线索
+                      leading: ProjectMarker(
+                        color: entry.key.color,
+                        fallbackIcon: Icons.folder_outlined,
+                      ),
                       title: Text(entry.key.title),
                       onTap: () => Navigator.of(sheetContext).pop(entry.key.id),
                     ),

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/models/ai_config.dart';
 import '../../platform/data_directory.dart';
 import '../common/format.dart';
 import '../common/section_header.dart';
+import '../projects/ai_settings_page.dart';
 import '../theme/app_theme.dart';
 import 'all_tasks_page.dart';
 import 'appearance_page.dart';
@@ -65,6 +67,13 @@ class MoreTab extends StatelessWidget {
           subtitle: _appearanceSubtitle(),
           page: AppearancePage(app: app),
         ),
+        const SectionHeader('AI'),
+        _MoreItem(
+          icon: Icons.auto_awesome_outlined,
+          title: 'AI 整理',
+          subtitle: _aiSubtitle(context),
+          page: AiSettingsPage(app: app),
+        ),
         const SectionHeader('数据安全'),
         _MoreItem(
           icon: Icons.history,
@@ -114,6 +123,29 @@ class MoreTab extends StatelessWidget {
     final background = prefs.hasBackground ? ' · 有背景图' : '';
     return '$themeName$background';
   }
+
+  /// AI 入口的副标题。
+  ///
+  /// `apiKey` 在安全存储里，只能异步读；用一个 `FutureBuilder` 局部处理，
+  /// **不**把 Key 拉进控制器状态 —— 这个副标题只是装饰，
+  /// 不该为了它让整页在启动时多一次异步依赖。
+  Widget _aiSubtitle(BuildContext context) {
+    return FutureBuilder<AiConfig>(
+      future: app.readAiConfig(),
+      builder: (context, snapshot) {
+        final config = snapshot.data;
+        final String text;
+        if (config == null) {
+          text = '用于把实现清单整理成正文';
+        } else if (config.isConfigured) {
+          text = '已配置 · ${config.model}';
+        } else {
+          text = '未配置（${config.validate()}）';
+        }
+        return Text(text, style: Theme.of(context).textTheme.bodySmall);
+      },
+    );
+  }
 }
 
 class _MoreItem extends StatelessWidget {
@@ -127,20 +159,25 @@ class _MoreItem extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String subtitle;
+
+  /// 静态文案；需要异步取值的入口（AI 配置）直接传一个组件进来。
+  final Object subtitle;
+
   final Widget page;
   final bool danger;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final dangerStyle = danger ? TextStyle(color: theme.colorScheme.error) : null;
     return ListTile(
       leading: Icon(icon, color: danger ? theme.colorScheme.error : null),
       title: Text(title),
-      subtitle: Text(
-        subtitle,
-        style: danger ? TextStyle(color: theme.colorScheme.error) : null,
-      ),
+      subtitle: switch (subtitle) {
+        final Widget widget => widget,
+        final String text => Text(text, style: dangerStyle),
+        _ => const SizedBox.shrink(),
+      },
       trailing: const Icon(Icons.chevron_right),
       onTap: () => Navigator.of(context).push<void>(
         MaterialPageRoute<void>(builder: (_) => page),
