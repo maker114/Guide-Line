@@ -24,7 +24,7 @@ void main() {
 
   Future<void> switchTab(WidgetTester tester, String label) async {
     await tester.tap(
-      find.descendant(of: find.byType(NavigationBar), matching: find.text(label)),
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text(label)),
     );
     await tester.pumpAndSettle();
   }
@@ -216,7 +216,7 @@ void main() {
     // 启动就看得见（设计上不做推送唤醒，这是唯一的提醒入口）
     expect(find.text('有 1 条任务已逾期'), findsOneWidget);
     expect(
-      find.descendant(of: find.byType(NavigationBar), matching: find.text('1')),
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('1')),
       findsOneWidget,
       reason: '「更多」页签上应该有逾期角标',
     );

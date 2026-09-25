@@ -27,7 +27,7 @@ void main() {
 
   Future<void> openEvent(WidgetTester tester, String name) async {
     await tester.tap(
-      find.descendant(of: find.byType(NavigationBar), matching: find.text('事件')),
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('事件')),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text(name));

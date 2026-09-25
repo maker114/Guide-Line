@@ -9,64 +9,162 @@ import 'more/due_page.dart';
 import 'more/more_tab.dart';
 import 'projects/project_tab.dart';
 
-/// 底部导航的形状参数（都是推算出来的，别单独改其中一个）。
+/// 底部导航的形状参数（自绘，改动时这三个要一起看）。
 ///
-/// 目标（实机反馈）：选中框尽量接近**正圆**、把图标和文字都罩住，
-/// 且它与外部胶囊的圆角同源，选最左 / 最右时能贴合胶囊内侧的弧。
+/// 目标（实机反馈）：选中框是**正圆**、把图标与文字都罩住，
+/// 且它与外部胶囊的圆角同源 —— 选最左 / 最右那项时两者是同一段弧，完全贴合。
 ///
-/// 有一个绕不开的限制：`NavigationBar` 的选中指示器尺寸是**写死的**
-/// （`_kIndicatorWidth = 64`、`_kIndicatorHeight = 32`，见 Flutter 源码），
-/// `indicatorShape` 只决定形状、**改不了尺寸**。想要正圆就得让宽 = 高，
-/// 而宽固定 64 → 指示器高度得是 64 → 导航高度得 128，那太占地方了。
-/// 所以这里取一个折中：把导航高度定成 56，指示器变成 64 × 28 的椭圆。
-/// 形状用 `StadiumBorder`，两端是完整半圆，视觉上就是个"横着的胶囊"，
-/// 与整个应用的形状规范一致；**要真正的正圆只能自绘导航**，那不值得。
-const double _navHeight = 56;
+/// **为什么自绘而不用 `NavigationBar`**：试过三版都不对。原因是它的选中指示器
+/// 框尺寸**写死的**（`_kIndicatorWidth = 64`、`_kIndicatorHeight = 32`，
+/// 见 Flutter 源码 `navigation_bar.dart`），`indicatorShape` 只能决定
+/// "在这个框里画什么形状"、改不了框。实机量到的两版：
+///   · 自绘半径 34 的圆 → 被框裁成 **64×28** 的压扁胶囊；
+///   · 半径改成 32（框宽的一半）→ 又被高度裁成 **64×56** 的椭圆。
+/// 想要"正圆 + 半径与外部胶囊一致"只能自己画，所以这里换成一段自绘导航。
+const double _navIndicatorRadius = 24;
 
-/// 外部胶囊的圆角半径：半个导航高度 + 外层纵向内边距 →
-/// 胶囊两端是完整半圆，与里面的选中胶囊同一套弧线。
+/// 导航内容高度 = 选中圆直径。
+const double _navHeight = _navIndicatorRadius * 2;
+
+/// 外层纵向内边距。
 const double _navOuterPadding = 6;
-const double _navRadius = _navHeight / 2 + _navOuterPadding;
 
-/// 选中指示器的**正圆**形状。
+/// 外部胶囊的圆角半径 = 选中圆半径 + 外层内边距。
 ///
-/// 为什么要自己画：`NavigationBar` 的指示器尺寸是**写死的**
-/// （`_kIndicatorWidth = 64`、`_kIndicatorHeight = 32`，见 Flutter 源码），
-/// `indicatorShape` 只能决定"在这个 64×32 的框里画什么形状"，
-/// 改不了框本身 —— 所以给 `CircleBorder` 或 `StadiumBorder` 得到的都是椭圆
-/// （64 宽的胶囊 / 被压扁的圆），不是正圆。
-///
-/// 这里换成"**无视框的实际尺寸、按给定半径画圆**"：
-/// 半径取外部胶囊的圆角半径 [_navRadius]，于是：
-///   · 它是个正圆；
-///   · 圆的高度 = 2 × _navRadius，把图标与文字整个罩住；
-///   · 选中最左 / 最右那一项时，圆与胶囊端部的弧**是同一条弧**，完全贴合。
-///
-/// 唯一的代价：指示器框宽仍是 64，划水波纹（InkWell）时高亮区域比圆略宽。
-/// 视觉上圆本身是准的 —— 这是不自己重写整个导航栏的前提下能做到的最接近。
-class _NavIndicatorCircle extends ShapeBorder {
-  const _NavIndicatorCircle(this.radius);
+/// 于是选中最左那一项时：圆心距胶囊左内缘正好等于圆半径，
+/// 圆在这点与胶囊左端的弧**相切** —— 两者同心同径，视觉上完全贴合。
+const double _navRadius = _navIndicatorRadius + _navOuterPadding;
 
-  final double radius;
+/// 底部导航的一项：一个可点的方块，选中时背后画一个**正圆**。
+///
+/// 圆把图标与文字一起罩住（图标在上、文字在下），所以文字也落在圆内。
+class _NavItem extends StatelessWidget {
+  const _NavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.badgeCount = 0,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final int badgeCount;
 
   @override
-  EdgeInsetsGeometry get dimensions => EdgeInsets.zero;
-
-  @override
-  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
-      getOuterPath(rect, textDirection: textDirection);
-
-  @override
-  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
-    final center = rect.center;
-    return Path()..addOval(Rect.fromCircle(center: center, radius: radius));
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          height: _navHeight,
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              // 选中态：正圆，直径 = _navHeight，与外部胶囊圆角同源
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 160),
+                opacity: selected ? 1 : 0,
+                child: Container(
+                  width: _navIndicatorRadius * 2,
+                  height: _navIndicatorRadius * 2,
+                  decoration: BoxDecoration(
+                    color: scheme.secondaryContainer,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Badge.count(
+                    count: badgeCount,
+                    isLabelVisible: badgeCount > 0,
+                    child: Icon(
+                      selected ? selectedIcon : icon,
+                      size: 22,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  Text(
+                    label,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
+}
+
+/// 自绘的底部导航条。
+///
+/// 单独抽成一个组件不只是为了整洁：`NavigationBar` 被换掉之后，
+/// 界面上就没有那个类型可找了，而用例要靠"找到底栏 → 点里面的页签"来切页。
+/// 给它一个**自己的公开类型**，测试用 `find.byType(AppBottomNav)` 定位，
+/// 比按文案或图标去猜稳得多。
+class AppBottomNav extends StatelessWidget {
+  const AppBottomNav({
+    super.key,
+    required this.index,
+    required this.onSelect,
+    this.overdueCount = 0,
+  });
+
+  final int index;
+  final ValueChanged<int> onSelect;
+  final int overdueCount;
 
   @override
-  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {}
-
-  @override
-  ShapeBorder scale(double t) => _NavIndicatorCircle(radius * t);
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        _NavItem(
+          icon: Icons.lightbulb_outline,
+          selectedIcon: Icons.lightbulb,
+          label: '灵感',
+          selected: index == 0,
+          onTap: () => onSelect(0),
+        ),
+        _NavItem(
+          icon: Icons.account_tree_outlined,
+          selectedIcon: Icons.account_tree,
+          label: '项目',
+          selected: index == 1,
+          onTap: () => onSelect(1),
+        ),
+        _NavItem(
+          icon: Icons.timeline_outlined,
+          selectedIcon: Icons.timeline,
+          label: '事件',
+          selected: index == 2,
+          onTap: () => onSelect(2),
+        ),
+        // 逾期数量挂在「更多」上：到期视图在那一页下面，
+        // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见
+        _NavItem(
+          icon: Icons.more_horiz,
+          selectedIcon: Icons.more_horiz,
+          label: '更多',
+          selected: index == 3,
+          badgeCount: overdueCount,
+          onTap: () => onSelect(3),
+        ),
+      ],
+    );
+  }
 }
 
 /// 手机端外壳：**底部四 Tab + 速记优先**（对应归档设计 §3.1.1 的手机端定位）。
@@ -105,6 +203,13 @@ class _AppShellState extends State<AppShell> {
     ShortcutChannel.consumePendingCapture().then((pending) {
       if (pending) _goCapture();
     });
+  }
+
+  /// 切换底部页签（底部导航每一项都用它，所以"切页"这件事只有一个入口）。
+  void _selectTab(int index) {
+    if (index == _index) return;
+    setState(() => _index = index);
+    widget.app.setLastTab(index);
   }
 
   /// 切到灵感页并把光标放进输入框 —— 「记一笔」的代价必须足够小。
@@ -164,18 +269,23 @@ class _AppShellState extends State<AppShell> {
                   icon: const Icon(Icons.bolt),
                   label: const Text('速记'),
                 ),
-          // 底部导航做成**悬浮的长条胶囊**（按实机反馈）：
-          //   · 原来 `NavigationBar` 铺满底边、底色占满整个区域，看着是一大片灰；
-          //   · 外边距 20、底部留 18（避开系统手势条）；
-          //   · 图标与文字的间距由 `labelPadding` 压到 0，配合小一号图标，
-          //     整条胶囊才紧凑（参数见文件顶部的推导说明）。
+          // 底部导航：**自绘的长条胶囊**。
+          //
+          // 为什么不用 `NavigationBar`（试过三版都不对）：
+          //   · 它的选中指示器框尺寸是**写死的**（`_kIndicatorWidth = 64`、
+          //     `_kIndicatorHeight = 32`，见 Flutter 源码），`indicatorShape`
+          //     只能决定"在这个框里画什么形状"，改不了框；
+          //   · 给 `StadiumBorder` 得到 64×32 的胶囊；自绘半径 34 的圆会被
+          //     这个框**裁成椭圆**（实机量出来是 64×28 与 64×56 两次都不是圆）。
+          // 要"正圆 + 半径与外部胶囊一致"就只能自己画。
+          //
+          // 自绘之后全是可控的：圆半径 `_navIndicatorRadius`，
+          // 外部圆角 `_navRadius = 圆半径 + 内边距`，选中最左/最右时两者同弧相切。
           bottomNavigationBar: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
-                // 圆角与里面的选中胶囊**同源**（都是 _navRadius），
-                // 所以两端的弧与选中块的弧是同一套
                 borderRadius: BorderRadius.circular(_navRadius),
                 boxShadow: <BoxShadow>[
                   BoxShadow(
@@ -186,54 +296,12 @@ class _AppShellState extends State<AppShell> {
                   ),
                 ],
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(_navRadius),
-                child: NavigationBar(
-                  backgroundColor: Colors.transparent,
-                  elevation: 0,
-                  height: _navHeight,
-                  labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-                  selectedIndex: _index,
-                  indicatorShape: const _NavIndicatorCircle(_navRadius),
-                  onDestinationSelected: (index) {
-                    setState(() => _index = index);
-                    app.setLastTab(index);
-                  },
-                  // 图标小一号、标签与图标之间**不留额外间距**：
-                  // 默认的 labelPadding(top: 4) + 24px 图标会让内容撑到贴边。
-                  labelPadding: EdgeInsets.zero,
-                  destinations: <NavigationDestination>[
-                    const NavigationDestination(
-                      icon: Icon(Icons.lightbulb_outline, size: 22),
-                      selectedIcon: Icon(Icons.lightbulb, size: 22),
-                      label: '灵感',
-                    ),
-                    const NavigationDestination(
-                      icon: Icon(Icons.account_tree_outlined, size: 22),
-                      selectedIcon: Icon(Icons.account_tree, size: 22),
-                      label: '项目',
-                    ),
-                    const NavigationDestination(
-                      icon: Icon(Icons.timeline_outlined, size: 22),
-                      selectedIcon: Icon(Icons.timeline, size: 22),
-                      label: '事件',
-                    ),
-                    // 逾期任务的数量挂在「更多」上：到期视图在那一页下面，
-                    // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见。
-                    NavigationDestination(
-                      icon: Badge.count(
-                        count: app.overdueCount,
-                        isLabelVisible: app.overdueCount > 0,
-                        child: const Icon(Icons.more_horiz, size: 22),
-                      ),
-                      selectedIcon: Badge.count(
-                        count: app.overdueCount,
-                        isLabelVisible: app.overdueCount > 0,
-                        child: const Icon(Icons.more_horiz, size: 22),
-                      ),
-                      label: '更多',
-                    ),
-                  ],
+              child: Padding(
+                padding: const EdgeInsets.all(_navOuterPadding),
+                child: AppBottomNav(
+                  index: _index,
+                  overdueCount: app.overdueCount,
+                  onSelect: _selectTab,
                 ),
               ),
             ),
