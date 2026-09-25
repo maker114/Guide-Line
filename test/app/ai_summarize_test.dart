@@ -259,6 +259,79 @@ void main() {
     });
   });
 
+  group('测试连接（设置页那个按钮）', () {
+    test('成功时把实际请求地址与模型回复都报出来', () async {
+      final app = await boot(generate: (_, _) async => '好的');
+
+      final result = await app.testAiConnection(
+        const AiConfig(
+          baseUrl: 'https://api.deepseek.com',
+          apiKey: 'sk-test',
+          model: 'deepseek-flash',
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.message, contains('连通成功'));
+      expect(result.message, contains('https://api.deepseek.com/chat/completions'));
+      expect(result.message, contains('deepseek-flash'));
+      expect(result.message, contains('好的'));
+    });
+
+    test('**失败时也把实际请求地址报出来** —— 排查"连不上"全靠这条', () async {
+      final app = await boot(
+        generate: (_, _) async => throw const AiRequestException('地址不对（404）'),
+      );
+
+      final result = await app.testAiConnection(
+        const AiConfig(
+          baseUrl: 'https://example.com/',
+          apiKey: 'sk-test',
+          model: 'm',
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(result.message, contains('连接失败'));
+      expect(
+        result.message,
+        contains('https://example.com/chat/completions'),
+        reason: '要看得到"到底请求了哪个地址"，末尾斜杠也应已被收掉',
+      );
+      expect(result.message, contains('地址不对（404）'));
+    });
+
+    test('没填地址/Key 时不去联网，直接说清缺什么', () async {
+      var called = false;
+      final app = await boot(generate: (_, _) async {
+        called = true;
+        return 'x';
+      });
+
+      final result = await app.testAiConnection(
+        const AiConfig(baseUrl: '', apiKey: 'k', model: 'm'),
+      );
+
+      expect(called, isFalse);
+      expect(result.ok, isFalse);
+      expect(result.message, contains('API 地址'));
+    });
+
+    test('测试只发一句固定文字，不带用户数据', () async {
+      final app = await boot(generate: (_, _) async => 'ok');
+      final project = app.ws.createProject(title: '不该被发出去的项目');
+      app.run(() => app.ws.addProjectItem(project.id, '不该被发出去的条目'));
+
+      await app.testAiConnection(
+        const AiConfig(baseUrl: AiConfig.defaultBaseUrl, apiKey: 'k', model: 'm'),
+      );
+
+      expect(lastInput!.projectTitle, '连接测试');
+      expect(lastInput!.items.single.text, '测试一下');
+      expect(lastInput!.purpose, isEmpty);
+    });
+  });
+
   test('提示词明确要求"只整理、不新增"', () {    expect(HttpAiTextGenerator.systemPrompt, contains('只整理，不新增'));
     expect(HttpAiTextGenerator.systemPrompt, contains('不要用列表'));
   });

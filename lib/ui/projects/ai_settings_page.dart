@@ -26,6 +26,9 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   final TextEditingController _apiKey = TextEditingController();
   bool _loading = true;
   bool _keyStored = false;
+  bool _testing = false;
+  bool _testOk = false;
+  String? _testResult;
 
   @override
   void initState() {
@@ -111,6 +114,52 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       ),
                     ),
                   ),
+                // 「测试连接」：把**实际请求的地址**和**服务端原话**都摆出来。
+                // 加它的原因是一次真实的排查困难 —— 用户在手机上看到"没有这个网站"，
+                // 但地址栏里到底存的是什么、拼成了什么请求，界面上完全看不到，
+                // 只能靠猜。这里一次点击就能定位（地址错 / 密钥错 / 被限流）。
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                  child: Row(
+                    children: <Widget>[
+                      FilledButton.tonalIcon(
+                        onPressed: _testing ? null : _testConnection,
+                        icon: _testing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.bolt_outlined, size: 18),
+                        label: Text(_testing ? '测试中…' : '测试连接'),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '会真的发一次请求（只发一句测试文字，不含你的任何数据）',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_testResult != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (_testOk ? theme.colorScheme.primary : theme.colorScheme.error)
+                            .withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: SelectableText(
+                        _testResult!,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ),
                 const Divider(height: 32),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
@@ -136,8 +185,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     );
   }
 
-  Future<void> _save() async {
-    final config = AiConfig(
+  Future<void> _save() async {    final config = AiConfig(
       baseUrl: _baseUrl.text,
       apiKey: _apiKey.text,
       model: _model.text,
@@ -168,6 +216,39 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     }
     setState(() => _keyStored = false);
     showToast(context, '已清除');
+  }
+
+  /// 真的发一次请求，把**实际地址**与**服务端原话**显示出来。
+  ///
+  /// 只发一句固定的测试文字，**不带用户任何数据** —— 这一点也写在按钮旁边。
+  Future<void> _testConnection() async {
+    // 先把当前输入框里的值存下来再测：不然"改了地址没保存就去测"会测到旧配置
+    final saveError = await widget.app.saveAiConfig(
+      AiConfig(baseUrl: _baseUrl.text, apiKey: _apiKey.text, model: _model.text),
+    );
+    if (!mounted) return;
+    if (saveError != null) {
+      setState(() {
+        _testOk = false;
+        _testResult = '保存配置失败：$saveError';
+      });
+      return;
+    }
+    setState(() {
+      _apiKey.clear();
+      _keyStored = true;
+      _testing = true;
+      _testResult = null;
+    });
+
+    final config = await widget.app.readAiConfig();
+    final result = await widget.app.testAiConnection(config);
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _testOk = result.ok;
+      _testResult = result.message;
+    });
   }
 }
 

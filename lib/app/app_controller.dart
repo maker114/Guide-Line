@@ -355,6 +355,42 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 真发一次请求做连通性测试（设置页的「测试连接」）。
+  ///
+  /// 只发一句固定测试文字，**不带用户任何数据**；返回可直接显示的文案。
+  /// 失败的文案里包含**实际请求的地址** —— 排查"连不上"时这是最关键的一条信息。
+  Future<({bool ok, String message})> testAiConnection(AiConfig config) async {
+    final normalized = config.normalized();
+    final reason = normalized.validate();
+    if (reason != null) return (ok: false, message: reason);
+
+    try {
+      final text = await ai.summarizeChecklist(
+        config: normalized,
+        input: const PromptInput(
+          projectTitle: '连接测试',
+          purpose: '',
+          items: <({String text, bool done})>[(text: '测试一下', done: false)],
+        ),
+      );
+      return (
+        ok: true,
+        message: '连通成功\n'
+            '请求地址：${normalized.chatCompletionsUrl}\n'
+            '模型：${normalized.model}\n'
+            '模型回复：${text.trim()}',
+      );
+    } on AiRequestException catch (error) {
+      return (
+        ok: false,
+        message: '连接失败\n请求地址：${normalized.chatCompletionsUrl}\n模型：${normalized.model}\n'
+            '原因：${error.message}',
+      );
+    } catch (error) {
+      return (ok: false, message: '连接失败：$error');
+    }
+  }
+
   /// 把项目清单交给模型整理成一段通顺说明（**只返回结果，不写库**）。
   ///
   /// 分成"生成"与"写回"两步是刻意的：模型可能编造清单里没有的东西，
