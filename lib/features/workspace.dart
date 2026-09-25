@@ -169,12 +169,22 @@ class Workspace {
   }
 
   /// 到期聚合视图（Q29 / Q41 / Q48）：`due_at` 早于等于 [date] 且未完成、未归档。
+  ///
+  /// **已搁置事件下的任务不算**（实机反馈）：事件被搁置就是"这条线先不做了"，
+  /// 再让它里面的任务天天出现在「到期」和逾期角标里，等于把已经放下的东西
+  /// 又拽回来催一遍。语义上它仍是一条待处理任务（`status = pending`），
+  /// 只是不再参与"到期"这件事。
   List<Task> tasksDueOnOrBefore(String date) {
+    final mutedEventIds = allEvents
+        .where((e) => e.status == NodeStatus.ignored)
+        .map((e) => e.id)
+        .toSet();
     final list = liveTasks
         .where((t) =>
             !t.archived &&
             t.status == NodeStatus.pending &&
             t.dueAt != null &&
+            !mutedEventIds.contains(t.eventId) &&
             t.dueAt!.compareTo(date) <= 0)
         .toList(growable: false);
     list.sort((a, b) {
@@ -184,6 +194,12 @@ class Workspace {
     });
     return list;
   }
+
+  /// 某事件是否**不再参与到期统计**（已搁置）。
+  ///
+  /// 界面用它把日期颜色降下来：既然不计入「到期」，就不该在这里显示成逾期红。
+  bool isEventMutedForDue(String eventId) =>
+      findEvent(eventId)?.status == NodeStatus.ignored;
 
   /// 全局搜索（Q42）：只搜未归档、未删除；灵感只搜 `pending`。
   List<SearchHit> search(String query, {int limit = 100}) {

@@ -844,6 +844,31 @@ void main() {
       expect(due.map((t) => t.id).toList(), <String>[overdue.id, soon.id]);
     });
 
+    test('已搁置的事件不再计入「到期」（实机反馈：放下的东西不该继续催）', () {
+      final dropped = ws.createEvent(name: '先不做了');
+      final droppedTask =
+          ws.createTask(eventId: dropped.id, title: '搁置线的任务', dueAt: '2026-01-01');
+      final active = ws.createEvent(name: '在做的事');
+      final activeTask =
+          ws.createTask(eventId: active.id, title: '进行中线的任务', dueAt: '2026-01-01');
+
+      // 搁置之前：两条都算到期
+      expect(ws.tasksDueOnOrBefore('2026-09-30').length, 2);
+      expect(ws.isEventMutedForDue(dropped.id), isFalse);
+
+      ws.setEventStatus(dropped.id, NodeStatus.ignored);
+
+      expect(ws.isEventMutedForDue(dropped.id), isTrue);
+      expect(
+        ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(),
+        <String>[activeTask.id],
+        reason: '事件搁置后，它下面的任务不再参与到期统计',
+      );
+      // 任务本身仍是"待处理"，只是不算到期 —— 不改变数据，只改统计口径
+      expect(ws.findTask(droppedTask.id)!.status, NodeStatus.pending);
+      expect(ws.liveTasks.length, 2, reason: '任务不该因为事件搁置而消失');
+    });
+
     test('彻底删除 = 墓碑骨架化，只保留 3 个 key（ADR-052）', () {
       final project = ws.createProject(title: '要彻底删掉');
       ws.deleteProject(project.id);
