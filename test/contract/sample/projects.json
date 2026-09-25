@@ -14,7 +14,24 @@
       "created_at": 1788220800000,
       "updated_at": 1788307200000,
       "deleted": false,
-      "color": "#2f6feb"
+      "color": "#2f6feb",
+      "items": [
+        {
+          "id": "aa11bb22-cc33-4d44-8e55-ff6677889900",
+          "text": "冻结数据契约",
+          "done": true
+        },
+        {
+          "id": "bb22cc33-dd44-4e55-9f66-aa7788990011",
+          "text": "补齐契约样本与逐字节回归",
+          "done": true
+        },
+        {
+          "id": "cc33dd44-ee55-4f66-a077-bb8899001122",
+          "text": "写解析层并处理坏数据",
+          "done": false
+        }
+      ]
     },
     {
       "id": "2a7c9e14-5b3d-4f61-8c02-3d5e7a9b1c22",

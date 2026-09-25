@@ -6,6 +6,7 @@ import 'package:guideline/core/json/document.dart';
 import 'package:guideline/core/json/store_file.dart';
 import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
+import 'package:guideline/core/models/project_item.dart';
 
 /// 后加字段的兼容性（灵感整理第 5、10 条）：`Inspiration.tags` 与 `Project.color`。
 ///
@@ -130,17 +131,14 @@ void main() {
   group('项目 color', () {
     test('老数据没有 color：读成 null，写出去不带这个字段', () {
       final issues = DecodeIssues();
-      final document = Document.parse(
-        DocName.projects,
-        Canonical.documentText(<String, dynamic>{
-          'items': <Map<String, dynamic>>[projectJson()],
-        }),
-        issues,
-      );
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[projectJson()],
+      });
+      final document = Document.parse(DocName.projects, text, issues);
 
       expect(issues.errors, isEmpty);
       expect(document.projectItems.single.color, isNull);
-      expect(document.toCanonicalText(), isNot(contains('"color"')));
+      expect(document.toCanonicalText(), text, reason: '没写出这个字段才会逐字节一致');
     });
 
     test('有 color：读入后规范化成小写，写出去逐字节一致', () {
@@ -193,8 +191,161 @@ void main() {
     });
   });
 
-  group('未知字段仍然透传（不能被新字段挤掉）', () {
-    test('tags / color 之外的未知字段照旧保留', () {
+  group('项目实现清单 items（设计文档 §1.1）', () {
+    Map<String, dynamic> item(String id, String text, bool done) =>
+        <String, dynamic>{'id': id, 'text': text, 'done': done};
+
+    Document parseProject(Map<String, dynamic> json, DecodeIssues issues) => Document.parse(
+          DocName.projects,
+          Canonical.documentText(<String, dynamic>{
+            'items': <Map<String, dynamic>>[json],
+          }),
+          issues,
+        );
+
+    test('老项目没有 items：读成空清单，写出去**不带**这个字段', () {
+      final issues = DecodeIssues();
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[projectJson()],
+      });
+      final document = Document.parse(DocName.projects, text, issues);
+
+      expect(issues.errors, isEmpty);
+      expect(document.projectItems.single.items, isEmpty);
+      // 用"逐字节往返"来断言"没写出这个字段"：集合外层本来就有个 `items` 键，
+      // 不能靠 `contains('"items"')` 判 —— 那命中的是外层那个。
+      expect(document.toCanonicalText(), text);
+    });
+
+    test('有 items：顺序、勾选状态、id 都原样保留，且逐字节往返', () {
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[
+          <String, dynamic>{
+            ...projectJson(),
+            'items': <Map<String, dynamic>>[
+              item('a-1', '第一条', true),
+              item('a-2', '第二条', false),
+              item('a-3', '第三条', true),
+            ],
+          },
+        ],
+      });
+      final issues = DecodeIssues();
+      final document = Document.parse(DocName.projects, text, issues);
+
+      expect(issues.errors, isEmpty);
+      final items = document.projectItems.single.items;
+      expect(items.map((i) => i.id), <String>['a-1', 'a-2', 'a-3'], reason: '顺序就是数组下标');
+      expect(items.map((i) => i.text), <String>['第一条', '第二条', '第三条']);
+      expect(items.map((i) => i.done), <bool>[true, false, true]);
+      expect(document.toCanonicalText(), text, reason: '读入→写出必须一模一样');
+    });
+
+    test('勾选状态不参与任何判定：清单全勾完也不影响项目 status', () {
+      final issues = DecodeIssues();
+      final document = parseProject(
+        <String, dynamic>{
+          ...projectJson(),
+          'items': <Map<String, dynamic>>[
+            item('a-1', '唯一的条目', true),
+          ],
+        },
+        issues,
+      );
+      final project = document.projectItems.single;
+      expect(project.itemsDoneCount, 1);
+      expect(
+        project.status,
+        NodeStatus.pending,
+        reason: '清单是纯文档，勾完也不该把项目变成已完成',
+      );
+    });
+
+    test('坏条目只丢它自己，不连累整个项目', () {
+      final issues = DecodeIssues();
+      final document = parseProject(
+        <String, dynamic>{
+          ...projectJson(),
+          'items': <Object?>[
+            item('ok-1', '正常条目', false),
+            '不是对象',
+            <String, dynamic>{'id': 'no-text', 'done': false},
+            <String, dynamic>{'text': '没有 id', 'done': false},
+            <String, dynamic>{'id': 'blank', 'text': '   ', 'done': false},
+            item('ok-1', '同 id 重复', false),
+            item('ok-2', '  前后有空格  ', true),
+          ],
+        },
+        issues,
+      );
+
+      final items = document.projectItems.single.items;
+      expect(
+        items.map((i) => i.id),
+        <String>['ok-1', 'ok-2'],
+        reason: '只留下两条合法条目',
+      );
+      expect(items.last.text, '前后有空格', reason: '读入时 trim');
+      expect(items.last.done, isTrue);
+      expect(issues.errors.length, greaterThanOrEqualTo(5), reason: '每条坏数据都要记 error');
+    });
+
+    test('items 不是数组时按空处理并记错', () {
+      final issues = DecodeIssues();
+      final document = parseProject(
+        <String, dynamic>{...projectJson(), 'items': '不是数组'},
+        issues,
+      );
+      expect(document.projectItems.single.items, isEmpty);
+      expect(issues.errors, isNotEmpty);
+    });
+
+    test('条目里的未知字段也透传（未来加字段不会丢）', () {
+      final text = Canonical.documentText(<String, dynamic>{
+        'items': <Map<String, dynamic>>[
+          <String, dynamic>{
+            ...projectJson(),
+            'items': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'a-1',
+                'text': '带未来字段的条目',
+                'done': false,
+                'future_key': '保留我',
+              },
+            ],
+          },
+        ],
+      });
+      final issues = DecodeIssues();
+      final document = Document.parse(DocName.projects, text, issues);
+
+      expect(document.projectItems.single.items.single.extra['future_key'], '保留我');
+      expect(document.toCanonicalText(), text);
+    });
+
+    test('copyWith(items:) 能换掉整个清单，其它字段不动', () {
+      final issues = DecodeIssues();
+      final document = parseProject(
+        <String, dynamic>{
+          ...projectJson(),
+          'items': <Map<String, dynamic>>[item('a-1', '旧的', false)],
+        },
+        issues,
+      );
+      final project = document.projectItems.single;
+      final updated = project.copyWith(
+        items: <ProjectItem>[
+          const ProjectItem(id: 'b-1', text: '新的', done: true),
+        ],
+      );
+
+      expect(updated.items.single.id, 'b-1');
+      expect(updated.title, project.title, reason: '没传的字段保持原值');
+      expect(project.items.single.id, 'a-1', reason: '原对象不该被改动');
+    });
+  });
+
+  group('未知字段仍然透传（不能被新字段挤掉）', () {    test('tags / color 之外的未知字段照旧保留', () {
       final text = Canonical.documentText(<String, dynamic>{
         'items': <Map<String, dynamic>>[
           inspirationJson(tags: <String>['甲'], extra: <String, dynamic>{'future_field': '保留我'}),
