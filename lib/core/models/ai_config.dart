@@ -65,6 +65,22 @@ class AiConfig {
     );
   }
 
+  /// 真正要 POST 的完整地址。
+  ///
+  /// 大多数人只知道填"根地址"，所以这里**自动补** `/chat/completions`；
+  /// 但也照顾已经把路径写进去的情况 —— 直接粘官方文档里那条 curl 命令的人
+  /// 填的就是 `https://api.deepseek.com/chat/completions`，
+  /// 再补一次会变成 `…/chat/completions/chat/completions`，
+  /// 服务端只会回一个让人摸不着头脑的 404（"没有这个网站"）。
+  ///
+  /// 顺带兼容 `/v1`：不少 OpenAI 兼容端点（以及一部分中转服务）习惯带版本前缀，
+  /// 这种地址末尾不是 endpoints 名，照常补后缀。
+  String get chatCompletionsUrl {
+    final base = normalized().baseUrl;
+    if (base.endsWith('/chat/completions')) return base;
+    return '$base/chat/completions';
+  }
+
   AiConfig copyWith({String? baseUrl, String? apiKey, String? model}) => AiConfig(
         baseUrl: baseUrl ?? this.baseUrl,
         apiKey: apiKey ?? this.apiKey,

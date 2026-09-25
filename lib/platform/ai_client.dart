@@ -104,7 +104,7 @@ class HttpAiTextGenerator implements AiTextGenerator {
     final error = config.validate();
     if (error != null) throw AiRequestException(error);
 
-    final uri = Uri.parse('${config.baseUrl}/chat/completions');
+    final uri = Uri.parse(config.chatCompletionsUrl);
     final body = jsonEncode(<String, dynamic>{
       'model': config.model,
       'messages': <Map<String, String>>[
@@ -143,7 +143,14 @@ class HttpAiTextGenerator implements AiTextGenerator {
     if (response.statusCode == 429) {
       throw const AiRequestException('额度用完或被限流了，稍后再试或换一个 Key');
     }
+    if (response.statusCode == 404) {
+      // 404 最常见的原因是地址拼错了。把**实际请求的地址**报出来，
+      // 用户一眼就能看出是多写了路径还是少了域名 —— 只说"404"没法定位。
+      throw AiRequestException('地址不对（404）：${uri.toString()}\n去设置里核对 API 地址');
+    }
     if (response.statusCode >= 400) {
+      // 有些网关会用 HTML 报错页（"没有这个网站"之类），直接贴出来很难看，
+      // 尽量只取纯文本部分
       throw AiRequestException('服务返回 ${response.statusCode}：${_brief(response.body)}');
     }
 
@@ -186,8 +193,13 @@ class HttpAiTextGenerator implements AiTextGenerator {
   }
 
   static String _brief(String body) {
-    final one = body.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return one.length <= 160 ? one : '${one.substring(0, 160)}…';
+    // 网关的报错页常常是 HTML，把标签去掉再截断，免得界面上出现一堆尖括号
+    final stripped = body
+        .replaceAll(RegExp(r'<[^>]*>'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (stripped.isEmpty) return '（返回内容为空）';
+    return stripped.length <= 160 ? stripped : '${stripped.substring(0, 160)}…';
   }
 
   /// 固定提示词：要求它只做整理，不许新增事实。

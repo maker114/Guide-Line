@@ -229,8 +229,37 @@ void main() {
     expect(reasonOf('https://example.com', 'k', 'm'), isNull);
   });
 
-  test('提示词明确要求"只整理、不新增"', () {
-    expect(HttpAiTextGenerator.systemPrompt, contains('只整理，不新增'));
+  group('请求地址怎么拼（连不上的第一嫌疑）', () {
+    String urlOf(String base) =>
+        AiConfig(baseUrl: base, apiKey: 'k', model: 'm').chatCompletionsUrl;
+
+    test('根地址自动补 /chat/completions（官方文档的 base_url 就长这样）', () {
+      expect(urlOf('https://api.deepseek.com'), 'https://api.deepseek.com/chat/completions');
+    });
+
+    test('末尾多余斜杠被收掉，不会拼出双斜杠', () {
+      expect(urlOf('https://api.deepseek.com/'), 'https://api.deepseek.com/chat/completions');
+      expect(urlOf('https://api.deepseek.com///'), 'https://api.deepseek.com/chat/completions');
+    });
+
+    test('**已经带了路径就不再补**（粘 curl 命令的人填的就是完整地址）', () {
+      expect(
+        urlOf('https://api.deepseek.com/chat/completions'),
+        'https://api.deepseek.com/chat/completions',
+        reason: '补两次会变成 …/chat/completions/chat/completions，服务端只回 404',
+      );
+    });
+
+    test('带版本前缀的地址照常补后缀（很多兼容端点写 /v1）', () {
+      expect(urlOf('https://example.com/v1'), 'https://example.com/v1/chat/completions');
+    });
+
+    test('前后空格被去掉（粘贴常常带进来）', () {
+      expect(urlOf('  https://api.deepseek.com  '), 'https://api.deepseek.com/chat/completions');
+    });
+  });
+
+  test('提示词明确要求"只整理、不新增"', () {    expect(HttpAiTextGenerator.systemPrompt, contains('只整理，不新增'));
     expect(HttpAiTextGenerator.systemPrompt, contains('不要用列表'));
   });
 

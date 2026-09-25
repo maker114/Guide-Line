@@ -83,7 +83,8 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   label: 'API 地址',
                   hint: AiConfig.defaultBaseUrl,
                   controller: _baseUrl,
-                  helper: 'OpenAI 兼容接口的根地址，会自动补 /chat/completions',
+                  helper: '填根地址即可，会自动补 /chat/completions；'
+                      '若已带路径也认得（含 /v1 这类版本前缀）',
                 ),
                 _Field(
                   label: '模型',

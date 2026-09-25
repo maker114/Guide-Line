@@ -295,12 +295,13 @@ void main() {
     await switchTab(tester, '项目');
     await switchTab(tester, '事件');
 
-    // 进任务线并打开任务动作面板（7 项，是最容易溢出的地方）
+    // 进任务线并打开任务动作面板（项目最多，是最容易溢出的地方）
     await tester.tap(find.text('一个名字相当长的事件名'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('一条名字相当长的主线任务'));
     await tester.pumpAndSettle();
-    expect(find.text('新建并列任务'), findsOneWidget);
+    // 「新建并列任务」已删除（并列走向改由「接后续任务…」表达），改断言仍在的项
+    expect(find.text('接后续任务…'), findsOneWidget);
     await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉面板
     await tester.pumpAndSettle();
     await tester.pageBack();
