@@ -13,6 +13,7 @@ import '../common/labels.dart';
 import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
 import '../theme/shape_tokens.dart';
+import 'fold_toggle_row.dart';
 import 'task_actions.dart';
 import 'task_flow_layout.dart';
 import 'task_fold.dart';
@@ -52,6 +53,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   /// 正在为哪个任务录子任务
   String? _subtaskParentId;
+
+  /// 是否把**自动收起的已完成节点**全部展开（临时状态，不进偏好）。
+  ///
+  /// 自动收起规则本身见 `task_fold.dart`；这里只负责"我需要时能再看回来"
+  /// （实机反馈：折是折对了，可是想看的时候没地方点）。
+  bool _showAllFolded = false;
 
   void _createTask({
     required String title,
@@ -279,7 +286,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
         final flowRows = layoutTaskFlow(flow);
         // 「已完成的老节点自动收起」：只留**当前节点的上一个节点**
         // （实机反馈：做完的任务一多，任务线就长得看不清现在做到哪了）
-        final foldedIds = _autoFoldedTaskIds(flowRows);
+        final autoFoldedIds = _autoFoldedTaskIds(flowRows);
+        // 用户按了"展开"就全画出来：自动收起是默认视图，不是不可逾越的规则
+        final foldedIds = _showAllFolded ? const <String>{} : autoFoldedIds;
 
         return Scaffold(
           appBar: AppBar(
@@ -332,7 +341,14 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )
-              else
+              else ...<Widget>[
+                // 折叠开关放在任务线最上面：被收起来的节点就在它下面
+                if (autoFoldedIds.isNotEmpty)
+                  FoldToggleRow(
+                    hiddenCount: autoFoldedIds.length,
+                    expanded: _showAllFolded,
+                    onTap: () => setState(() => _showAllFolded = !_showAllFolded),
+                  ),
                 for (var i = 0; i < flowRows.length; i += 1)
                   // 被自动收起的已完成老节点：不画它、也不画它前面那条连线
                   if (!foldedIds.contains(flowRows[i].task?.id)) ...<Widget>[
@@ -344,6 +360,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                       const _VerticalConnector(),
                     _buildFlowRow(context, flowRows[i]),
                   ],
+              ],
               const SizedBox(height: 16),
               Card(
                 margin: EdgeInsets.zero,

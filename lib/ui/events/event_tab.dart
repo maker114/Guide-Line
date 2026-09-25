@@ -11,6 +11,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import 'event_detail_page.dart';
+import 'fold_toggle_row.dart';
 import 'task_fold.dart';
 
 /// 事件 Tab：**任务线的入口列表**，与项目页同一套观感。
@@ -34,6 +35,9 @@ class EventTab extends StatefulWidget {
 
 class _EventTabState extends State<EventTab> {
   String? _renamingId;
+
+  /// 哪几条事件线被手动**就地展开**了（临时状态，不进偏好）。
+  final Set<String> _revealedLines = <String>{};
 
   AppController get _app => widget.app;
 
@@ -147,57 +151,39 @@ class _EventTabState extends State<EventTab> {
       ];
     }
 
-    final folded = autoFoldedMainLineIds(
+    // 自动收起：只留当前节点的上一个（规则见 `task_fold.dart`，与详情页共用）
+    final autoFolded = autoFoldedMainLineIds(
       mainLine,
       // 用户手动展开过的**不折**（显式选择优先于自动规则）
       userExpanded: (id) =>
           _app.isExpanded(id, defaultExpanded: false) &&
           _app.ws.prefs.expandedIds.contains(id),
     );
-    final visible = mainLine.where((t) => !folded.contains(t.id)).toList(growable: false);
-    final hidden = mainLine.length - visible.length;
+    // 想回看的时候要能**就地展开**（实机反馈），所以这里有个开关；
+    // 展开状态是临时的：它是"我现在想看一眼"，不是这一页该长期记住的偏好
+    final revealed = _revealedLines.contains(event.id);
+    final visible = revealed
+        ? mainLine
+        : mainLine.where((t) => !autoFolded.contains(t.id)).toList(growable: false);
     final muted = _app.ws.isEventMutedForDue(event.id);
 
     return <Widget>[
       for (final task in visible) _EventTaskRow(app: _app, task: task, muted: muted),
-      if (hidden > 0)
-        // 收起了多少要说出来：不然"这条线怎么忽然只有两步"会让人以为数据丢了
-        InkWell(
-          onTap: () => _open(event),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(40, 2, 12, 8),
-            child: Row(
-              children: <Widget>[
-                Icon(
-                  Icons.unfold_more,
-                  size: 14,
-                  color: Theme.of(context).colorScheme.outline,
-                ),
-                const SizedBox(width: 4),
-                // 1.6 倍字体下这行会顶到卡片右边（实机字号放大是常规场景），
-                // 所以必须让它可压缩
-                Expanded(
-                  child: Text(
-                    '另有 $hidden 个已完成节点（点开看全过程）',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ),
-              ],
-            ),
-          ),
+      if (autoFolded.isNotEmpty)
+        FoldToggleRow(
+          hiddenCount: autoFolded.length,
+          expanded: revealed,
+          compact: true,
+          onTap: () => setState(() {
+            if (revealed) {
+              _revealedLines.remove(event.id);
+            } else {
+              _revealedLines.add(event.id);
+            }
+          }),
         ),
       const SizedBox(height: 6),
     ];
-  }
-
-  void _open(Event event) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => EventDetailPage(app: _app, eventId: event.id),
-      ),
-    );
   }
 
   void _toast(String message, {bool error = false}) {

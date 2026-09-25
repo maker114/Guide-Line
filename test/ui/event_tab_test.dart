@@ -174,6 +174,41 @@ void main() {
     expect(find.byType(EventDetailPage), findsOneWidget);
   });
 
+  testWidgets('折起来的老节点能就地展开，再点一次收回去', (tester) async {
+    await bootWithLine(tester);
+    expect(find.text('第一步'), findsNothing, reason: '默认是收起的');
+
+    await tester.tap(find.textContaining('另有 2 个已完成节点'));
+    await tester.pumpAndSettle();
+
+    // 就地展开：不用跳进详情页，被收起的老节点直接出现在卡里
+    expect(find.text('第一步'), findsOneWidget);
+    expect(find.text('第二步'), findsOneWidget);
+    expect(find.text('第四步'), findsOneWidget);
+    expect(find.byType(EventDetailPage), findsNothing, reason: '应当是就地展开，不是跳页');
+    expect(find.text('收起已完成节点'), findsOneWidget);
+
+    await tester.tap(find.text('收起已完成节点'));
+    await tester.pumpAndSettle();
+    expect(find.text('第一步'), findsNothing);
+    expect(find.textContaining('另有 2 个已完成节点'), findsOneWidget);
+  });
+
+  testWidgets('详情页里也能把自动收起的节点展开', (tester) async {
+    await bootWithLine(tester);
+
+    await tester.tap(find.text('第四步'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EventDetailPage), findsOneWidget);
+
+    // 详情页按同一条规则折叠 —— 但它同样给了"就地展开"的出路
+    expect(find.text('第一步'), findsNothing);
+    await tester.tap(find.textContaining('另有 2 个已完成节点'));
+    await tester.pumpAndSettle();
+    expect(find.text('第一步'), findsOneWidget);
+    expect(find.text('第二步'), findsOneWidget);
+  });
+
   testWidgets('已搁置的事件：日期不再标成逾期红，也不计入「到期」', (tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final dropped = app.ws.createEvent(name: '放下的事');
