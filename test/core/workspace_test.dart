@@ -6,6 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/core/json/store_file.dart';
 import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
+import 'package:guideline/core/models/project.dart';
+import 'package:guideline/core/models/project_item.dart';
 import 'package:guideline/core/rules/completion.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
@@ -408,6 +410,180 @@ void main() {
 
       final reloaded = Workspace.fromLoad(storage, storage.load());
       expect(reloaded.findProject(project.id)!.color, isNull);
+    });
+  });
+
+  group('实现清单（设计文档 §1.4）', () {
+    late Project project;
+
+    setUp(() {
+      project = ws.createProject(title: '带清单的项目');
+    });
+
+    List<ProjectItem> itemsOf() => ws.findProject(project.id)!.items;
+    List<String> textsOf() => itemsOf().map((i) => i.text).toList();
+
+    test('加条目：追加在末尾、默认未勾选，并立刻落盘', () {
+      ws.addProjectItem(project.id, '第一条');
+      ws.addProjectItem(project.id, '  第二条  ');
+
+      expect(textsOf(), <String>['第一条', '第二条'], reason: '顺序就是加入顺序，且要 trim');
+      expect(itemsOf().every((i) => !i.done), isTrue);
+      expect(
+        Workspace.fromLoad(storage, storage.load()).findProject(project.id)!.items.length,
+        2,
+        reason: '要真的写进磁盘',
+      );
+    });
+
+    test('空内容一律拒绝，且不会留下空条目', () {
+      for (final bad in <String>['', '   ', '\n\t']) {
+        expect(
+          () => ws.addProjectItem(project.id, bad),
+          throwsA(isA<RuleViolation>()),
+        );
+      }
+      expect(itemsOf(), isEmpty);
+    });
+
+    test('改条目文字：改得掉；空内容拒绝并保持原值；值没变不产生新时间戳', () {
+      final item = ws.addProjectItem(project.id, '原文');
+      ws.updateProjectItemText(project.id, item.id, '  改过  ');
+      expect(itemsOf().single.text, '改过');
+
+      expect(
+        () => ws.updateProjectItemText(project.id, item.id, '   '),
+        throwsA(isA<RuleViolation>()),
+      );
+      expect(itemsOf().single.text, '改过', reason: '被拒绝后保持原值');
+
+      final before = ws.findProject(project.id)!.updatedAt;
+      ws.updateProjectItemText(project.id, item.id, '改过');
+      expect(ws.findProject(project.id)!.updatedAt, before, reason: '值没变就不该写盘');
+    });
+
+    test('勾选 / 取消勾选：只动那一条，且**不影响项目状态**', () {
+      final a = ws.addProjectItem(project.id, '甲');
+      final b = ws.addProjectItem(project.id, '乙');
+
+      ws.setProjectItemDone(project.id, a.id, true);
+      expect(itemsOf()[0].done, isTrue);
+      expect(itemsOf()[1].done, isFalse, reason: '只该动被点的那一条');
+      expect(ws.findProject(project.id)!.itemsDoneCount, 1);
+
+      ws.setProjectItemDone(project.id, b.id, true);
+      expect(ws.findProject(project.id)!.itemsDoneCount, 2);
+      expect(
+        ws.findProject(project.id)!.status,
+        NodeStatus.pending,
+        reason: '清单全勾完也不该把项目变成已完成 —— 清单不参与判定',
+      );
+    });
+
+    test('删条目：只删指定那条；不存在的 id 会抛而不是静默', () {
+      final a = ws.addProjectItem(project.id, '甲');
+      final b = ws.addProjectItem(project.id, '乙');
+
+      ws.removeProjectItem(project.id, a.id);
+      expect(textsOf(), <String>['乙']);
+      expect(() => ws.removeProjectItem(project.id, '不存在的-id'), throwsA(isA<RuleViolation>()));
+      expect(textsOf(), <String>['乙'], reason: '失败不能改动清单');
+      expect(b.id, isNotEmpty);
+    });
+
+    test('上移 / 下移：换位正确，到两端是空操作', () {
+      ws.addProjectItem(project.id, '甲');
+      final b = ws.addProjectItem(project.id, '乙');
+      final c = ws.addProjectItem(project.id, '丙');
+
+      ws.moveProjectItem(project.id, c.id, -1);
+      expect(textsOf(), <String>['甲', '丙', '乙']);
+
+      ws.moveProjectItem(project.id, c.id, -1);
+      expect(textsOf(), <String>['丙', '甲', '乙']);
+
+      ws.moveProjectItem(project.id, c.id, -1); // already first
+      expect(textsOf(), <String>['丙', '甲', '乙'], reason: '到顶了就不动');
+
+      ws.moveProjectItem(project.id, b.id, 1); // already last
+      expect(textsOf(), <String>['丙', '甲', '乙'], reason: '到底了就不动');
+
+      expect(
+        () => ws.moveProjectItem(project.id, b.id, 2),
+        throwsA(isA<RuleViolation>()),
+        reason: '一次只允许一位',
+      );
+    });
+
+    test('从正文拆条目：按行拆、去掉列表记号、丢空行', () {
+      expect(
+        Workspace.splitImplementationLines(
+          '先冻结契约\n- 补齐样本\n* 写解析层\n1. 处理坏数据\n\n   \n2) 收尾',
+        ),
+        <String>['先冻结契约', '补齐样本', '写解析层', '处理坏数据', '收尾'],
+      );
+    });
+
+    test('从正文拆条目：只在清单为空时允许，已有条目会被拒绝', () {
+      final project2 = ws.createProject(title: '有正文没清单');
+      ws.updateProject(project2.id, implementation: '第一步\n第二步');
+
+      expect(ws.splitImplementationIntoItems(project2.id), 2);
+      expect(
+        ws.findProject(project2.id)!.items.map((i) => i.text),
+        <String>['第一步', '第二步'],
+      );
+
+      expect(
+        () => ws.splitImplementationIntoItems(project2.id),
+        throwsA(isA<RuleViolation>()),
+        reason: '已有条目再拆会把它们顶掉',
+      );
+    });
+
+    test('从正文拆条目：正文为空时拒绝', () {
+      final empty = ws.createProject(title: '空正文');
+      expect(
+        () => ws.splitImplementationIntoItems(empty.id),
+        throwsA(isA<RuleViolation>()),
+      );
+    });
+
+    test('拆分之后正文**原样保留**（清单与正文是并存的两种形态）', () {
+      final project3 = ws.createProject(title: '并存');
+      ws.updateProject(project3.id, implementation: '第一步\n第二步');
+      ws.splitImplementationIntoItems(project3.id);
+      expect(
+        ws.findProject(project3.id)!.implementation,
+        '第一步\n第二步',
+        reason: '拆是"另存一份结构"，不是"改写正文"',
+      );
+    });
+
+    test('AI 整理写回正文：替换文本，清单不动', () {
+      ws.addProjectItem(project.id, '甲');
+      ws.addProjectItem(project.id, '乙');
+      ws.replaceImplementation(project.id, '这是一段整理后的说明。');
+
+      expect(ws.findProject(project.id)!.implementation, '这是一段整理后的说明。');
+      expect(textsOf(), <String>['甲', '乙'], reason: '整理稿落回正文，清单保持原样');
+
+      expect(
+        () => ws.replaceImplementation(project.id, '   '),
+        throwsA(isA<RuleViolation>()),
+        reason: '空的整理结果不能把正文清没',
+      );
+      expect(ws.findProject(project.id)!.implementation, '这是一段整理后的说明。');
+    });
+
+    test('清单写入会落盘，重新加载后仍在（含勾选状态与顺序）', () {
+      final a = ws.addProjectItem(project.id, '甲');
+      ws.addProjectItem(project.id, '乙');
+      ws.setProjectItemDone(project.id, a.id, true);
+
+      final reloaded = Workspace.fromLoad(storage, storage.load()).findProject(project.id)!;
+      expect(reloaded.items.map((i) => i.text), <String>['甲', '乙']);
+      expect(reloaded.items.map((i) => i.done), <bool>[true, false]);
     });
   });
 

@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../../features/workspace.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
@@ -11,6 +12,7 @@ import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../inspiration/merge_editor_page.dart';
 import 'project_actions.dart';
+import 'project_checklist.dart';
 
 /// 项目详情：**目的 / 实现 / 日期 / 三态**，加子项目与已分配灵感。
 ///
@@ -109,13 +111,21 @@ class ProjectDetailPage extends StatelessWidget {
                 onSubmitted: (value) =>
                     app.run(() => ws.updateProject(project.id, purpose: value)),
               ),
-              _TextField(
-                title: '实现',
-                hint: '怎么做 —— 灵感合并进来会写到这里',
-                value: project.implementation,
-                onSubmitted: (value) =>
-                    app.run(() => ws.updateProject(project.id, implementation: value)),
+              // 「实现」由两部分组成：上面的**待办清单**（结构化、可勾选），
+              // 下面的**正文**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
+              // 两者并存：清单是"要做什么"的拆分，正文是"整体怎么做"的说明。
+              ProjectChecklist(
+                app: app,
+                project: project,
+                onSplitFromImplementation: () => _splitIntoItems(context, project),
               ),
+              _ImplementationField(project: project, onSubmit: (value) {
+                // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
+                final error = value.trim().isEmpty
+                    ? null
+                    : app.run(() => ws.replaceImplementation(project.id, value));
+                if (error != null) showToast(context, error, error: true);
+              }),
               _ChildrenField(app: app, project: project, children: children),
               _InspirationsField(
                 app: app,
@@ -126,6 +136,107 @@ class ProjectDetailPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  /// 把「实现」正文按行拆成清单条目（**显式动作**）。
+  ///
+  /// 不在读取时自动拆：把一段中文按行拆开是不可逆的猜测，自动拆等于
+  /// 第一次打开就悄悄改了数据形态。拆之前说清会发生什么，拆完报告条数。
+  Future<void> _splitIntoItems(BuildContext context, Project project) async {
+    final lines = Workspace.splitImplementationLines(project.implementation);
+    if (lines.isEmpty) {
+      showToast(context, '正文里没有可拆成条目的内容', error: true);
+      return;
+    }
+
+    if (project.items.isNotEmpty) {
+      final ok = await confirmAction(
+        context,
+        title: '从正文重拆',
+        message: '会先清空现在这 ${project.items.length} 条，再按正文重新拆成 ${lines.length} 条。\n'
+            '正文本身不会动。',
+        confirmLabel: '重拆',
+        danger: true,
+      );
+      if (!ok || !context.mounted) return;
+      final cleared = app.run(() => app.ws.clearProjectItems(project.id));
+      if (cleared != null) {
+        if (context.mounted) showToast(context, cleared, error: true);
+        return;
+      }
+    }
+
+    final error = app.run(() => app.ws.splitImplementationIntoItems(project.id));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) showToast(context, '已拆成 ${lines.length} 条');
+  }
+}
+
+/// 「实现」正文：与清单并存的那一段整体说明。
+///
+/// 它是三样东西的共同落点 —— 灵感合并写进来、AI 整理写回来、交接导出从这里取。
+/// 清单为空时它就是主角；清单不为空时它退成"整理稿"，所以默认收起来。
+class _ImplementationField extends StatefulWidget {
+  const _ImplementationField({required this.project, required this.onSubmit});
+
+  final Project project;
+  final ValueChanged<String> onSubmit;
+
+  @override
+  State<_ImplementationField> createState() => _ImplementationFieldState();
+}
+
+class _ImplementationFieldState extends State<_ImplementationField> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final value = widget.project.implementation;
+    final hasItems = widget.project.items.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 20, 8, 0),
+          child: Row(
+            children: <Widget>[
+              Text('实现正文', style: theme.textTheme.labelLarge),
+              const SizedBox(width: 8),
+              Text(
+                value.trim().isEmpty ? '还没有内容' : '${value.trim().length} 字',
+                style: theme.textTheme.labelSmall,
+              ),
+              const Spacer(),
+              // 清单为空时正文就是主内容，默认展开；有清单时默认收起，免得两屏都是字
+              if (value.trim().isNotEmpty)
+                IconButton(
+                  tooltip: _expanded ? '收起' : '展开',
+                  icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                ),
+            ],
+          ),
+        ),
+        if (_expanded || value.trim().isEmpty || !hasItems)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: InlineTextField(
+              value: value,
+              hint: '怎么做 —— 灵感合并、AI 整理都会写到这里',
+              minLines: 1,
+              maxLines: 12,
+              allowEmpty: true,
+              textStyle: theme.textTheme.bodyMedium,
+              onSubmitted: widget.onSubmit,
+            ),
+          ),
+      ],
     );
   }
 }

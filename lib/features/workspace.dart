@@ -7,6 +7,7 @@ import '../core/models/enums.dart';
 import '../core/models/event.dart';
 import '../core/models/inspiration.dart';
 import '../core/models/project.dart';
+import '../core/models/project_item.dart';
 import '../core/models/task.dart';
 import '../core/rules/archive_zone.dart';
 import '../core/rules/cascade.dart';
@@ -637,6 +638,144 @@ class Workspace {
     final inspiration = findInspiration(id);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
     _upsert(DocName.inspirations, inspiration.copyWith(deleted: true, updatedAt: Ids.nowMillis()));
+    persist();
+  }
+
+  // ---------------------------------------------------------------- 实现清单
+
+  /// 把一段正文按行拆成清单条目（**显式动作**，不在读取时自动拆）。
+  ///
+  /// 只在"清单为空"时由界面调用：把一段中文按行拆开是**不可逆的猜测**
+  /// （用户可能一段就是一条），自动拆等于第一次打开就悄悄改了数据形态。
+  /// 行首的 `-` / `*` / `1.` 这类记号会被去掉，空行丢弃。
+  static List<String> splitImplementationLines(String implementation) {
+    final out = <String>[];
+    for (final rawLine in implementation.split('\n')) {
+      var line = rawLine.trim();
+      if (line.isEmpty) continue;
+      line = line.replaceFirst(RegExp(r'^[-*+]\s+'), '');
+      line = line.replaceFirst(RegExp(r'^\d+[.)]\s+'), '');
+      line = line.trim();
+      if (line.isEmpty) continue;
+      out.add(line);
+    }
+    return out;
+  }
+
+  ProjectItem addProjectItem(String projectId, String text) {
+    final project = _requireProject(projectId);
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+
+    final item = ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false);
+    _writeItems(project, <ProjectItem>[...project.items, item]);
+    return item;
+  }
+
+  void updateProjectItemText(String projectId, String itemId, String text) {
+    final project = _requireProject(projectId);
+    final index = _itemIndex(project, itemId);
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+    if (project.items[index].text == trimmed) return; // 没变就不写盘
+
+    final next = <ProjectItem>[...project.items];
+    next[index] = next[index].copyWith(text: trimmed);
+    _writeItems(project, next);
+  }
+
+  void setProjectItemDone(String projectId, String itemId, bool done) {
+    final project = _requireProject(projectId);
+    final index = _itemIndex(project, itemId);
+    if (project.items[index].done == done) return;
+
+    final next = <ProjectItem>[...project.items];
+    next[index] = next[index].copyWith(done: done);
+    _writeItems(project, next);
+  }
+
+  void removeProjectItem(String projectId, String itemId) {
+    final project = _requireProject(projectId);
+    _itemIndex(project, itemId); // 不存在就抛，避免静默什么都没发生
+    _writeItems(
+      project,
+      project.items.where((i) => i.id != itemId).toList(growable: false),
+    );
+  }
+
+  /// 上移 / 下移一条。[delta] 只接受 `-1` 与 `1`；已经在两端时是空操作。
+  void moveProjectItem(String projectId, String itemId, int delta) {
+    if (delta != -1 && delta != 1) {
+      throw const RuleViolation('一次只能上移或下移一位');
+    }
+    final project = _requireProject(projectId);
+    final index = _itemIndex(project, itemId);
+    final target = index + delta;
+    if (target < 0 || target >= project.items.length) return; // 到头了，什么也不做
+
+    final next = <ProjectItem>[...project.items];
+    final moved = next.removeAt(index);
+    next.insert(target, moved);
+    _writeItems(project, next);
+  }
+
+  /// 把正文按行拆成条目。**只在清单为空时允许** —— 否则会把已有条目顶掉。
+  int splitImplementationIntoItems(String projectId) {
+    final project = _requireProject(projectId);
+    if (project.items.isNotEmpty) {
+      throw const RuleViolation('已经有条目了，先把清单清空再拆');
+    }
+    final lines = splitImplementationLines(project.implementation);
+    if (lines.isEmpty) throw const RuleViolation('正文里没有可拆成条目的内容');
+
+    _writeItems(
+      project,
+      <ProjectItem>[
+        for (final line in lines) ProjectItem(id: Ids.uuidV4(), text: line, done: false),
+      ],
+    );
+    return lines.length;
+  }
+
+  /// 清空清单（**只清清单，不动正文**）。
+  ///
+  /// 给"拆错了想重来"用：拆完不满意时可以清掉再拆一次。
+  void clearProjectItems(String projectId) {
+    final project = _requireProject(projectId);
+    if (project.items.isEmpty) return;
+    _writeItems(project, const <ProjectItem>[]);
+  }
+
+  /// 用整理后的正文替换「实现」文本（AI 整理写回走这里）。
+  void replaceImplementation(String projectId, String text) {
+    final project = _requireProject(projectId);
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('整理结果不能是空的');
+    if (trimmed == project.implementation) return;
+    _upsert(
+      DocName.projects,
+      project.copyWith(implementation: trimmed, updatedAt: Ids.nowMillis()),
+    );
+    persist();
+  }
+
+  Project _requireProject(String projectId) {
+    final project = findProject(projectId);
+    if (project == null || project.deleted) throw const RuleViolation('项目不存在');
+    return project;
+  }
+
+  int _itemIndex(Project project, String itemId) {
+    final index = project.items.indexWhere((i) => i.id == itemId);
+    if (index < 0) throw const RuleViolation('条目不存在');
+    return index;
+  }
+
+  void _writeItems(Project project, List<ProjectItem> items) {
+    _upsert(
+      DocName.projects,
+      project.copyWith(items: items, updatedAt: Ids.nowMillis()),
+    );
     persist();
   }
 
