@@ -9,35 +9,42 @@ import 'more/due_page.dart';
 import 'more/more_tab.dart';
 import 'projects/project_tab.dart';
 
-/// 底部导航的形状参数（自绘，改动时这三个要一起看）。
+/// 底部导航的形状参数（自绘，改动时这几个要一起看）。
 ///
 /// 目标（实机反馈）：选中框是**正圆**、把图标与文字都罩住，
-/// 且它与外部胶囊的圆角同源 —— 选最左 / 最右那项时两者是同一段弧，完全贴合。
+/// **上下与外部胶囊相切**，切换时**左右滑动**。
 ///
-/// **为什么自绘而不用 `NavigationBar`**：试过三版都不对。原因是它的选中指示器
+/// **为什么自绘而不用 `NavigationBar`**：试过三版都不对。它的选中指示器
 /// 框尺寸**写死的**（`_kIndicatorWidth = 64`、`_kIndicatorHeight = 32`，
 /// 见 Flutter 源码 `navigation_bar.dart`），`indicatorShape` 只能决定
 /// "在这个框里画什么形状"、改不了框。实机量到的两版：
 ///   · 自绘半径 34 的圆 → 被框裁成 **64×28** 的压扁胶囊；
 ///   · 半径改成 32（框宽的一半）→ 又被高度裁成 **64×56** 的椭圆。
-/// 想要"正圆 + 半径与外部胶囊一致"只能自己画，所以这里换成一段自绘导航。
+/// 想要"正圆 + 上下相切 + 能滑动"只能自己画。
 const double _navIndicatorRadius = 24;
 
 /// 导航内容高度 = 选中圆直径。
 const double _navHeight = _navIndicatorRadius * 2;
 
-/// 外层纵向内边距。
-const double _navOuterPadding = 6;
+/// 外层纵向内边距：**取 0**，好让圆上下与胶囊内缘相切
+/// （实机反馈"圆直径大一点、上下和外部胶囊相切"）。
+/// 再大一点圆就会被胶囊裁掉上下两端，不再是个完整的圆。
+const double _navOuterPadding = 0;
 
 /// 外部胶囊的圆角半径 = 选中圆半径 + 外层内边距。
 ///
-/// 于是选中最左那一项时：圆心距胶囊左内缘正好等于圆半径，
-/// 圆在这点与胶囊左端的弧**相切** —— 两者同心同径，视觉上完全贴合。
+/// 于是圆心距胶囊左内缘正好等于圆半径，圆在这点与胶囊左端的弧**相切** ——
+/// 两者同心同径，视觉上完全贴合。
 const double _navRadius = _navIndicatorRadius + _navOuterPadding;
 
-/// 底部导航的一项：一个可点的方块，选中时背后画一个**正圆**。
+/// 滑动时长：切换页签时圆从旧位置滑到新位置。
+const Duration _navSlideDuration = Duration(milliseconds: 260);
+
+/// 底部导航的一项：可点的方块（图标在上、文字在下）。
 ///
-/// 圆把图标与文字一起罩住（图标在上、文字在下），所以文字也落在圆内。
+/// **不含选中背景**：选中圆是整条导航共用的一个，在 `AppBottomNav` 里
+/// 靠 `Stack` 定位并做滑动动画 —— 每项各画一个圆就只能"淡入淡出"，
+/// 做不到"滑过去"。
 class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
@@ -64,42 +71,24 @@ class _NavItem extends StatelessWidget {
         customBorder: const CircleBorder(),
         child: SizedBox(
           height: _navHeight,
-          child: Stack(
-            alignment: Alignment.center,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
-              // 选中态：正圆，直径 = _navHeight，与外部胶囊圆角同源
-              AnimatedOpacity(
-                duration: const Duration(milliseconds: 160),
-                opacity: selected ? 1 : 0,
-                child: Container(
-                  width: _navIndicatorRadius * 2,
-                  height: _navIndicatorRadius * 2,
-                  decoration: BoxDecoration(
-                    color: scheme.secondaryContainer,
-                    shape: BoxShape.circle,
-                  ),
+              Badge.count(
+                count: badgeCount,
+                isLabelVisible: badgeCount > 0,
+                child: Icon(
+                  selected ? selectedIcon : icon,
+                  size: 22,
+                  color: scheme.onSurfaceVariant,
                 ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Badge.count(
-                    count: badgeCount,
-                    isLabelVisible: badgeCount > 0,
-                    child: Icon(
-                      selected ? selectedIcon : icon,
-                      size: 22,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                  Text(
-                    label,
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
-                        ?.copyWith(color: scheme.onSurfaceVariant),
-                  ),
-                ],
+              Text(
+                label,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: scheme.onSurfaceVariant),
               ),
             ],
           ),
@@ -115,7 +104,7 @@ class _NavItem extends StatelessWidget {
 /// 界面上就没有那个类型可找了，而用例要靠"找到底栏 → 点里面的页签"来切页。
 /// 给它一个**自己的公开类型**，测试用 `find.byType(AppBottomNav)` 定位，
 /// 比按文案或图标去猜稳得多。
-class AppBottomNav extends StatelessWidget {
+class AppBottomNav extends StatefulWidget {
   const AppBottomNav({
     super.key,
     required this.index,
@@ -128,41 +117,94 @@ class AppBottomNav extends StatelessWidget {
   final int overdueCount;
 
   @override
+  State<AppBottomNav> createState() => _AppBottomNavState();
+}
+
+class _AppBottomNavState extends State<AppBottomNav> {
+  static const int _itemCount = 4;
+
+  /// 上一次显示的页签。
+  ///
+  /// 用它判断"要不要播滑动动画"：与传进来的 index 比，变了才滑。
+  /// 之所以自己存一份而不是看 `didUpdateWidget` 的 `oldWidget.index`，
+  /// 是为了不依赖"父级一定会传新值"—— 父级因别的原因重建时不会误播动画。
+  /// 对齐发生在 build 里（而不是动画结束后），因为动画起点由
+  /// `AnimatedPositioned` 自己按旧位置接管，这里只负责"这次要不要动"。
+  int _shownIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _shownIndex = widget.index;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        _NavItem(
-          icon: Icons.lightbulb_outline,
-          selectedIcon: Icons.lightbulb,
-          label: '灵感',
-          selected: index == 0,
-          onTap: () => onSelect(0),
-        ),
-        _NavItem(
-          icon: Icons.account_tree_outlined,
-          selectedIcon: Icons.account_tree,
-          label: '项目',
-          selected: index == 1,
-          onTap: () => onSelect(1),
-        ),
-        _NavItem(
-          icon: Icons.timeline_outlined,
-          selectedIcon: Icons.timeline,
-          label: '事件',
-          selected: index == 2,
-          onTap: () => onSelect(2),
-        ),
-        // 逾期数量挂在「更多」上：到期视图在那一页下面，
-        // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见
-        _NavItem(
-          icon: Icons.more_horiz,
-          selectedIcon: Icons.more_horiz,
-          label: '更多',
-          selected: index == 3,
-          badgeCount: overdueCount,
-          onTap: () => onSelect(3),
-        ),
-      ],
+    final scheme = Theme.of(context).colorScheme;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final itemWidth = constraints.maxWidth / _itemCount;
+        // 圆在"选中那一格"里居中
+        final target = itemWidth * widget.index + (itemWidth - _navIndicatorRadius * 2) / 2;
+        final animate = _shownIndex != widget.index;
+        _shownIndex = widget.index;
+
+        return Stack(
+          children: <Widget>[
+            AnimatedPositioned(
+              // 首次出现不播动画；之后 index 一变就从旧位置滑到新位置
+              duration: animate ? _navSlideDuration : Duration.zero,
+              curve: Curves.easeOutCubic,
+              left: target,
+              // 纵向顶到 0：配合外层零纵向内边距，圆上下与胶囊内缘**相切**
+              top: 0,
+              child: Container(
+                width: _navIndicatorRadius * 2,
+                height: _navIndicatorRadius * 2,
+                decoration: BoxDecoration(
+                  color: scheme.secondaryContainer,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            Row(
+              children: <Widget>[
+                _NavItem(
+                  icon: Icons.lightbulb_outline,
+                  selectedIcon: Icons.lightbulb,
+                  label: '灵感',
+                  selected: widget.index == 0,
+                  onTap: () => widget.onSelect(0),
+                ),
+                _NavItem(
+                  icon: Icons.account_tree_outlined,
+                  selectedIcon: Icons.account_tree,
+                  label: '项目',
+                  selected: widget.index == 1,
+                  onTap: () => widget.onSelect(1),
+                ),
+                _NavItem(
+                  icon: Icons.timeline_outlined,
+                  selectedIcon: Icons.timeline,
+                  label: '事件',
+                  selected: widget.index == 2,
+                  onTap: () => widget.onSelect(2),
+                ),
+                // 逾期数量挂在「更多」上：到期视图在那一页下面，
+                // 不做推送唤醒（ADR-062），所以至少让用户一进 App 就看得见
+                _NavItem(
+                  icon: Icons.more_horiz,
+                  selectedIcon: Icons.more_horiz,
+                  label: '更多',
+                  selected: widget.index == 3,
+                  badgeCount: widget.overdueCount,
+                  onTap: () => widget.onSelect(3),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
