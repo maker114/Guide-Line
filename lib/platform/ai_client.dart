@@ -128,8 +128,15 @@ class HttpAiTextGenerator implements AiTextGenerator {
             body: body,
           )
           .timeout(timeout);
-    } on SocketException {
-      throw const AiRequestException('连不上这个地址，检查网络或 API 地址');
+    } on SocketException catch (error) {
+      // 注意：**权限缺失在 Dart 侧也表现为 SocketException**（Android 没给
+      // INTERNET 权限时连不上任何地址）。所以文案要把"权限"一起提一句 ——
+      // 这个坑真踩过：debug 包有权限、release 包没有，于是"调试时好好的、
+      // 装出来就连不上"，只看日志根本想不到是清单里少了一行。
+      throw AiRequestException(
+        '连不上这个地址（${error.osError?.message ?? error.message}）\n'
+        '检查网络与该地址是否可达；若怎么都连不上，确认安装包的联网权限没有被去掉',
+      );
     } on HttpException {
       throw const AiRequestException('网络请求失败，稍后再试');
     } catch (error) {

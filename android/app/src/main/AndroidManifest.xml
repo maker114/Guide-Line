@@ -1,4 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 联网权限。
+         Flutter 模板**只在 debug / profile 清单里**给这一条（那是给热重载用的），
+         并注明"应用自己不需要网络"。这个应用到 v1.3.0 之前确实不需要；
+         从「AI 整理」开始它要发请求，所以必须在 main 里自己声明 ——
+         否则 release 包在 Android 上**根本不允许联网**，而失败表现只是
+         "连不上"，看不出是权限问题（实测踩过一次）。
+         调试时"能连上"会误导人：debug 包有这条权限，release 包没有。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
