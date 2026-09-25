@@ -66,7 +66,8 @@ void main() {
     await tester.longPress(find.text('灵感甲'));
     await tester.pumpAndSettle();
     expect(find.text('已选 1 条'), findsWidgets);
-    expect(find.byType(Checkbox), findsNWidgets(2), reason: '多选模式每条前面有勾选框');
+    // 多选模式：每条前面一个勾选框，**外加动作条里的「全选」**那个
+    expect(find.byType(Checkbox), findsNWidgets(3));
 
     // 再点第二条 → 选中两条
     await tester.tap(find.text('灵感乙'));
@@ -105,6 +106,31 @@ void main() {
     expect(find.text('已选 1 条'), findsNothing, reason: '批量动作完要退出多选');
   });
 
+  testWidgets('多选里有「全选」：一次选中当前可见的全部', (tester) async {
+    final app = await boot();
+    app.run(() => app.ws.captureInspiration('甲'));
+    app.run(() => app.ws.captureInspiration('乙'));
+    app.run(() => app.ws.captureInspiration('丙'));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('多选'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 条'), findsWidgets, reason: '进多选默认选中第一条');
+
+    // 动作条里的「全选」勾选框是那一排里最靠左的那个
+    final selectAll = find.byType(Checkbox).first;
+    await tester.tap(selectAll);
+    await tester.pumpAndSettle();
+    expect(find.text('已选 3 条'), findsWidgets, reason: '全选应当把可见的都选上');
+
+    // 再点一次 = 取消全选
+    await tester.tap(find.byType(Checkbox).first);
+    await tester.pumpAndSettle();
+    expect(find.text('已选 0 条'), findsWidgets);
+  });
+
   testWidgets('「多选」按钮也能进多选（不只有长按这一条路）', (tester) async {
     final app = await boot();
     app.run(() => app.ws.captureInspiration('一条灵感'));
@@ -130,9 +156,16 @@ void main() {
     await tester.tap(find.text('项目甲').first);
     await tester.pumpAndSettle();
 
+    // 灵感区在页面靠下（前面还有标识色等字段），`ListView` 是懒构建的，
+    // 所以"待处理灵感"这块**在滚动到之前根本没被建出来** —— 必须先滚再看。
+    await tester.scrollUntilVisible(
+      find.text('这条灵感要合并'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('待处理灵感 1'), findsOneWidget);
-    // 灵感区在页面靠下，先滚到可见再点
-    await tester.scrollUntilVisible(find.text('这条灵感要合并'), 120);
+    await tester.ensureVisible(find.text('这条灵感要合并'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('这条灵感要合并'));
     await tester.pumpAndSettle();
@@ -154,7 +187,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('项目乙').first);
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('灵感原文'), 120);
+    await tester.scrollUntilVisible(
+      find.text('灵感原文'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('灵感原文'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('灵感原文'));
     await tester.pumpAndSettle();

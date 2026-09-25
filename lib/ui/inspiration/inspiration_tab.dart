@@ -37,6 +37,9 @@ class InspirationTabState extends State<InspirationTab> {
   bool _selecting = false;
   final Set<String> _selectedIds = <String>{};
 
+  /// 当前列表里**可见**的那些 id（「全选」按它算，不含被筛选掉的）。
+  final Set<String> _visibleIds = <String>{};
+
   /// 正在就地改正文的那一条
   String? _editingId;
 
@@ -84,6 +87,19 @@ class InspirationTabState extends State<InspirationTab> {
     });
   }
 
+  /// 全选 / 取消全选（只作用于当前可见的那些）。
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIds.length == _visibleIds.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(_visibleIds);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final ws = widget.app.ws;
@@ -95,6 +111,10 @@ class InspirationTabState extends State<InspirationTab> {
     // 选中项可能已被别人改动（例如在别处合并掉了），每次构建都清一遍幽灵选中
     final visibleIds = list.map((i) => i.id).toSet();
     _selectedIds.removeWhere((id) => !visibleIds.contains(id));
+    // 「全选」按当前可见项算，所以存下来给动作条用
+    _visibleIds
+      ..clear()
+      ..addAll(visibleIds);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -191,12 +211,17 @@ class InspirationTabState extends State<InspirationTab> {
             ),
           ),
           Positioned(
-            right: 4,
-            bottom: 4,
-            child: IconButton.filledTonal(
-              tooltip: '保存',
-              icon: const Icon(Icons.send),
+            right: 8,
+            bottom: 8,
+            // 保存键做成**胶囊**（按实机反馈）：文字 + 图标，比一个圆图标更像按钮
+            child: FilledButton.tonalIcon(
               onPressed: _save,
+              icon: const Icon(Icons.send, size: 18),
+              label: const Text('记下'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                shape: const StadiumBorder(),
+              ),
             ),
           ),
         ],
@@ -204,13 +229,15 @@ class InspirationTabState extends State<InspirationTab> {
     );
   }
 
-  /// 多选时的批量动作条。
+  /// 多选时的批量动作条：胶囊形按钮，动作少而明确。
   Widget _buildSelectionBar(BuildContext context) {
+    final theme = Theme.of(context);
     final count = _selectedIds.length;
+    final allSelected = _visibleIds.isNotEmpty && count == _visibleIds.length;
     return Material(
-      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 4, 4, 4),
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
         child: Row(
           children: <Widget>[
             IconButton(
@@ -218,21 +245,32 @@ class InspirationTabState extends State<InspirationTab> {
               icon: const Icon(Icons.close),
               onPressed: _exitSelection,
             ),
-            Text('已选 $count 条', style: Theme.of(context).textTheme.labelLarge),
+            // 全选只作用于**当前可见**的那些：有筛选时就是筛出来的那些。
+            // "全选"若连看不见的也选上，用户不知道自己提交了什么。
+            // 勾选框放在前面（"已选 n 条"已经由标题行显示，这里不重复）。
+            Checkbox(
+              value: allSelected,
+              tristate: false,
+              onChanged: _visibleIds.isEmpty ? null : (_) => _toggleSelectAll(),
+            ),
+            Tooltip(
+              message: allSelected ? '取消全选' : '全选',
+              child: const Icon(Icons.done_all, size: 18),
+            ),
             const Spacer(),
-            IconButton(
+            _BarAction(
               tooltip: '分配到项目…',
-              icon: const Icon(Icons.drive_file_move_outline),
+              icon: Icons.drive_file_move_outline,
               onPressed: count == 0 ? null : () => _batchAssign(context),
             ),
-            IconButton(
+            _BarAction(
               tooltip: '丢弃',
-              icon: const Icon(Icons.visibility_off_outlined),
+              icon: Icons.visibility_off_outlined,
               onPressed: count == 0 ? null : () => _batchDiscard(context),
             ),
-            IconButton(
+            _BarAction(
               tooltip: '删除',
-              icon: const Icon(Icons.delete_outline),
+              icon: Icons.delete_outline,
               onPressed: count == 0 ? null : () => _batchDelete(context),
             ),
           ],
@@ -565,5 +603,38 @@ class _InspirationTile extends StatelessWidget {
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
     if (error != null) showToast(context, error, error: true);
+  }
+}
+
+/// 批量动作条上的一个**胶囊图标按钮**（三处共用，外观一致）。
+///
+/// 按实机反馈把批量动作条从"裸图标排一排"改成胶囊按钮：
+/// 每个按钮有自己的底色与圆角，边界清楚，也更符合全应用的形状规范。
+class _BarAction extends StatelessWidget {
+  const _BarAction({required this.tooltip, required this.icon, required this.onPressed});
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Tooltip(
+        message: tooltip,
+        child: IconButton(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 20),
+          style: IconButton.styleFrom(
+            backgroundColor: theme.colorScheme.surface,
+            shape: const StadiumBorder(),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            minimumSize: const Size(44, 36),
+          ),
+        ),
+      ),
+    );
   }
 }

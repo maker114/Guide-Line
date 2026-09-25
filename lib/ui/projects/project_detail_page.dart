@@ -113,8 +113,6 @@ class ProjectDetailPage extends StatelessWidget {
                 ),
               ),
               _StatusField(app: app, project: project),
-              _ColorField(app: app, project: project),
-              _DateField(app: app, project: project),
               _TextField(
                 title: '目的',
                 hint: '为什么做这个项目',
@@ -293,6 +291,7 @@ class _ImplementationBodyState extends State<_ImplementationBody> {
   }
 }
 
+/// 状态 + 标识色 / 日期图标。三样都是"这个项目本身"的属性，所以放在同一行。
 class _StatusField extends StatelessWidget {
   const _StatusField({required this.app, required this.project});
 
@@ -306,7 +305,13 @@ class _StatusField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('状态', style: Theme.of(context).textTheme.labelLarge),
+          Row(
+            children: <Widget>[
+              Text('状态', style: Theme.of(context).textTheme.labelLarge),
+              const Spacer(),
+              _IconActions(app: app, project: project),
+            ],
+          ),
           const SizedBox(height: 8),
           StatusPillSelector<NodeStatus>(
             values: NodeStatus.values,
@@ -323,9 +328,13 @@ class _StatusField extends StatelessWidget {
   }
 }
 
-/// 标识色（灵感整理第 10 条）：只在项目树与这里显示，不影响任何规则。
-class _ColorField extends StatelessWidget {
-  const _ColorField({required this.app, required this.project});
+/// 「标识色 / 日期」的图标入口。
+///
+/// 按实机反馈收成图标：这两项是**设置一次就不再动**的东西，
+/// 各占一整行 ListTile 太浪费纵向空间。长按 = 清除（图标右下角带个小叉提示），
+/// 所以不需要再各配一个"清除"按钮。
+class _IconActions extends StatelessWidget {
+  const _IconActions({required this.app, required this.project});
 
   final AppController app;
   final Project project;
@@ -334,83 +343,49 @@ class _ColorField extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = colorOfHex(project.color);
-    return ListTile(
-      leading: Icon(
-        Icons.palette_outlined,
-        color: color ?? theme.colorScheme.outline,
-      ),
-      title: const Text('标识色'),
-      subtitle: Text(
-        project.color ?? '未设置（在项目树里用主题色）',
-        style: theme.textTheme.labelSmall,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Container(
-            width: 16,
-            height: 16,
-            decoration: BoxDecoration(
-              color: color ?? theme.colorScheme.surfaceContainerHighest,
-              shape: BoxShape.circle,
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.chevron_right),
-        ],
-      ),
-      onTap: () async {
-        final picked = await pickProjectColor(context, current: project.color);
-        // null = 取消；'' = 明确选了"不用标识色"
-        if (picked == null || !context.mounted) return;
-        final error = app.run(
-          () => app.ws.setProjectColor(project.id, picked.isEmpty ? null : picked),
-        );
-        if (error != null && context.mounted) showToast(context, error, error: true);
-      },
-    );
-  }
-}
+    final hasDate = project.date != null;
+    final overdue = hasDate && isOverdue(project.date) && project.status != NodeStatus.done;
 
-class _DateField extends StatelessWidget {
-  const _DateField({required this.app, required this.project});
-
-  final AppController app;
-  final Project project;
-
-  @override
-  Widget build(BuildContext context) {
-    final date = project.date;
-    return ListTile(
-      leading: const Icon(Icons.event_outlined),
-      title: const Text('日期'),
-      subtitle: Text(
-        date == null ? '未设置' : describeDateWithDays(date),
-        style: date != null && isOverdue(date) && project.status != NodeStatus.done
-            ? TextStyle(color: Theme.of(context).colorScheme.error)
-            : null,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (date != null)
-            IconButton(
-              tooltip: '清除日期',
-              icon: const Icon(Icons.close),
-              onPressed: () => _set(context, null),
-            ),
-          IconButton(
-            tooltip: '选择日期',
-            icon: const Icon(Icons.edit_calendar_outlined),
-            onPressed: () => _pick(context),
-          ),
-        ],
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _ClearableIcon(
+          tooltip: color == null
+              ? '标识色：点一下选'
+              : '标识色 ${project.color}（长按清除）',
+          icon: Icons.palette_outlined,
+          color: color ?? theme.colorScheme.onSurfaceVariant,
+          hasValue: color != null,
+          onTap: () => _pickColor(context),
+          onLongPress: color == null ? null : () => _setColor(context, null),
+        ),
+        _ClearableIcon(
+          tooltip: !hasDate
+              ? '日期：点一下选'
+              : '日期 ${describeDateWithDays(project.date)}（长按清除）',
+          icon: hasDate ? Icons.event_available_outlined : Icons.event_outlined,
+          color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
+          hasValue: hasDate,
+          onTap: () => _pickDate(context),
+          onLongPress: hasDate ? () => _setDate(context, null) : null,
+        ),
+      ],
     );
   }
 
-  Future<void> _pick(BuildContext context) async {
+  Future<void> _pickColor(BuildContext context) async {
+    final picked = await pickProjectColor(context, current: project.color);
+    // null = 取消；'' = 明确选了"不用标识色"
+    if (picked == null || !context.mounted) return;
+    _setColor(context, picked.isEmpty ? null : picked);
+  }
+
+  void _setColor(BuildContext context, String? value) {
+    final error = app.run(() => app.ws.setProjectColor(project.id, value));
+    if (error != null) showToast(context, error, error: true);
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
     final now = DateTime.now();
     final initial = project.date == null ? now : (DateTime.tryParse(project.date!) ?? now);
     final picked = await showDatePicker(
@@ -423,12 +398,69 @@ class _DateField extends StatelessWidget {
     if (picked == null || !context.mounted) return;
     final month = picked.month.toString().padLeft(2, '0');
     final day = picked.day.toString().padLeft(2, '0');
-    _set(context, '${picked.year}-$month-$day');
+    _setDate(context, '${picked.year}-$month-$day');
   }
 
-  void _set(BuildContext context, String? value) {
+  void _setDate(BuildContext context, String? value) {
     final error = app.run(() => app.ws.updateProject(project.id, date: value));
     if (error != null) showToast(context, error, error: true);
+  }
+}
+
+/// 一个"有值时长按可清除"的图标按钮：右下角一个小叉表示可以清掉。
+class _ClearableIcon extends StatelessWidget {
+  const _ClearableIcon({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.hasValue,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final bool hasValue;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        customBorder: const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: <Widget>[
+              Icon(icon, size: 22, color: color),
+              if (hasValue)
+                Positioned(
+                  right: -3,
+                  bottom: -3,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      size: 11,
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -529,7 +561,8 @@ class _ChildrenField extends StatelessWidget {
         InlineComposer(
           label: '新建子项目',
           hint: '子项目名',
-          leading: Icons.subdirectory_arrow_right,
+          leading: Icons.add,
+          compact: true,
           onCreate: (title) {
             final error =
                 app.run(() => app.ws.createProject(title: title, parentId: project.id));

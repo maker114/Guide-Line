@@ -190,6 +190,7 @@ class InlineComposer extends StatefulWidget {
     this.maxLines = 1,
     this.leading,
     this.dense = false,
+    this.compact = false,
   });
 
   /// 折叠时显示的文案，例如「新建项目」
@@ -200,6 +201,10 @@ class InlineComposer extends StatefulWidget {
   final int maxLines;
   final IconData? leading;
   final bool dense;
+
+  /// 折叠时**只显示一个图标按钮**（不显示文字），用于「新建子项目」这类
+  /// 想让界面更轻的地方。展开后的输入框完全一样。
+  final bool compact;
 
   @override
   State<InlineComposer> createState() => _InlineComposerState();
@@ -242,6 +247,20 @@ class _InlineComposerState extends State<InlineComposer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (!_expanded) {
+      if (widget.compact) {
+        // 只给一个加号按钮：新建子项目这类入口不必占一整行文字
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton.filledTonal(
+              tooltip: widget.label,
+              icon: Icon(widget.leading ?? Icons.add, size: 20),
+              onPressed: _expand,
+            ),
+          ),
+        );
+      }
       return ListTile(
         dense: widget.dense,
         leading: Icon(widget.leading ?? Icons.add, color: theme.colorScheme.primary),
