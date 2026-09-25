@@ -56,6 +56,40 @@ class ProjectMarker extends StatelessWidget {
   }
 }
 
+/// 项目标识色的**竖条**（项目树行首、项目详情页标题旁共用）。
+///
+/// 与 [ProjectMarker] 是同一个信息的两种形状：圆点用在"一列项目里认人"，
+/// 竖条用在"标题旁边立一个标记"—— 标题是横着读的，左边立一根竖条比一个圆点
+/// 更贴边、也更像"这一页属于这个颜色"。
+///
+/// **没设色时用中性灰补齐同一个位置**（实机反馈）：空着会让标题一列一个位置。
+class ProjectColorBar extends StatelessWidget {
+  const ProjectColorBar({
+    super.key,
+    required this.color,
+    this.width = 4,
+    this.height = 16,
+  });
+
+  /// 项目的标识色（`#rrggbb`），`null` → 中性灰
+  final String? color;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: colorOfHex(color) ?? theme.colorScheme.outlineVariant,
+        borderRadius: BorderRadius.circular(2),
+      ),
+    );
+  }
+}
+
 /// 选标识色。返回：
 ///   · `null` —— 用户取消（保持原值）；
 ///   · `''`   —— 用户选择"不用标识色"，调用方据此清空。

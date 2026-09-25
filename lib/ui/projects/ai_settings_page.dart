@@ -10,7 +10,7 @@ import '../common/dialogs.dart';
 ///   · 请求只发到你自己填的地址，没有硬编码的第三方服务器；
 ///   · **只发项目名称、目的、清单条目** —— 灵感原文、事件任务、其它项目都不发；
 ///   · `apiKey` 存在系统安全存储里，**不进偏好文件、不进备份、不进导出**；
-///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「实现正文」。
+///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「实现计划」。
 class AiSettingsPage extends StatefulWidget {
   const AiSettingsPage({super.key, required this.app});
 

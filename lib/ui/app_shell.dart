@@ -358,6 +358,17 @@ class _AppShellState extends State<AppShell> {
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
 
+  /// 标题栏文案。
+  ///
+  /// 项目页要**带上数量**（实机反馈「项目   4」）：数量原来在正文第一行
+  /// （「共 4 个项目」），与标题分居两行、白占一行高度。数字取的是
+  /// [visibleProjectCount] —— 与列表里画出来的行数同一个口径。
+  String _titleFor(AppController app) {
+    final base = _titles[_index];
+    if (_index != 1) return base;
+    return '$base   ${visibleProjectCount(app)}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -435,7 +446,7 @@ class _AppShellState extends State<AppShell> {
         final app = widget.app;
         return Scaffold(
           appBar: AppBar(
-            title: Text(_titles[_index]),
+            title: Text(_titleFor(app)),
             actions: <Widget>[
               if (_index == 3)
                 TextButton(

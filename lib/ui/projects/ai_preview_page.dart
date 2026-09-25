@@ -45,7 +45,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
         actions: <Widget>[
           TextButton(
             onPressed: _apply,
-            child: const Text('写入实现正文'),
+            child: const Text('写入实现计划'),
           ),
         ],
       ),
@@ -76,7 +76,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
             child: Text(
-              '下面是模型给出的整理稿，可以直接改；写入后清单不受影响，只替换「实现正文」。',
+              '下面是模型给出的整理稿，可以直接改；写入后清单不受影响，只替换「实现计划」。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -100,7 +100,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Text(
-              '写入会覆盖原来的「实现正文」（清单条目不动）。原来那段可以在写入前先手动备份。',
+              '写入会覆盖原来的「实现计划」（清单条目不动）。原来那段可以在写入前先手动备份。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -123,7 +123,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
       return;
     }
     Navigator.of(context).pop();
-    showToast(context, '已写入「实现正文」');
+    showToast(context, '已写入「实现计划」');
   }
 }
 

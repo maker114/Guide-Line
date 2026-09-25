@@ -644,14 +644,14 @@ class _InspirationTile extends StatelessWidget {
     final error = app.run(() => ws.mergeInspiration(
           inspirationId: inspiration.id,
           projectId: project.id,
-          newImplementation: merged,
+          itemText: merged,
         ));
     if (error != null) {
       if (context.mounted) showToast(context, error, error: true);
       return;
     }
     if (context.mounted) {
-      showToast(context, '已合并进「${project.title}」，原文可在归档区「已合并」找回');
+      showToast(context, '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回');
     }
   }
 

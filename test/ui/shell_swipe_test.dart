@@ -58,7 +58,7 @@ void main() {
 
     await swipe(tester, 1);
 
-    expect(find.text('共 1 个项目'), findsOneWidget, reason: '滑一下应当到项目页');
+    expect(find.text('项目   1'), findsOneWidget, reason: '滑一下应当到项目页');
     expect(pillLeft(tester), closeTo(cell, 1), reason: '胶囊要跟到第 1 格');
     expect(app.prefs.lastTabIndex, 1, reason: '滑过去的页签同样要记住');
   });
@@ -72,7 +72,7 @@ void main() {
     expect(pillLeft(tester), closeTo(cell * 2, 1));
 
     await swipe(tester, -1);
-    expect(find.text('共 1 个项目'), findsOneWidget);
+    expect(find.text('项目   1'), findsOneWidget);
     expect(pillLeft(tester), closeTo(cell, 1));
   });
 

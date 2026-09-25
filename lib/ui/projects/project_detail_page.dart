@@ -20,13 +20,56 @@ import 'project_checklist.dart';
 
 /// 项目详情：**目的 / 实现 / 日期 / 三态**，加子项目与已分配灵感。
 ///
-/// 「实现」是灵感合并的落点（ADR-033），所以正文用大段可点区域展示，
-/// 一眼能看出内容有没有被写进去。
-class ProjectDetailPage extends StatelessWidget {
+/// 「实现」分成两块：上面的**待办清单**（结构化、可勾选）与下面的
+/// **实现计划**（整段说明 / AI 整理的输出）。
+///
+/// 名称不在这里改（标题栏已经写着项目名了，正文再放一遍是重复）：改名入口
+/// 收在标题右侧的三个点里，点「重命名」之后标题栏原地变成输入框。
+class ProjectDetailPage extends StatefulWidget {
   const ProjectDetailPage({super.key, required this.app, required this.projectId});
 
   final AppController app;
   final String projectId;
+
+  @override
+  State<ProjectDetailPage> createState() => _ProjectDetailPageState();
+}
+
+class _ProjectDetailPageState extends State<ProjectDetailPage> {
+  /// 标题栏是否处于"改名字"状态
+  bool _renaming = false;
+  final TextEditingController _titleController = TextEditingController();
+
+  AppController get app => widget.app;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  void _startRename(Project project) {
+    _titleController
+      ..text = project.title
+      // 全选：进来就能直接覆盖着写，长名字不用先删一遍
+      ..selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: project.title.length,
+      );
+    setState(() => _renaming = true);
+  }
+
+  void _cancelRename() => setState(() => _renaming = false);
+
+  /// 提交改名。**空名字不提交、保持原名** —— 与 `InlineTextField` 同一条约定
+  /// （必填项被清空时不能把标题清没）。
+  void _commitRename(Project project) {
+    final next = _titleController.text.trim();
+    setState(() => _renaming = false);
+    if (next.isEmpty || next == project.title) return;
+    final error = app.run(() => app.ws.updateProject(project.id, title: next));
+    if (error != null && mounted) showToast(context, error, error: true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +77,7 @@ class ProjectDetailPage extends StatelessWidget {
       listenable: app,
       builder: (context, _) {
         final ws = app.ws;
-        final project = ws.findProject(projectId);
+        final project = ws.findProject(widget.projectId);
         if (project == null || project.deleted) {
           return Scaffold(
             appBar: AppBar(title: const Text('项目')),
@@ -44,51 +87,81 @@ class ProjectDetailPage extends StatelessWidget {
 
         final parent = project.parentId == null ? null : ws.findProject(project.parentId!);
         final children = ws.projectTree
-            .childrenOf(projectId)
+            .childrenOf(widget.projectId)
             .whereType<Project>()
             .where((p) => !p.archived)
             .toList(growable: false);
         final inspirations = ws.liveInspirations
-            .where((i) => i.isPending && i.projectId == projectId)
+            .where((i) => i.isPending && i.projectId == widget.projectId)
             .toList(growable: false)
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
         return Scaffold(
           appBar: AppBar(
-            title: Text(project.title, overflow: TextOverflow.ellipsis),
-            actions: <Widget>[
-              PopupMenuButton<String>(
-                tooltip: '更多',
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'handoff':
-                      if (!context.mounted) return;
-                      await _exportHandoff(context, project);
-                      break;
-                    case 'move':
-                      await moveProjectAction(context, app, project.id);
-                      break;
-                    case 'archive':
-                      await archiveProjectAction(context, app, project.id, archived: true);
-                      break;
-                    case 'delete':
-                      if (!context.mounted) return;
-                      await deleteProjectAction(context, app, project.id);
-                      if (context.mounted) Navigator.of(context).maybePop();
-                      break;
-                  }
-                },
-                itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(
-                    value: 'handoff',
-                    child: Text('导出交接说明…'),
-                  ),
-                  PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
-                  PopupMenuItem<String>(value: 'archive', child: Text('归档')),
-                  PopupMenuItem<String>(value: 'delete', child: Text('删除')),
-                ],
-              ),
-            ],
+            title: _renaming
+                ? TextField(
+                    controller: _titleController,
+                    autofocus: true,
+                    textInputAction: TextInputAction.done,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: '项目名',
+                      border: InputBorder.none,
+                    ),
+                    onSubmitted: (_) => _commitRename(project),
+                  )
+                : _DetailTitle(project: project),
+            actions: _renaming
+                ? <Widget>[
+                    IconButton(
+                      tooltip: '取消',
+                      icon: const Icon(Icons.close),
+                      onPressed: _cancelRename,
+                    ),
+                    IconButton(
+                      tooltip: '保存',
+                      icon: const Icon(Icons.check),
+                      onPressed: () => _commitRename(project),
+                    ),
+                  ]
+                : <Widget>[
+                    PopupMenuButton<String>(
+                      tooltip: '更多',
+                      onSelected: (value) async {
+                        switch (value) {
+                          case 'rename':
+                            _startRename(project);
+                            break;
+                          case 'handoff':
+                            if (!context.mounted) return;
+                            await _exportHandoff(context, project);
+                            break;
+                          case 'move':
+                            await moveProjectAction(context, app, project.id);
+                            break;
+                          case 'archive':
+                            await archiveProjectAction(context, app, project.id, archived: true);
+                            break;
+                          case 'delete':
+                            if (!context.mounted) return;
+                            await deleteProjectAction(context, app, project.id);
+                            if (context.mounted) Navigator.of(context).maybePop();
+                            break;
+                        }
+                      },
+                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                        PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
+                        PopupMenuItem<String>(
+                          value: 'handoff',
+                          child: Text('导出交接说明…'),
+                        ),
+                        PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
+                        PopupMenuItem<String>(value: 'archive', child: Text('归档')),
+                        PopupMenuItem<String>(value: 'delete', child: Text('删除')),
+                      ],
+                    ),
+                  ],
           ),
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),
@@ -99,20 +172,6 @@ class ProjectDetailPage extends StatelessWidget {
                   leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
                   title: Text('属于「${parent.title}」', style: Theme.of(context).textTheme.labelMedium),
                 ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Text('名称', style: Theme.of(context).textTheme.labelLarge),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: InlineTextField(
-                  value: project.title,
-                  hint: '项目名',
-                  textStyle: Theme.of(context).textTheme.titleMedium,
-                  onSubmitted: (title) =>
-                      app.run(() => ws.updateProject(project.id, title: title)),
-                ),
-              ),
               _StatusField(app: app, project: project),
               _TextField(
                 title: '目的',
@@ -122,7 +181,7 @@ class ProjectDetailPage extends StatelessWidget {
                     app.run(() => ws.updateProject(project.id, purpose: value)),
               ),
               // 「实现」由两部分组成：上面的**待办清单**（结构化、可勾选），
-              // 下面的**正文**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
+              // 下面的**实现计划**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
               // 两者都套在与「目的」同一个 `_FieldCard` 里，一页只留一种观感。
               _FieldCard(
                 title: '实现清单',
@@ -139,7 +198,7 @@ class ProjectDetailPage extends StatelessWidget {
                 ),
               ),
               _FieldCard(
-                title: '实现正文',
+                title: '实现计划',
                 child: _ImplementationBody(
                   value: project.implementation,
                   hasItems: project.items.isNotEmpty,
@@ -224,9 +283,34 @@ class ProjectDetailPage extends StatelessWidget {
   }
 }
 
-/// 「实现正文」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
+/// 标题栏上的**标识色竖条 + 项目名**。
 ///
-/// 正文是三样东西的共同落点 —— 灵感合并写进来、AI 整理写回来、交接导出从这里取。
+/// 竖条与项目树行首是同一个控件（`ProjectColorBar`）：进了详情页也知道
+/// 自己看的是哪个颜色的项目（实机反馈）。没设色时是同一根灰条，
+/// 位置永远占住，标题不会因为"有的有颜色、有的没有"而左右跳。
+class _DetailTitle extends StatelessWidget {
+  const _DetailTitle({required this.project});
+
+  final Project project;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        ProjectColorBar(color: project.color, height: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(project.title, overflow: TextOverflow.ellipsis),
+        ),
+      ],
+    );
+  }
+}
+
+/// 「实现计划」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
+///
+/// 这一块是三样东西的共同落点 —— AI 整理写进来、交接导出从这里取、
+/// 手写也写在这里（灵感合并不再写它，见 `Workspace.mergeInspiration`）。
 /// 清单为空时它就是主角，默认展开；有清单时它退成"整理稿"，默认收起，
 /// 免得一屏全是字。
 class _ImplementationBody extends StatefulWidget {
@@ -464,7 +548,7 @@ class _ClearableIcon extends StatelessWidget {
   }
 }
 
-/// 一个"带轻阴影的字段卡"（项目详情里「目的 / 实现清单 / 实现正文」共用）。
+/// 一个"带轻阴影的字段卡"（项目详情里「目的 / 实现清单 / 实现计划」共用）。
 ///
 /// 抽出来是为了让三块**长得一样**：以前「目的」是 `Card(elevation: 0)`
 /// （其实没有阴影），清单与正文则是裸标题 + 内容 —— 同一页里三种观感。
@@ -732,7 +816,7 @@ class _InspirationsField extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Text(
-              '点一条即可把它合并进上面的「实现」',
+              '点一条即可把它追加进上面的「实现清单」',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -753,14 +837,14 @@ class _InspirationsField extends StatelessWidget {
     final error = app.run(() => app.ws.mergeInspiration(
           inspirationId: inspiration.id,
           projectId: project.id,
-          newImplementation: merged,
+          itemText: merged,
         ));
     if (error != null) {
       if (context.mounted) showToast(context, error, error: true);
       return;
     }
     if (context.mounted) {
-      showToast(context, '已合并进「${project.title}」，原文可在归档区「已合并」找回');
+      showToast(context, '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回');
     }
   }
 }

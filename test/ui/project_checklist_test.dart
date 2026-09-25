@@ -5,13 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/projects/project_checklist.dart';
 
 import 'scroll_finders.dart';
 
 /// 项目「实现」清单的界面接线（设计文档 §1.3）：
 ///   · 清单与正文并存，两块的入口都在项目详情页；
 ///   · 加条目、打勾、删条目都真的改了数据；
-///   · 「从正文拆成条目」把正文按行拆开，且正文本身不动。
+///   · 「从正文拆成条目」把正文按行拆开，且正文本身不动；
+///   · 清单块自己**不再挂「更多」按钮**，条目**点一下就改**（带确认 / 取消）。
 void main() {
   late Directory tempDir;
 
@@ -132,12 +134,72 @@ void main() {
     await tester.tap(find.text('原来的条目'));
     await tester.pumpAndSettle();
 
-    final field = find.byType(TextField).last;
+    final field = find.descendant(
+      of: find.byType(ProjectChecklist),
+      matching: find.byType(TextField),
+    );
     await tester.enterText(field, '改过的条目');
-    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.tap(find.byTooltip('确认'));
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.items.single.text, '改过的条目');
+  });
+
+  testWidgets('条目：行尾没有改名图标，编辑态补上确认 / 取消', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目辛');
+    app.run(() => app.ws.addProjectItem(project.id, '原来的条目'));
+
+    await openProject(tester, app, '清单项目辛');
+    await scrollTo(tester, find.text('原来的条目'));
+
+    // 只读态：条目行里不该再有那个"重命名"小铅笔（点这一行本身就是改）
+    expect(
+      find.descendant(
+        of: find.byType(ProjectChecklist),
+        matching: find.byIcon(Icons.edit_outlined),
+      ),
+      findsNothing,
+      reason: '点条目就能改，行尾再挂一个图标是多余的记号',
+    );
+
+    await tester.tap(find.text('原来的条目'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('确认'), findsOneWidget);
+    expect(find.byTooltip('取消'), findsOneWidget);
+
+    final field = find.descendant(
+      of: find.byType(ProjectChecklist),
+      matching: find.byType(TextField),
+    );
+
+    // 取消：改了一半想放弃 —— 数据不动、界面回到原值
+    await tester.enterText(field, '改了一半');
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+    expect(app.ws.findProject(project.id)!.items.single.text, '原来的条目');
+    expect(find.text('原来的条目'), findsOneWidget);
+    expect(find.text('改了一半'), findsNothing);
+  });
+
+  testWidgets('清单块不再自带「更多」按钮（重拆 / 清空两件事已去掉）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目壬');
+    app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
+
+    await openProject(tester, app, '清单项目壬');
+    await scrollTo(tester, find.text('一条条目'));
+
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is PopupMenuButton<String> && w.tooltip == '清单操作',
+      ),
+      findsNothing,
+      reason: '它一个人占一整行又不常用 —— 整个去掉',
+    );
+    expect(find.text('清空清单'), findsNothing);
+    // 详情页标题栏的「更多」（交接导出等）不受影响，仍在
+    expect(find.byTooltip('更多'), findsOneWidget);
   });
 
   testWidgets('长按条目弹出操作，删除不弹确认', (tester) async {
@@ -173,10 +235,10 @@ void main() {
     app.run(() => app.ws.replaceImplementation(project.id, '整理后的整体说明'));
 
     await openProject(tester, app, '清单项目庚');
-    await scrollTo(tester, find.text('实现正文'));
+    await scrollTo(tester, find.text('实现计划'));
 
     expect(find.text('一条条目'), findsOneWidget);
-    expect(find.text('实现正文'), findsOneWidget);
+    expect(find.text('实现计划'), findsOneWidget);
     // 有清单时正文默认收起：内容不在树里
     expect(find.text('整理后的整体说明'), findsNothing);
 

@@ -136,7 +136,7 @@ class MoreTab extends StatelessWidget {
         final config = snapshot.data;
         final String text;
         if (config == null) {
-          text = '用于把实现清单整理成正文';
+          text = '用于把实现清单整理成「实现计划」';
         } else if (config.isConfigured) {
           text = '已配置 · ${config.model}';
         } else {

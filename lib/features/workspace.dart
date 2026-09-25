@@ -547,18 +547,6 @@ class Workspace {
     persist();
   }
 
-  /// 把一条灵感**原封不动**追加到项目「实现」的末尾（灵感整理第 7 条）。
-  ///
-  /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
-  /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
-  static String appendToImplementation(String implementation, String inspirationText) {
-    final base = implementation.trimRight();
-    final addition = inspirationText.trim();
-    if (addition.isEmpty) return base;
-    if (base.isEmpty) return addition;
-    return '$base\n$addition';
-  }
-
   /// 批量分配（`projectId = null` 表示解除分配）。
   ///
   /// 规则与单条 [assignInspiration] 一致：已合并的不能改归属。
@@ -641,11 +629,20 @@ class Workspace {
     persist();
   }
 
-  /// 合并灵感：写入项目正文 + 灵感置 `merged`（**跨文档**，ADR-033/037）。
-  void mergeInspiration({
+  /// 合并灵感：把这条灵感**追加成项目实现清单的新条目** + 灵感置 `merged`
+  /// （**跨文档**，ADR-033/037）。
+  ///
+  /// 2026-09-25 实机反馈：合并的落点从「实现计划」正文改成**清单条目** ——
+  /// 合并产出的是一件"要做的事"，不是往一段说明里再添一句。`implementation`
+  /// 因此**不再被合并写入**（它仍然由手写与 AI 整理写入）。
+  ///
+  /// 与其它跨文档动作一样，两份文档**一次落盘**：要么条目和灵感状态都在，
+  /// 要么都不在。撤销合并只恢复灵感，**不把条目撤回来**（ADR-057 同理：
+  /// 已经写进项目的内容不回滚）。
+  ProjectItem mergeInspiration({
     required String inspirationId,
     required String projectId,
-    required String newImplementation,
+    required String itemText,
   }) {
     final inspiration = findInspiration(inspirationId);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
@@ -653,10 +650,17 @@ class Workspace {
     final project = findProject(projectId);
     if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
 
+    final trimmed = itemText.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+
     final now = Ids.nowMillis();
+    final item = ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false);
     _upsert(
       DocName.projects,
-      project.copyWith(implementation: newImplementation, updatedAt: now),
+      project.copyWith(
+        items: <ProjectItem>[...project.items, item],
+        updatedAt: now,
+      ),
     );
     _upsert(
       DocName.inspirations,
@@ -669,6 +673,7 @@ class Workspace {
       ),
     );
     persist();
+    return item;
   }
 
   /// 撤销合并（ADR-057）：**只恢复灵感，不回滚项目正文**。

@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/project.dart';
 import '../common/color_picker.dart';
+import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
@@ -16,6 +17,12 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 /// 标识色小色条的 Key：用例靠它确认"没设色的项目用的是灰条，而不是空位"。
 @visibleForTesting
 Key projectColorBarKey(String projectId) => Key('ProjectTile.colorBar.$projectId');
+
+/// 项目页**当前能看到几行**（列表里真的画出来的那些行）。
+///
+/// 标题栏上的「项目   4」用的就是它 —— 与列表同一个数：折叠起来的子项目
+/// 不算在内，标题里的数字和眼睛看到的行数永远一致。
+int visibleProjectCount(AppController app) => _flatten(app).length;
 
 /// 项目 Tab：**项目树（≤ 3 层）**。
 ///
@@ -47,24 +54,11 @@ class _ProjectTabState extends State<ProjectTab> {
       () => _app.ws.createProject(title: title, parentId: parentId),
     );
     if (error != null) {
-      _toast(error, error: true);
+      if (mounted) showToast(context, error, error: true);
       return;
     }
     // 加完子项目就把那一行的输入框收起来，避免列表里挂着一排展开的输入
     if (parentId != null) setState(() => _addingChildOf = null);
-  }
-
-  void _toast(String message, {bool error = false}) {
-    if (!mounted) return;
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    messenger?.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: error
-            ? Theme.of(context).colorScheme.errorContainer
-            : null,
-      ),
-    );
   }
 
   @override
@@ -73,13 +67,16 @@ class _ProjectTabState extends State<ProjectTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Text(
-            rows.isEmpty ? '还没有项目' : '共 ${rows.length} 个项目',
-            style: Theme.of(context).textTheme.labelLarge,
+        // 数量原来单独占一行（「共 4 个项目」），被标题栏的「项目   4」接管了 ——
+        // 这里只在**一个项目都没有**时留一句引导，有项目时不占行。
+        if (rows.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Text(
+              '还没有项目',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
           ),
-        ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.only(bottom: 96),
@@ -350,16 +347,9 @@ class _ProjectTile extends StatelessWidget {
           if (!isChild)
             Padding(
               padding: const EdgeInsets.only(right: 6),
-              child: Container(
+              child: ProjectColorBar(
                 key: projectColorBarKey(project.id),
-                width: 4,
-                height: 16,
-                decoration: BoxDecoration(
-                  color:
-                      colorOfHex(project.color) ??
-                      theme.colorScheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+                color: project.color,
               ),
             ),
           Expanded(

@@ -40,6 +40,8 @@ class InlineTextField extends StatefulWidget {
     this.padding = const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
     this.autofocus = false,
     this.onEditClosed,
+    this.showEditIcon = true,
+    this.editorActions = false,
   });
 
   /// 当前值（外部真源）
@@ -65,6 +67,17 @@ class InlineTextField extends StatefulWidget {
   /// 每次**结束编辑**都会调用（无论值有没有变）。
   /// 列表里用来把"正在重命名"的行恢复成普通行。
   final VoidCallback? onEditClosed;
+
+  /// 只读态右侧那个"这里能改"的小铅笔。默认给（多数字段没有别的入口）；
+  /// 列表里"点这一行就是改"的地方（清单条目）关掉它 —— 那一行已经点得进去，
+  /// 再挂一个图标只是多一个看不出区别的记号（实机反馈）。
+  final bool showEditIcon;
+
+  /// 编辑态右侧补上 **确认 / 取消** 两个按钮。
+  ///
+  /// 原来编辑态只有一个输入框：改完只能靠"点别处"或键盘的完成键提交，
+  /// 想放弃改动就只能自己改回去（实机反馈"没有确认和取消键"）。
+  final bool editorActions;
 
   @override
   State<InlineTextField> createState() => _InlineTextFieldState();
@@ -128,27 +141,56 @@ class _InlineTextFieldState extends State<InlineTextField> {
     widget.onEditClosed?.call();
   }
 
+  /// 取消编辑：**丢掉改了一半的内容、恢复原值**，一个字节都不写盘。
+  ///
+  /// 先把 `_editing` 置回 false 再 `unfocus()`：焦点监听里"失焦即提交"那条
+  /// 只认编辑态，顺序反了的话这次取消会被当成一次提交。
+  void _cancel() {
+    _controller.text = widget.value;
+    setState(() => _editing = false);
+    _focus.unfocus();
+    widget.onEditClosed?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (_editing) {
+      final field = TextField(
+        controller: _controller,
+        focusNode: _focus,
+        minLines: widget.minLines,
+        maxLines: widget.maxLines,
+        textInputAction:
+            widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
+        style: widget.textStyle,
+        decoration: InputDecoration(
+          isDense: true,
+          border: inputBorderForLines(widget.maxLines),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        ),
+        onSubmitted: widget.maxLines > 1 ? null : (_) => _commit(),
+      );
       return Padding(
         padding: widget.padding,
-        child: TextField(
-          controller: _controller,
-          focusNode: _focus,
-          minLines: widget.minLines,
-          maxLines: widget.maxLines,
-          textInputAction:
-              widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
-          style: widget.textStyle,
-          decoration: InputDecoration(
-            isDense: true,
-            border: inputBorderForLines(widget.maxLines),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          ),
-          onSubmitted: widget.maxLines > 1 ? null : (_) => _commit(),
-        ),
+        child: widget.editorActions
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: <Widget>[
+                  Expanded(child: field),
+                  _EditorAction(
+                    tooltip: '取消',
+                    icon: Icons.close,
+                    onPressed: _cancel,
+                  ),
+                  _EditorAction(
+                    tooltip: '确认',
+                    icon: Icons.check,
+                    onPressed: _commit,
+                  ),
+                ],
+              )
+            : field,
       );
     }
 
@@ -170,10 +212,39 @@ class _InlineTextFieldState extends State<InlineTextField> {
               ),
             ),
             // 给一个"这里能改"的轻微提示，不做成显眼按钮
-            Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.outlineVariant),
+            if (widget.showEditIcon)
+              Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.outlineVariant),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 行内编辑的 **确认 / 取消** 按钮：比 `IconButton` 小一圈。
+///
+/// 它们长在一条本来就紧凑的行里（清单条目），默认 48×48 的触摸目标会把行撑高，
+/// 所以按 `compact` 密度收成 32×32 —— 仍然够点，也不抢文本的宽度。
+class _EditorAction extends StatelessWidget {
+  const _EditorAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      icon: Icon(icon, size: 18),
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
     );
   }
 }

@@ -93,8 +93,12 @@ void main() {
     final colored = app.ws.liveProjects.firstWhere((p) => p.color != null);
 
     Color? barColorOf(String projectId) {
+      // 色条本体是共用控件 `ProjectColorBar`，渲染颜色在它里面的 `Container` 上
       final widget = tester.widget<Container>(
-        find.byKey(projectColorBarKey(projectId)),
+        find.descendant(
+          of: find.byKey(projectColorBarKey(projectId)),
+          matching: find.byType(Container),
+        ),
       );
       return (widget.decoration as BoxDecoration?)?.color;
     }

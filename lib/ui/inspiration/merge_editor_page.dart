@@ -2,14 +2,19 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
-import '../../features/workspace.dart';
+import '../common/dialogs.dart';
 
 /// 合并编辑器（**手机端形态**）。
 ///
-/// 手机上放不下"上下分区同时可见"，因此按归档设计的建议做适配：
-/// 上区仍是可编辑的项目「实现」，下区的灵感原文默认**折叠成一条可展开的参考条**。
+/// 合并的落点是项目的**实现清单**：这条灵感会被追加成清单的**新的一条**
+/// （2026-09-25 实机反馈）。原先它写进「实现」正文 —— 但合并本来就该产出一件
+/// "要做的事"，往一段文字里再添一句，做的时候还得自己去清单里重打一遍。
 ///
-/// 保存后由调用方写入：项目正文更新 + 灵感置为 `merged`（原灵感可在归档区撤销）。
+/// 编辑框**一进来就是灵感原文**：直接点保存 = 原文原样成为新条目；也可以先
+/// 改成一句更清楚的话再保存 —— 改的只是这一条条目的措辞，不改写原灵感
+/// （原文照旧在归档区「已合并」里）。
+///
+/// 保存后由调用方写入：清单追加条目 + 灵感置为 `merged`。
 class MergeEditorPage extends StatefulWidget {
   const MergeEditorPage({super.key, required this.project, required this.inspiration});
 
@@ -21,14 +26,23 @@ class MergeEditorPage extends StatefulWidget {
 }
 
 class _MergeEditorPageState extends State<MergeEditorPage> {
-  late final TextEditingController _implementation =
-      TextEditingController(text: widget.project.implementation);
-  bool _referenceExpanded = false;
+  late final TextEditingController _itemText =
+      TextEditingController(text: widget.inspiration.text);
 
   @override
   void dispose() {
-    _implementation.dispose();
+    _itemText.dispose();
     super.dispose();
+  }
+
+  void _save() {
+    final text = _itemText.text.trim();
+    if (text.isEmpty) {
+      // 清空了就不提交：条目不允许空文字（业务层同样会拒），留在这里提示更近
+      showToast(context, '条目内容不能为空', error: true);
+      return;
+    }
+    Navigator.of(context).pop(text);
   }
 
   @override
@@ -39,7 +53,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
         title: Text('合并进「${widget.project.title}」', overflow: TextOverflow.ellipsis),
         actions: <Widget>[
           TextButton(
-            onPressed: () => Navigator.of(context).pop(_implementation.text),
+            onPressed: _save,
             child: const Text('保存'),
           ),
         ],
@@ -49,26 +63,13 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
         children: <Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Row(
-              children: <Widget>[
-                Text('项目的「实现」内容（可编辑）', style: theme.textTheme.labelLarge),
-                const Spacer(),
-                // 「一键合并」：把灵感原文**原封不动**作为新的一行贴到末尾（灵感整理第 7 条）。
-                // 只改编辑框、不直接写盘 —— 用户还能在保存前再调一下，
-                // 与这个页面"编辑完再 pop 出去保存"的语义保持一致。
-                TextButton.icon(
-                  onPressed: _appendOriginal,
-                  icon: const Icon(Icons.playlist_add, size: 18),
-                  label: const Text('追加原文'),
-                ),
-              ],
-            ),
+            child: Text('要追加的清单条目（可编辑）', style: theme.textTheme.labelLarge),
           ),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: TextField(
-                controller: _implementation,
+                controller: _itemText,
                 expands: true,
                 maxLines: null,
                 minLines: null,
@@ -76,74 +77,19 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
                 keyboardType: TextInputType.multiline,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
-                  hintText: '整合一下这条灵感，或直接点右上角「追加原文」',
+                  hintText: '这条要做什么',
                 ),
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          _ReferencePanel(
-            text: widget.inspiration.text,
-            expanded: _referenceExpanded,
-            onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Text(
-              '保存后：项目正文更新，这条灵感从灵感箱消失（可在「更多 → 归档区 → 已合并」撤销）。',
+              '保存后：这条灵感成为「${widget.project.title}」实现清单的新条目，'
+              '从灵感箱消失（可在「更多 → 归档区 → 已合并」撤销）。',
               style: theme.textTheme.bodySmall,
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  /// 追加原文：不改写、不润色，就是"原文成为新的一行"。
-  void _appendOriginal() {
-    final next = Workspace.appendToImplementation(
-      _implementation.text,
-      widget.inspiration.text,
-    );
-    _implementation.text = next;
-    _implementation.selection = TextSelection.collapsed(offset: next.length);
-  }
-}
-
-class _ReferencePanel extends StatelessWidget {
-  const _ReferencePanel({
-    required this.text,
-    required this.expanded,
-    required this.onToggle,
-  });
-
-  final String text;
-  final bool expanded;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.lightbulb_outline, size: 18),
-            title: Text('灵感原文（参考）', style: theme.textTheme.labelLarge),
-            trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),
-            onTap: onToggle,
-          ),
-          if (expanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: SelectableText(text, style: theme.textTheme.bodyMedium),
-              ),
-            ),
         ],
       ),
     );

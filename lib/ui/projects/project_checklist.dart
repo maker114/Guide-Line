@@ -37,29 +37,10 @@ class ProjectChecklist extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // 标题与进度由外面的 `_FieldCard` 给（那里显示 n/m），
-        // 这里只保留"清单操作"菜单，免得同一块出现两个「实现清单」。
-        if (items.isNotEmpty)
-          Align(
-            alignment: Alignment.centerRight,
-            child: PopupMenuButton<String>(
-              tooltip: '清单操作',
-              onSelected: (value) {
-                switch (value) {
-                  case 'split':
-                    onSplitFromImplementation();
-                    break;
-                  case 'clear':
-                    _confirmClear(context);
-                    break;
-                }
-              },
-              itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                PopupMenuItem<String>(value: 'split', child: Text('清空后从正文重拆…')),
-                PopupMenuItem<String>(value: 'clear', child: Text('清空清单')),
-              ],
-            ),
-          ),
+        // 这里**没有**自己的标题工具栏：标题与进度由外面的 `_FieldCard` 给
+        // （那里显示 n/m）。原来这里还挂着一个「清单操作」的更多按钮，
+        // 它一个人占一整行、又只有"重拆 / 清空"两件事（实机反馈：影响美观、
+        // 没什么用），整个去掉了。想重来就长按条目删掉，或直接改条目文字。
         if (items.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -99,7 +80,7 @@ class ProjectChecklist extends StatelessWidget {
             onCreate: (text) => _run(context, () => app.ws.addProjectItem(project.id, text)),
           ),
         ),
-        // AI 整理：把清单**反向压成**一段通顺的实现正文（设计文档 §2.1）。
+        // AI 整理：把清单**反向压成**一段通顺的实现说明（设计文档 §2.1）。
         // 只在有清单时才给入口 —— 空清单没什么可整理的。
         if (items.isNotEmpty)
           Padding(
@@ -107,26 +88,13 @@ class ProjectChecklist extends StatelessWidget {
             child: ListTile(
               dense: true,
               leading: const Icon(Icons.auto_awesome_outlined, size: 18),
-              title: const Text('AI 整理成正文'),
-              subtitle: const Text('把清单合成一段通顺说明，写进「实现正文」'),
+              title: const Text('AI 整理成计划'),
+              subtitle: const Text('把清单合成一段通顺说明，写进「实现计划」'),
               onTap: () => startAiSummarize(context, app, project.id, project.title),
             ),
           ),
       ],
     );
-  }
-
-  Future<void> _confirmClear(BuildContext context) async {
-    final ok = await confirmAction(
-      context,
-      title: '清空清单',
-      message: '会删掉全部 ${project.items.length} 条条目。\n'
-          '「实现」的正文不会动，可以再从正文拆一次。',
-      confirmLabel: '清空',
-      danger: true,
-    );
-    if (!ok || !context.mounted) return;
-    _run(context, () => app.ws.clearProjectItems(project.id));
   }
 
   void _run(BuildContext context, void Function() action) {
@@ -155,8 +123,9 @@ class _ItemRow extends StatelessWidget {
     final theme = Theme.of(context);
     return InkWell(
       // 点文本**就地改**（与「目的」等字段一样用 `InlineTextField`），
-      // **长按**才弹出条目操作。原来行尾挂了一个三个点，实机反馈"意义不明" ——
-      // 编辑本来是最常用的动作，直接点就行，不必先开菜单。
+      // **长按**才弹出条目操作。行尾那个"重命名"小铅笔也去掉了（实机反馈）：
+      // 点这一行本身就是改名，再挂一个图标只是多一个看不出区别的记号。
+      // 编辑态自带**确认 / 取消**两个键 —— 改到一半想放弃时不用自己改回去。
       onLongPress: () => _showActions(context),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
@@ -176,6 +145,8 @@ class _ItemRow extends StatelessWidget {
                 value: item.text,
                 hint: '这条要做什么',
                 maxLines: 3,
+                showEditIcon: false,
+                editorActions: true,
                 textStyle: item.done
                     ? theme.textTheme.bodyMedium?.copyWith(
                         decoration: TextDecoration.lineThrough,
@@ -241,49 +212,9 @@ class _ItemRow extends StatelessWidget {
     _act(context, value);
   }
 
-  Future<void> _edit(BuildContext context) async {
-    final controller = TextEditingController(text: item.text);
-    final next = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('编辑条目'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 1,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            hintText: '这条要做什么',
-          ),
-          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-    // 弹窗还在做退场动画时那个 TextField 仍然活着，**不能立刻 dispose 控制器**
-    // ——否则会撞上"正在构建的元素被 dispose"。推到下一帧之后再释放。
-    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
-    if (next == null || !context.mounted) return;
-    final error = app.run(() => app.ws.updateProjectItemText(projectId, item.id, next));
-    if (error != null && context.mounted) showToast(context, error, error: true);
-  }
-
   void _act(BuildContext context, String action) {
     void Function()? job;
     switch (action) {
-      case 'edit':
-        _edit(context);
-        return;
       case 'up':
         job = () => app.ws.moveProjectItem(projectId, item.id, -1);
         break;
