@@ -134,8 +134,43 @@ void main() {
     expect(app.isExpanded(event.id), isTrue);
   });
 
-  testWidgets('1.6 倍字体 + 很长的标题：事件卡不溢出', (tester) async {
-    tester.view.physicalSize = const Size(1080, 2340);
+  testWidgets('老数据里的并列任务：按子任务行显示，不再有「并列」字样', (tester) async {
+    // 手写一份"老文件"（`parallel` 已废除，但老文件里还有），走真实启动路径读进来
+    final eventId = 'e0000000-0000-4000-8000-000000000001';
+    final mainId = 'a0000000-0000-4000-8000-000000000001';
+    final legacyId = 'a0000000-0000-4000-8000-000000000002';
+    String taskJson(String id, String title, String type, String? parent) =>
+        '{"id":"$id","event_id":"$eventId","parent_task_id":'
+        '${parent == null ? 'null' : '"$parent"'},"next_task_ids":[],'
+        '"task_type":"$type","title":"$title","due_at":null,"status":"pending",'
+        '"archived":false,"order":1000,"completed_at":null,"created_at":1,'
+        '"updated_at":1,"deleted":false}';
+    File('${tempDir.path}${Platform.pathSeparator}guideline.json').writeAsStringSync(
+      '{"schemaVersion":2,"savedAt":1,"collections":{'
+      '"projects":{"items":[]},"inspirations":{"items":[]},'
+      '"events":{"items":[{"id":"$eventId","name":"老事件","status":"pending",'
+      '"archived":false,"order":1000,"completed_at":null,"created_at":1,'
+      '"updated_at":1,"deleted":false}]},'
+      '"tasks":{"items":['
+      '${taskJson(mainId, '老主线', 'standard', null)},'
+      '${taskJson(legacyId, '老记录', 'parallel', mainId)}'
+      ']}}}\n',
+    );
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('事件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('老事件'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EventDetailPage), findsOneWidget);
+    expect(find.text('老记录'), findsOneWidget, reason: '老记录不能因为类型废除就消失');
+    expect(find.textContaining('并列'), findsNothing, reason: '界面上不该再出现这个概念');
+  });
+
+  testWidgets('1.6 倍字体 + 很长的标题：事件卡不溢出', (tester) async {    tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
 

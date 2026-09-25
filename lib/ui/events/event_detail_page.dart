@@ -21,13 +21,15 @@ import 'task_fold.dart';
 /// 事件详情：**一条任务线的可视化**。
 ///
 /// 渲染规则（设计文档 4.9 / ADR-036 / ADR-053）：
-///   · `standard` —— 独立节点框，沿主线**纵向串联**（框间有连线，表示"接着做"）
-///   · `subtask`  —— 渲染在父节点**框内**并缩进（叶子，无子节点）
-///   · `parallel` —— 独立节点框，与兄弟**横向并排**（表示"两条都能走"），其子任务仍在框内
+///   · `standard` —— 独立节点框，沿主线**纵向串联**（框间有连线，表示"接着做"）；
+///     分叉 / 合流由主线节点之间的**走向边**（`next_task_ids`）决定，分出来的
+///     那几条仍然各是一个 `standard` 框，只是缩进一层并配一道支路色；
+///   · `subtask`  —— 渲染在父节点**框内**并缩进（叶子，无子节点）。
 ///
-/// 手机屏幕放不下真正的双列，所以并列框用**横向滚动**表达"并联"，而不是硬挤成两列。
+/// `parallel`（框内并列）已经废除：那种建模只能分叉、不能合流，已被走向边取代。
+/// 老文件里还留着这种记录，读进来之后**按子任务的样子渲染**（见 [TaskType]）。
 ///
-/// 新建与重命名都是**页面内直接输入**：主线在任务线末尾，子任务 / 并列任务在各自的框内，
+/// 新建与重命名都是**页面内直接输入**：主线在任务线末尾，子任务在各自的框内，
 /// 重命名就在那一行原地改。只有"必须有副作用提示"的动作（到期 / 移动 / 归档 / 删除）
 /// 才用底部面板问一句。
 class EventDetailPage extends StatefulWidget {
@@ -113,7 +115,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
   ///
   /// 与 `beginLinkNext` 里那个「新建一个后续任务」是同一件事，区别只是省掉
   /// "先开面板再选新建"两步 —— 想连着铺几个节点时这个入口快得多。
-  /// 建完进改名态，与新建子任务 / 并列任务的手感一致（建了立刻命名）。
+  /// 建完进改名态，与新建子任务的手感一致（建了立刻命名）。
   Future<void> createAndLinkNext(Task task) async {
     final error = app.run(() {
       final created = app.ws.createTask(eventId: eventId, title: '新节点');
@@ -571,21 +573,21 @@ class _VerticalConnector extends StatelessWidget {
   }
 }
 
-/// 一个任务节点框：自身 + 框内子任务 + （若有）并排的并列任务框。
+/// 一个任务节点框：自身 + 框内的下级任务。
+///
+/// 框内的行**不区分类型**：新数据里只会有 `subtask`；老数据里可能还有 `parallel`
+/// （已废除的框内并列），同样按子任务的样子排在框里 —— 信息不丢，也不再为它
+/// 维护一套并排渲染。
 class _TaskBox extends StatelessWidget {
   const _TaskBox({
     required this.host,
     required this.task,
-    this.compact = false,
     this.accentOverride,
     this.badge,
   });
 
   final _EventDetailPageState host;
   final Task task;
-
-  /// 并列框内使用：不显示进一步的并列分组（并列任务只能挂子任务）。
-  final bool compact;
 
   /// 支路节点用支路色描边（主线节点传 `null`，走默认的主题色）
   final Color? accentOverride;
@@ -597,13 +599,8 @@ class _TaskBox extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = host.app;
     final eventId = host.eventId;
+    // 框内的下级：新数据只有子任务；老数据里的 `parallel` 也排在这儿
     final children = app.ws.subtasksOf(task.id, eventId: eventId);
-    final subtasks = children
-        .where((c) => c.taskType != TaskType.parallel)
-        .toList(growable: false);
-    final parallels = children
-        .where((c) => c.taskType == TaskType.parallel)
-        .toList(growable: false);
     final theme = Theme.of(context);
     final addingSubtask = host._subtaskParentId == task.id;
     final isDone = task.status != NodeStatus.pending;
@@ -612,7 +609,7 @@ class _TaskBox extends StatelessWidget {
     // 但**不改变顺序** —— 主线是一条链，把已完成的挪到末尾会破坏"接着做"的语义，
     // 所以这里是就地缩成一行，而不是重新分组。
     final expanded = app.isExpanded(task.id, defaultExpanded: !isDone);
-    final hasChildren = subtasks.isNotEmpty || parallels.isNotEmpty;
+    final hasChildren = children.isNotEmpty;
     final accent =
         accentOverride ??
         (isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary);
@@ -670,16 +667,16 @@ class _TaskBox extends StatelessWidget {
               onTap: () => app.setExpanded(task.id, expanded: true),
             ),
           if (expanded)
-            for (final subtask in subtasks)
+            for (final child in children)
               _TaskLine(
                 host: host,
-                task: subtask,
+                task: child,
                 indent: 1,
-                blocked: host._blocked(subtask),
+                blocked: host._blocked(child),
               ),
           // 正在录下级时**不受折叠状态影响**：已完成 / 已搁置的任务默认是折叠的，
-          // 如果这里再串上 `expanded`，「点新建子任务 / 新建并列任务」就会什么都不发生
-          // —— 用户只会觉得"这个功能坏了"（实测复现过一次）。
+          // 如果这里再串上 `expanded`，「点新建子任务」就会什么都不发生 ——
+          // 用户只会觉得"这个功能坏了"（实测复现过一次）。
           if (addingSubtask)
             Padding(
               padding: const EdgeInsets.only(left: 20),
@@ -693,58 +690,6 @@ class _TaskBox extends StatelessWidget {
                   parentTaskId: task.id,
                   type: TaskType.subtask,
                 ),
-              ),
-            ),
-          // 「新建并列任务」入口已删除：并列走向现在由**后续节点**表达
-          // （「接后续任务…」接出第二条就是分叉，两条指回同一节点就是合流）。
-          // 靠"造一个并列子节点"来表达分叉是旧的表达方式，两种并存只会让人迷惑。
-          // `TaskType.parallel` 类型本身**保留**：契约里有这个取值、老数据里也有这种任务，
-          // 下面的渲染分支继续把它显示出来。
-          if (expanded && parallels.isNotEmpty && !compact)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Icon(
-                        Icons.call_split,
-                        size: 14,
-                        color: theme.colorScheme.outline,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '并列 ${parallels.length}',
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        for (
-                          var i = 0;
-                          i < parallels.length;
-                          i += 1
-                        ) ...<Widget>[
-                          if (i > 0) const SizedBox(width: 8),
-                          SizedBox(
-                            width: 220,
-                            child: _TaskBox(
-                              host: host,
-                              task: parallels[i],
-                              compact: true,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
               ),
             ),
         ],
@@ -894,8 +839,6 @@ class _TaskLine extends StatelessWidget {
                 style: titleStyle,
               ),
             ),
-            if (task.taskType == TaskType.parallel)
-              Icon(Icons.call_split, size: 14, color: theme.colorScheme.outline),
             // 展开/收起留在标题行（它只跟"这行有没有下级"有关）
             if (collapsible)
               IconButton(
@@ -1146,8 +1089,8 @@ List<TaskAction> taskActions(Task task, {int? successorCount, bool flowOnly = fa
       const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right),
     );
   }
-  // 「新建并列任务」已删除（并列走向改由「接后续任务…」接出第二条来表达）。
-  // 只有主线任务在"走向"上，子任务不参与
+  // 走向只属于**主线节点**（`parent_task_id == null`）：子任务不参与分叉 / 合流。
+  // 「并列任务」已废除，分叉改由「接后续任务…」接出第二条来表达。
   if (task.parentId == null) {
     actions.add(const TaskAction('linkNext', '接后续任务…', Icons.timeline));
     // 一步造出分叉：直接建一个新节点并接在这条之后。

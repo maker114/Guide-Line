@@ -8,7 +8,7 @@ import 'enums.dart';
 ///   · `parent_task_id` —— **归属**（子任务挂在主任务框内）；
 ///   · `next_task_ids`  —— **走向**（主线上下一步接到哪些任务，可多可合）。
 ///
-/// 原来只有前者，于是主线只能是一条兄弟链、并列任务只能"分叉不能合流"。
+/// 原来只有前者，于是主线只能是一条兄弟链、并列出来的几条只能"分叉不能合流"。
 class Task implements EntityNode {
   const Task({
     required this.id,
@@ -95,6 +95,10 @@ class Task implements EntityNode {
   bool get isMainLine => parentId == null;
 
   /// 允许的子节点（ADR-053 的父子组合约束）。
+  ///
+  /// 新数据只会问"能不能挂 `subtask`"；`parallel` 这一支是为**老数据**留的：
+  /// 当年它也能挂子任务，现在那些记录还在用户文件里，读进来之后
+  /// 增删改查都得照旧成立（`parallel` 本身已经不允许新建了，见 [TaskType]）。
   bool canHaveChild(TaskType childType) {
     switch (taskType) {
       case TaskType.subtask:

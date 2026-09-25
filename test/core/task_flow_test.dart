@@ -47,8 +47,6 @@ void main() {
       expect(flow.sinks.map((t) => t.id), <String>['c']);
       expect(flow.successorsOf('a').map((t) => t.id), <String>['b']);
       expect(flow.successorsOf('c'), isEmpty);
-      expect(flow.hasFork, isFalse);
-      expect(flow.hasJoin, isFalse);
       expect(flow.layerCount, 3);
       expect(flow.layerOf('a'), 0);
       expect(flow.layerOf('c'), 2);
@@ -59,10 +57,11 @@ void main() {
       expect(TaskFlow.of(<Task>[task('x', 1000, event: '别的')], eventId: eventId).isEmpty, isTrue);
     });
 
-    test('子任务与并列任务（有归属父节点）不参与走向', () {
+    test('有归属父节点的任务（子任务、历史的并列）不参与走向', () {
       final flow = TaskFlow.of(<Task>[
         task('main', 1000),
         task('sub', 1000, parentId: 'main', type: TaskType.subtask),
+        // `parallel` 是老数据里的类型（已废除，见 `TaskType`），它同样有父节点
         task('par', 2000, parentId: 'main', type: TaskType.parallel),
       ], eventId: eventId);
 
@@ -85,8 +84,6 @@ void main() {
       expect(flow.roots.map((t) => t.id), <String>['start']);
       expect(flow.isFork('start'), isTrue);
       expect(flow.isJoin('join'), isTrue);
-      expect(flow.hasFork, isTrue);
-      expect(flow.hasJoin, isTrue);
       expect(flow.sinks.map((t) => t.id), <String>['join']);
     });
 

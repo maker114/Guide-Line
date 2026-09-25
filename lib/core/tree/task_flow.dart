@@ -184,9 +184,6 @@ class TaskFlow {
   List<Task> successorsOf(String id) =>
       _byOrder((_next[id] ?? const <String>[]).map((each) => _byId[each]).whereType<Task>());
 
-  List<Task> predecessorsOf(String id) =>
-      _byOrder((_prev[id] ?? const <String>[]).map((each) => _byId[each]).whereType<Task>());
-
   int successorCountOf(String id) => (_next[id] ?? const <String>[]).length;
 
   int predecessorCountOf(String id) => (_prev[id] ?? const <String>[]).length;
@@ -194,10 +191,6 @@ class TaskFlow {
   bool isFork(String id) => successorCountOf(id) > 1;
 
   bool isJoin(String id) => predecessorCountOf(id) > 1;
-
-  bool get hasFork => all.any((task) => isFork(task.id));
-
-  bool get hasJoin => all.any((task) => isJoin(task.id));
 
   int layerOf(String id) => _layers[id] ?? 0;
 

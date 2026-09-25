@@ -28,6 +28,16 @@ class RuleViolation implements Exception {
   String toString() => message;
 }
 
+/// 「并列任务」已经废除：它是当年"框内并排两条线"的做法，只能分叉不能合流，
+/// 已被**走向边**（`next_task_ids`）取代。
+///
+/// 这里只是**不再允许新建 / 改写**；老文件里已有的 `parallel` 记录照旧读得进来、
+/// 照旧能改能删（《数据契约》§7 禁止删枚举值，删了会静默改写老数据）。
+/// 拒绝时把替代做法一并说出来，免得用户以为"这个功能坏了"。
+const String _parallelGone =
+    '「并列任务」已废除 —— 要表达两条线，请用这条任务的「接后续任务…」接出两条（分叉），'
+    '两条各自往下走、再拿「接后续任务…」指回同一个节点就是合流';
+
 /// 搜索命中。
 class SearchHit {
   const SearchHit({required this.doc, required this.entity, required this.matchedField});
@@ -937,6 +947,7 @@ class Workspace {
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('任务名不能为空');
+    if (type == TaskType.parallel) throw const RuleViolation(_parallelGone);
     final event = findEvent(eventId);
     if (event == null || event.deleted) throw const RuleViolation('所属事件不存在');
 
@@ -1126,6 +1137,7 @@ class Workspace {
     final task = findTask(id);
     if (task == null) throw const RuleViolation('任务不存在');
     if (title != null && title.trim().isEmpty) throw const RuleViolation('任务名不能为空');
+    if (taskType == TaskType.parallel) throw const RuleViolation(_parallelGone);
     if (taskType != null && taskType != task.taskType) {
       final parent = task.parentId == null ? null : findTask(task.parentId!);
       if (parent == null && taskType != TaskType.standard) {

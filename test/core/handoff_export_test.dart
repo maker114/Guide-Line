@@ -216,7 +216,7 @@ void main() {
     );
   });
 
-  test('并列任务标注出来，截止日跟在后面', () {
+  test('历史的并列任务按子任务标注（类型已废除），截止日跟在后面', () {
     final text = build(
       events: <Event>[event('e-1', '出行')],
       tasks: <Task>[
@@ -229,7 +229,10 @@ void main() {
         ),
       ],
     );
-    expect(text, contains('- [ ] 并列的那条（并列） — 截止 2026-10-01'));
+    // 导出是给对面那个 AI 看的：`parallel` 已经没有对应概念，
+    // 按"框内的下级"标注即可，不再出现「并列」这种它读不懂的旧类型名
+    expect(text, contains('- [ ] 并列的那条（子任务） — 截止 2026-10-01'));
+    expect(text, isNot(contains('（并列）')));
   });
 
   test('没有任务的事件不产生空小节', () {

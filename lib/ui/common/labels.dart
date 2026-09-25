@@ -49,8 +49,9 @@ String taskTypeLabel(TaskType type) {
       return '标准';
     case TaskType.subtask:
       return '子任务';
+    // 历史类型：老数据里可能还有，界面上一律按子任务对待（见 [TaskType]）
     case TaskType.parallel:
-      return '并列';
+      return '子任务';
   }
 }
 
@@ -78,22 +79,4 @@ String entityTitle(Entity entity) {
   if (entity is Task) return entity.title;
   if (entity is Inspiration) return entity.text;
   return entity.id;
-}
-
-/// 三态标签（树形实体通用）。
-String entityStatusLabel(Entity entity) {
-  if (entity is Project) return nodeStatusLabel(entity.status);
-  if (entity is Event) return nodeStatusLabel(entity.status);
-  if (entity is Task) return nodeStatusLabel(entity.status);
-  if (entity is Inspiration) {
-    switch (entity.status) {
-      case InspirationStatus.pending:
-        return '待处理';
-      case InspirationStatus.merged:
-        return '已合并';
-      case InspirationStatus.discarded:
-        return '已丢弃';
-    }
-  }
-  return '';
 }

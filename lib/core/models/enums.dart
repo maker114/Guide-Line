@@ -52,12 +52,26 @@ enum InspirationStatus {
 }
 
 /// 任务的渲染角色（ADR-053：允许的父子组合受约束）。
+///
+/// **现在只有两种是"活"的**：`standard`（主线节点）与 `subtask`（框内的子任务）。
+///
+/// `parallel` 是**历史取值**：当年用来表达"框内并排的两条线"，这条路只能分叉、
+/// 不能合流，已经被**走向边**（`next_task_ids`）取代 —— 分叉 / 合流现在都由
+/// 主线节点的后续边表达。它仍然留在枚举里，是因为《数据契约》§7 明确规定
+/// **禁止删除枚举值**：老数据里还有这种任务，删掉就会在读入时被降级、
+/// 下次保存时被静默改写成别的类型。
+///
+/// 所以：新数据**不再产生** `parallel`（`Workspace.createTask` / `updateTask`
+/// 都会拒绝），但读老文件时照旧解析出来，并按子任务的样子渲染。
 enum TaskType {
   standard,
   subtask,
   parallel;
 
   String get wire => name;
+
+  /// 还能不能新建出来的类型 —— 界面与写入层都按它判断。
+  bool get isCreatable => this != TaskType.parallel;
 
   static TaskType fromWire(Object? value, void Function(String)? onIssue) {
     switch (value) {
@@ -90,18 +104,4 @@ enum DocName {
 
   /// 单文件里 `collections` 的键。
   String get key => name;
-
-  static DocName? fromFileName(String name) {
-    for (final doc in DocName.values) {
-      if (doc.fileName == name) return doc;
-    }
-    return null;
-  }
-
-  static DocName? fromKey(String name) {
-    for (final doc in DocName.values) {
-      if (doc.key == name) return doc;
-    }
-    return null;
-  }
 }

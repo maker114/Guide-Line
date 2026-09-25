@@ -45,7 +45,7 @@ class MoreTab extends StatelessWidget {
         _MoreItem(
           icon: Icons.checklist_outlined,
           title: '全部任务',
-          subtitle: '当前 ${app.taskCount} 条（含子任务与并列任务）',
+          subtitle: '当前 ${app.taskCount} 条（含子任务）',
           page: AllTasksPage(app: app),
         ),
         _MoreItem(

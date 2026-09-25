@@ -88,7 +88,7 @@ class HandoffExport {
     ];
   }
 
-  // 事件与任务线：任务是 `- [x]`，子任务缩进一层，并列任务标注出来
+  // 事件与任务线：任务是 `- [x]`，框内的子任务缩进一层
   static List<String> _eventsSection(List<Event> events, List<Task> tasks) {
     final sorted = [...events]..sort((a, b) => a.order.compareTo(b.order));
     final lines = <String>[];
@@ -126,11 +126,9 @@ class HandoffExport {
   static String _taskLine(Task task, int indent) {
     final pad = '    ' * indent;
     final marker = task.status == NodeStatus.done ? 'x' : ' ';
-    final kind = switch (task.taskType) {
-      TaskType.standard => '',
-      TaskType.subtask => '（子任务）',
-      TaskType.parallel => '（并列）',
-    };
+    // 任务类型只在"主线 / 框内"这一层有意义（导出里靠缩进就能看出来）：
+    // `parallel` 是历史类型（见 [TaskType]），按子任务一样处理，不再单独标注
+    final kind = task.taskType == TaskType.standard ? '' : '（子任务）';
     final due = task.dueAt == null ? '' : ' — 截止 ${task.dueAt}';
     return '$pad- [$marker] ${_oneLine(task.title)}$kind$due';
   }

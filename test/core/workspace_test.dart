@@ -691,23 +691,77 @@ void main() {
       );
     });
 
-    test('并列任务可以有自己的子任务（ADR-036/053）', () {
+    test('并列任务已废除：新建与改写都被拒绝，并指出替代做法', () {
       final event = ws.createEvent(name: '事件 1');
       final standard = ws.createTask(eventId: event.id, title: '标准任务');
-      final parallel = ws.createTask(
-        eventId: event.id,
-        title: '并列任务',
-        parentTaskId: standard.id,
-        type: TaskType.parallel,
+
+      expect(
+        () => ws.createTask(
+          eventId: event.id,
+          title: '并列',
+          parentTaskId: standard.id,
+          type: TaskType.parallel,
+        ),
+        throwsA(isA<RuleViolation>()),
+        reason: '并列任务不能再新建出来',
       );
-      final leaf = ws.createTask(
-        eventId: event.id,
-        title: '并列下的子任务',
-        parentTaskId: parallel.id,
-        type: TaskType.subtask,
+      expect(
+        () => ws.updateTask(standard.id, taskType: TaskType.parallel),
+        throwsA(isA<RuleViolation>()),
+        reason: '也不能把已有的任务改写成并列',
       );
-      expect(leaf.parentId, parallel.id);
-      expect(ws.taskTree.depthOf(leaf.id), 3);
+      // 拒绝的理由要说清"那该怎么办" —— 否则用户只会觉得这个功能坏了
+      expect(
+        () => ws.updateTask(standard.id, taskType: TaskType.parallel),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('接后续任务')),
+        ),
+      );
+      expect(TaskType.parallel.isCreatable, isFalse);
+      expect(TaskType.subtask.isCreatable, isTrue);
+    });
+
+    test('老数据里的并列任务照旧读得进来，且不会被静默改写', () {
+      // 手写一份"老文件"：主线 + 一条 parallel + 它自己的子任务
+      final eventId = 'e0000000-0000-4000-8000-000000000001';
+      final mainId = 'a0000000-0000-4000-8000-000000000001';
+      final legacyId = 'a0000000-0000-4000-8000-000000000002';
+      final leafId = 'a0000000-0000-4000-8000-000000000003';
+      String taskJson(String id, String title, String type, String? parent) =>
+          '{"id":"$id","event_id":"$eventId","parent_task_id":'
+          '${parent == null ? 'null' : '"$parent"'},"next_task_ids":[],'
+          '"task_type":"$type","title":"$title","due_at":null,"status":"pending",'
+          '"archived":false,"order":1000,"completed_at":null,"created_at":1,'
+          '"updated_at":1,"deleted":false}';
+      File('${dir.path}${Platform.pathSeparator}guideline.json').writeAsStringSync(
+        '{"schemaVersion":2,"savedAt":1,"collections":{'
+        '"projects":{"items":[]},"inspirations":{"items":[]},'
+        '"events":{"items":[{"id":"$eventId","name":"老事件","status":"pending",'
+        '"archived":false,"order":1000,"completed_at":null,"created_at":1,'
+        '"updated_at":1,"deleted":false}]},'
+        '"tasks":{"items":['
+        '${taskJson(mainId, '老主线', 'standard', null)},'
+        '${taskJson(legacyId, '老并列', 'parallel', mainId)},'
+        '${taskJson(leafId, '并列下的子任务', 'subtask', legacyId)}'
+        ']}}}\n',
+      );
+
+      final loaded = Workspace.fromLoad(storage, storage.load());
+
+      expect(loaded.findTask(legacyId)!.taskType, TaskType.parallel,
+          reason: '枚举值不能删：删了这里就会被降级、下次保存被静默改写');
+      expect(loaded.findTask(leafId)!.parentId, legacyId);
+      expect(loaded.taskTree.depthOf(leafId), 3, reason: '它当年能挂子任务，现在照样成立');
+
+      // 改状态也照常，且**写出后仍是 parallel**（不因"已废除"而迁移数据）
+      loaded.setTaskStatus(leafId, NodeStatus.done);
+      loaded.setTaskStatus(legacyId, NodeStatus.done);
+      expect(
+        File('${dir.path}${Platform.pathSeparator}guideline.json')
+            .readAsStringSync()
+            .contains('"task_type": "parallel"'),
+        isTrue,
+      );
     });
 
     test('子任务未终态时父任务不可完成；完成后子任务退回会连带父任务退回', () {

@@ -302,12 +302,6 @@ void main() {
           parentTaskId: task.id,
           type: TaskType.subtask,
         ));
-    app.run(() => app.ws.createTask(
-          eventId: event.id,
-          title: '并列任务',
-          parentTaskId: task.id,
-          type: TaskType.parallel,
-        ));
     app.run(() => app.ws.captureInspiration('一条比较长的灵感内容，用来检验放大字体后会不会挤爆布局'));
 
     await tester.pumpWidget(
