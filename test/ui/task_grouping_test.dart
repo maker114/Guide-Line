@@ -122,19 +122,19 @@ void main() {
   });
 
   group('按事件分组', () {
-    test('组序跟事件顺序走，组内按任务顺序', () {
-      Event event(String id, String name, int order) => Event(
-            id: id,
-            name: name,
-            status: NodeStatus.pending,
-            archived: false,
-            order: order,
-            completedAt: null,
-            createdAt: 0,
-            updatedAt: 0,
-            deleted: false,
-          );
+    Event event(String id, String name, int order) => Event(
+          id: id,
+          name: name,
+          status: NodeStatus.pending,
+          archived: false,
+          order: order,
+          completedAt: null,
+          createdAt: 0,
+          updatedAt: 0,
+          deleted: false,
+        );
 
+    test('组序跟事件顺序走，组内同档再按任务顺序（都没排期时）', () {
       final groups = groupByEvent(
         <Task>[
           task(id: 't2', title: '第二个', eventId: 'e2', order: 2000),
@@ -149,7 +149,27 @@ void main() {
       expect(
         groups.first.tasks.map((t) => t.title).toList(),
         <String>['第一个', '也是第一个'],
-        reason: '组内按 order 升序',
+        reason: '同档同日期时按 order 升序',
+      );
+    });
+
+    test('组内先按完成度（未完成 → 已搁置 → 已完成），同档再按到期日', () {
+      final groups = groupByEvent(
+        <Task>[
+          task(id: 'd', title: '做完了', eventId: 'e1', status: NodeStatus.done, dueAt: '2026-09-20'),
+          task(id: 'p2', title: '未完成后排期的', eventId: 'e1', dueAt: '2026-09-28'),
+          task(id: 'i', title: '搁置了', eventId: 'e1', status: NodeStatus.ignored, dueAt: '2026-09-21'),
+          task(id: 'p1', title: '未完成先排期的', eventId: 'e1', dueAt: '2026-09-26'),
+          task(id: 'p3', title: '未完成没排期的', eventId: 'e1'),
+        ],
+        <Event>[event('e1', '一件事', 1000)],
+        (_) => '一件事',
+      );
+
+      expect(
+        groups.single.tasks.map((t) => t.title).toList(),
+        <String>['未完成先排期的', '未完成后排期的', '未完成没排期的', '搁置了', '做完了'],
+        reason: '未完成 → 已搁置 → 已完成；同档按到期日，没排期的垫底',
       );
     });
   });

@@ -127,6 +127,27 @@ void main() {
     expect(find.text('一件事'), findsWidgets, reason: '按事件分组时组头是事件名');
   });
 
+  testWidgets('按事件分组：组内也是未完成 → 已搁置 → 已完成，同档按到期日', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final pending = app.ws.createTask(eventId: event.id, title: '还欠着', dueAt: dateOffset(2));
+    final done = app.ws.createTask(eventId: event.id, title: '做完了', dueAt: dateOffset(1));
+    app.run(() => app.ws.setTaskStatus(done.id, NodeStatus.done));
+    final ignored = app.ws.createTask(eventId: event.id, title: '搁置了', dueAt: dateOffset(3));
+    app.run(() => app.ws.setTaskStatus(ignored.id, NodeStatus.ignored));
+
+    await openAllTasks(tester, app);
+    await tester.tap(find.text('按事件'));
+    await tester.pumpAndSettle();
+
+    final pendingY = tester.getRect(find.text('还欠着')).top;
+    final ignoredY = tester.getRect(find.text('搁置了')).top;
+    final doneY = tester.getRect(find.text('做完了')).top;
+    expect(pendingY, lessThan(ignoredY), reason: '未完成最前');
+    expect(ignoredY, lessThan(doneY), reason: '已搁置居中、已完成最后');
+    expect(pending.id, isNotEmpty);
+  });
+
   testWidgets('两行任务之间的间距够紧凑（实机反馈：再小一点）', (tester) async {
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;

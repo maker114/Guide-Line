@@ -38,6 +38,28 @@ class TaskGroup {
   final List<Task> tasks;
 }
 
+/// 完成度排序键：**未完成 → 已搁置 → 已完成**（实机反馈给的固定顺序）。
+int completionRank(NodeStatus status) {
+  switch (status) {
+    case NodeStatus.pending:
+      return 0;
+    case NodeStatus.ignored:
+      return 1;
+    case NodeStatus.done:
+      return 2;
+  }
+}
+
+/// 组内排序：**先按完成度，同一档再按到期日**（近的在前、没排期的垫底）。
+///
+/// 「按事件」分组也用这一条（实机反馈）：一个事件下面先看到还欠着的，
+/// 已完成 / 已搁置的沉到组尾。
+int byCompletionThenDue(Task a, Task b) {
+  final byStatus = completionRank(a.status).compareTo(completionRank(b.status));
+  if (byStatus != 0) return byStatus;
+  return byDueThenOrder(a, b);
+}
+
 /// 按完成度分组：**未完成 → 已搁置 → 已完成**（实机反馈给的固定顺序）。
 ///
 /// 取代了原来的「不分组」：平铺列表把三种状态混在一起，看不出还剩多少。
@@ -85,6 +107,9 @@ List<TaskGroup> groupByUrgency(List<Task> tasks) {
 }
 
 /// 按所属事件分组（组序 = 事件顺序）。
+///
+/// 组内**先按完成度（未完成 → 已搁置 → 已完成），同一档再按到期日**
+/// （实机反馈）：一个事件下面先看到还欠着的，做完的沉到组尾。
 List<TaskGroup> groupByEvent(
   List<Task> tasks,
   Iterable<Event> events,
@@ -109,7 +134,7 @@ List<TaskGroup> groupByEvent(
       TaskGroup(
         label: nameOf(eventId),
         tone: null,
-        tasks: byEvent[eventId]!..sort(byOrderOfTask),
+        tasks: byEvent[eventId]!..sort(byCompletionThenDue),
       ),
   ];
 }
