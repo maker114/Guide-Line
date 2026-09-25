@@ -210,4 +210,47 @@ void main() {
       reason: '追加是"原文作为新的一行"，不改写也不润色',
     );
   });
+
+  testWidgets('写下来的时候就选好项目：选完「记下」直接就是已分配', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标项目');
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 书写区的归属按钮默认「未分配」
+    expect(find.text('未分配'), findsOneWidget);
+
+    await tester.tap(find.text('未分配'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('目标项目').last);
+    await tester.pumpAndSettle();
+    expect(find.text('目标项目'), findsOneWidget, reason: '选完按钮上要显示项目名');
+
+    await tester.enterText(find.byType(TextField).first, '写下就归好类的灵感');
+    await tester.tap(find.text('记下'));
+    await tester.pumpAndSettle();
+
+    final captured = app.ws.liveInspirations.single;
+    expect(captured.text, '写下就归好类的灵感');
+    expect(captured.projectId, project.id, reason: '归属应当在书写时就定下来');
+  });
+
+  testWidgets('标签功能已移除：条目上不显示标签，动作面板里也没有加标签入口', (tester) async {
+    final app = await boot();
+    // 老数据里可能还留着标签（契约字段仍在，见《数据契约》§3.1），界面不再呈现
+    final inspiration = app.ws.captureInspiration('老数据一条');
+    app.run(() => app.ws.updateInspirationTags(inspiration.id, <String>['产品', '体验']));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('产品'), findsNothing, reason: '条目上不该再出现标签');
+    expect(find.text('体验'), findsNothing);
+
+    await tester.tap(find.text('老数据一条'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('加标签'), findsNothing, reason: '动作面板里不该再有加标签入口');
+    expect(find.textContaining('标签（'), findsNothing);
+  });
 }

@@ -11,12 +11,11 @@ import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
-import '../common/tag_editor.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
 ///
-/// 顶部常驻输入框，下面按创建时间倒序列出未处理的灵感；
+/// 顶部常驻输入框（**写的时候就选好项目**），下面按创建时间倒序列出未处理的灵感；
 /// 每条可以「分配 / 合并 / 丢弃 / 删除」。
 class InspirationTab extends StatefulWidget {
   const InspirationTab({super.key, required this.app});
@@ -32,6 +31,12 @@ class InspirationTabState extends State<InspirationTab> {
   final FocusNode _focus = FocusNode();
   bool _onlySelectedProject = false;
   String? _selectedProjectId;
+
+  /// 正在写的这条灵感要归到哪个项目（`null` = 未分配）。
+  ///
+  /// 这是"写下来的时候就分好类"的落点：不再需要事后一条条去分配。
+  /// 记完**不重置** —— 连着记几条同一个项目的想法是常见动作。
+  String? _captureProjectId;
 
   /// 多选模式（灵感整理第 6 条）：长按任一条进入，之后点条目标即选中。
   bool _selecting = false;
@@ -128,7 +133,12 @@ class InspirationTabState extends State<InspirationTab> {
                 FilterChip(
                   label: Text('只看「${ws.findProject(_selectedProjectId!)?.title ?? ''}」'),
                   selected: _onlySelectedProject,
-                  onSelected: (value) => setState(() => _onlySelectedProject = value),
+                  onSelected: (value) => setState(() {
+                    _onlySelectedProject = value;
+                    // 正在按某个项目筛，多半就是在给它记东西 —— 顺手把书写区的
+                    // 归属也切过去（**看得见**的一步，不是暗中的规则）
+                    if (value) _captureProjectId = _selectedProjectId;
+                  }),
                 ),
                 const Spacer(),
                 TextButton(
@@ -197,8 +207,14 @@ class InspirationTabState extends State<InspirationTab> {
   /// 所以外面是一张带轻阴影的卡片（`Card(elevation: 1)`，没有标题行），
   /// 里面直接放一个**无边框**的输入区。之前那版是"外框 + 内框"两层，
   /// 看着像个表单；再往前那版连外框都没有，又看不出这是输入区。
+  ///
+  /// 底部一行是**书写时就选项目**（实机反馈的原意：归类应该在写下来的那一刻做，
+  /// 而不是事后一条条补）+ 「记下」。
   Widget _buildCaptureArea() {
     final theme = Theme.of(context);
+    final project = _captureProjectId == null
+        ? null
+        : widget.app.ws.findProject(_captureProjectId!);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Card(
@@ -229,24 +245,59 @@ class InspirationTabState extends State<InspirationTab> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.tonalIcon(
-                  onPressed: _save,
-                  icon: const Icon(Icons.send, size: 18),
-                  label: const Text('记下'),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                    shape: const StadiumBorder(),
-                    visualDensity: VisualDensity.compact,
+              Row(
+                children: <Widget>[
+                  // 归属选择：一个胶囊小按钮，一眼看出这条灵感将归到哪儿
+                  Flexible(
+                    child: TextButton.icon(
+                      onPressed: _pickCaptureProject,
+                      icon: ProjectMarker(color: project?.color, size: 12),
+                      label: Text(
+                        project?.title ?? '未分配',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelMedium,
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: const StadiumBorder(),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   ),
-                ),
+                  const Spacer(),
+                  FilledButton.tonalIcon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.send, size: 18),
+                    label: const Text('记下'),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      shape: const StadiumBorder(),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// 选这条灵感归哪个项目（可"不分配"）。
+  Future<void> _pickCaptureProject() async {
+    final picked = await pickProject(
+      context,
+      widget.app,
+      title: '这条灵感归到哪个项目',
+      allowNone: true,
+      noneLabel: '（不分配）',
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _captureProjectId = picked == pickNone ? null : picked);
   }
 
   /// 多选时的批量动作条：胶囊形按钮，动作少而明确。
@@ -356,9 +407,10 @@ class InspirationTabState extends State<InspirationTab> {
   void _save() {
     final text = _capture.text;
     if (text.trim().isEmpty) return;
-    final projectId = _onlySelectedProject ? _selectedProjectId : null;
-    final error =
-        widget.app.run(() => widget.app.ws.captureInspiration(text, projectId: projectId));
+    // 归属在书写时就定好了（`_captureProjectId`），这里不再"顺手"从筛选里猜
+    final error = widget.app.run(
+      () => widget.app.ws.captureInspiration(text, projectId: _captureProjectId),
+    );
     if (error != null) {
       showToast(context, error, error: true);
       return;
@@ -433,48 +485,25 @@ class _InspirationTile extends StatelessWidget {
         maxLines: 4,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      // 归属 + 时间一行说完：标签功能已去掉（栏目里不再有这一项），
+      // 归类靠"写下来时就选项目"完成，不再有第二个分类维度。
+      subtitle: Row(
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              // 项目标识色也体现在这里：灵感列表里就能按颜色认项目。
-              // 未分配 / 未设色时是灰色空心圆（`ProjectMarker` 自己处理）
-              ProjectMarker(color: project?.color, size: 14),
-              const SizedBox(width: 4),
-              Expanded(
-                child: GestureDetector(
-                  onTap: project == null ? null : () => onFilterProject(project.id),
-                  child: Text(
-                    project?.title ?? '未分配',
-                    style: theme.textTheme.labelSmall,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
-            ],
-          ),
-          // 标签（灵感整理第 5 条）：只在有标签时占位，免得每条都多一行空白
-          if (inspiration.tags.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                children: <Widget>[
-                  for (final tag in inspiration.tags)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(tag, style: theme.textTheme.labelSmall),
-                    ),
-                ],
+          // 项目标识色也体现在这里：灵感列表里就能按颜色认项目。
+          // 未分配 / 未设色时是灰色空心圆（`ProjectMarker` 自己处理）
+          ProjectMarker(color: project?.color, size: 14),
+          const SizedBox(width: 4),
+          Expanded(
+            child: GestureDetector(
+              onTap: project == null ? null : () => onFilterProject(project.id),
+              child: Text(
+                project?.title ?? '未分配',
+                style: theme.textTheme.labelSmall,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+          ),
+          Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
         ],
       ),
       selected: selecting && selected,
@@ -531,20 +560,6 @@ class _InspirationTile extends StatelessWidget {
               onTap: () async {
                 Navigator.of(sheetContext).pop();
                 await _merge(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.label_outline),
-              title: Text(inspiration.tags.isEmpty ? '加标签…' : '标签（${inspiration.tags.length}）…'),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                final tags = await editTags(
-                  context,
-                  initial: inspiration.tags,
-                  title: '编辑标签',
-                );
-                if (tags == null || !context.mounted) return;
-                _run(context, () => ws.updateInspirationTags(inspiration.id, tags));
               },
             ),
             ListTile(
