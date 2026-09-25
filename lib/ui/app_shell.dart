@@ -38,10 +38,23 @@ const double _navRadius = _navHeight / 2;
 const double _navOuterPadding = 0;
 
 /// 滑动时长：切换页签时胶囊从旧位置滑到新位置。
-const Duration _navSlideDuration = Duration(milliseconds: 300);
+///
+/// 收得比上一版（300ms）短：实机反馈"太粘滞、像质量很大"，
+/// 主要是尾随边要花小半程去追平 —— 缩短总时长 + 让拉伸提前收回（见
+/// [_navStretchAt]）合起来才是"质量小一点"。
+const Duration _navSlideDuration = Duration(milliseconds: 220);
 
 /// 惯性拉伸的上限（dp）：跳三格也不会拉成一条香肠。
-const double _navStretchMax = 20;
+///
+/// 从 20 收到 12：拉伸越小，"被拖着走"的黏滞感越弱。
+const double _navStretchMax = 12;
+
+/// 惯性拉伸量（dp）：随进度**鼓起再收回**。
+///
+/// `sin(πt)` 负责"两头 0、中间最大"，再乘 `(1 - 0.4t)` 让它在后半程**提前**收 ——
+/// 只靠 `sin(πt)` 的话，尾随边会一路拖到最后一两帧才追平，那正是"粘滞"的来源。
+double _navStretchAt(double progress) =>
+    _navStretchMax * math.sin(math.pi * progress) * (1 - 0.4 * progress);
 
 /// 选中指示器的 Key：用例靠它量"滑到哪儿了、此刻多宽"。
 @visibleForTesting
@@ -53,8 +66,8 @@ const Key navIndicatorKey = Key('AppBottomNav.indicator');
 /// 惯性 = **前导边先走、尾随边落后**，两条边都只朝目标方向走：
 ///   · **前导边**（运动方向那一侧）走 `easeOutCubic` —— 起步快、后段慢慢靠上去，
 ///     而且**正好停在目标格边界上，不越过去**；
-///   · **宽度**加一个 `sin(πt)` 的包络 —— 起步 0、中途最宽（+[_navStretchMax]）、
-///     落位收回；拉出来的这部分全部长在**尾随边**那一侧。
+///   · **宽度**加一个鼓起包络（[_navStretchAt]）—— 起步 0、中途最宽、
+///     后半程提前收回；拉出来的这部分全部长在**尾随边**那一侧。
 ///
 /// 为什么不是"把中心放到缓动位置上、宽度对称地鼓"：那样前导边会先冲过目标格
 /// 再退回来 —— 实机上看着就是"右边界到位之后又往左挪了一下"（用户反馈的原话），
@@ -71,7 +84,7 @@ const Key navIndicatorKey = Key('AppBottomNav.indicator');
 }) {
   final progress = t.clamp(0.0, 1.0);
   final eased = Curves.easeOutCubic.transform(progress);
-  final width = nominalWidth + _navStretchMax * math.sin(math.pi * progress);
+  final width = nominalWidth + _navStretchAt(progress);
 
   if (toLeft >= fromLeft) {
     // 向右：前导边是右边，先到位；宽度长在左边（尾随边落后再追平）

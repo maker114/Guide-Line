@@ -38,16 +38,23 @@ void main() {
           closeTo(barWidth, 1e-9));
     });
 
-    test('途中被拉长：起步与落位都不鼓，中间最鼓且不超上限', () {
+    test('途中被拉长：起步与落位都不鼓，前半程最鼓、后半程提前收回', () {
       expect(at(0.02).width, lessThan(nominal + 2), reason: '起步不该突然弹宽');
-      expect(at(0.98).width, lessThan(nominal + 2), reason: '落位前应当收回');
-      expect(at(0.5).width, closeTo(nominal + 20, 1e-9), reason: '中途最鼓');
+      expect(at(0.98).width, lessThan(nominal + 1), reason: '落位前应当基本收回');
 
+      var peak = 0.0;
       for (var step = 0; step <= 20; step += 1) {
         final width = at(step / 20).width;
         expect(width, greaterThanOrEqualTo(nominal - 1e-9));
-        expect(width, lessThanOrEqualTo(nominal + 20 + 1e-9));
+        expect(width, lessThanOrEqualTo(nominal + 12 + 1e-9), reason: '拉伸超过上限');
+        if (width > peak) peak = width;
       }
+      expect(peak, greaterThan(nominal + 8), reason: '该拉长的时候要看得出来');
+
+      // 「质量小一点」（实机反馈"太粘滞"）：峰值靠前，后半程就收回大半，
+      // 而不是一路鼓到最后几帧才追平
+      expect(at(0.4).width, greaterThan(at(0.6).width), reason: '峰值应当在前半程');
+      expect(at(0.9).width - nominal, lessThan(3), reason: '后段应当已经基本收回');
     });
 
     test('鼓起时不会越出导航条（含跨三格、两端起跳）', () {
