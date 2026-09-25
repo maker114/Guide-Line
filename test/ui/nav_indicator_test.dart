@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/nav_icon_motion.dart';
 
 /// 选中指示器（胶囊 + 惯性）的几何：这是纯逻辑，先用函数钉住。
 void main() {
@@ -223,50 +226,118 @@ void main() {
       }
     });
 
-    /// 图标那一层当前的缩放倍数（`Transform.scale` 只改绘制，量尺寸量不到）。
-    double iconScale(WidgetTester tester, String label) => tester
-        .widget<Transform>(find.byKey(navIconKey(label)))
-        .transform
-        .getMaxScaleOnAxis();
+    /// 这一项此刻**动起来了没有**：不关心它用的是哪种手势，
+    /// 只要子树里有一个非恒等的 `Transform`、或者灯泡那圈光线正在画，
+    /// 就算"动起来了"。
+    bool iconIsMoving(WidgetTester tester, String label) {
+      final scope = find.byKey(navIconKey(label));
+      final transforms = tester.widgetList<Transform>(
+        find.descendant(of: scope, matching: find.byType(Transform)),
+      );
+      for (final transform in transforms) {
+        final storage = transform.transform.storage;
+        for (var i = 0; i < 16; i += 1) {
+          final expected = (i % 5 == 0) ? 1.0 : 0.0;
+          if ((storage[i] - expected).abs() > 1e-6) return true;
+        }
+      }
+      final paints = tester.widgetList<CustomPaint>(
+        find.descendant(of: scope, matching: find.byType(CustomPaint)),
+      );
+      for (final paint in paints) {
+        final painter = paint.painter;
+        if (painter is NavBulbRays && painter.progress > 0.05) return true;
+      }
+      return false;
+    }
 
-    testWidgets('点某一项：图标弹一下再回到原大小', (tester) async {
+    /// 点一下之后在动画里的若干时刻采样 —— 只要有一个时刻在动就算动过。
+    ///
+    /// 不能只挑一个时刻看：四种手势相位不同（"摆两下"在正中间恰好回到原位）。
+    Future<bool> tapAndWatch(WidgetTester tester, String label) async {
+      await tester.tap(find.text(label));
+      await tester.pump();
+      var moved = false;
+      for (var step = 0; step < 5; step += 1) {
+        await tester.pump(const Duration(milliseconds: 60));
+        if (iconIsMoving(tester, label)) moved = true;
+      }
+      return moved;
+    }
+
+    testWidgets('点某一项：它自己的那一下会播（四种手势都动）', (tester) async {
       await pumpNav(tester);
 
-      expect(iconScale(tester, '项目'), closeTo(1, 0.001), reason: '静止时就是原大小');
+      for (final label in <String>['灵感', '项目', '事件', '更多']) {
+        expect(iconIsMoving(tester, label), isFalse, reason: '$label 静止时不该在动');
+      }
 
-      await tester.tap(find.text('项目'));
-      await tester.pump(); // 起帧
-      await tester.pump(const Duration(milliseconds: 120)); // 动画中点
-      expect(iconScale(tester, '项目'), greaterThan(1.05), reason: '途中应当被放大');
+      for (final label in <String>['灵感', '项目', '事件', '更多']) {
+        expect(await tapAndWatch(tester, label), isTrue, reason: '$label 点一下应当动起来');
+
+        await tester.pumpAndSettle();
+        expect(iconIsMoving(tester, label), isFalse, reason: '$label 播完要回到静止');
+      }
+    });
+
+    testWidgets('灯泡那一下：图标框里确实画出了发散的光线', (tester) async {
+      await pumpNav(tester);
+
+      NavBulbRays? rays() {
+        final paints = tester.widgetList<CustomPaint>(
+          find.descendant(
+            of: find.byKey(navIconKey('灵感')),
+            matching: find.byType(CustomPaint),
+          ),
+        );
+        for (final paint in paints) {
+          final painter = paint.painter;
+          if (painter is NavBulbRays) return painter;
+        }
+        return null;
+      }
+
+      expect(rays(), isNotNull, reason: '灯泡那一项要有光线画层');
+      expect(rays()!.progress, 0, reason: '静止时不该画');
+
+      await tester.tap(find.text('灵感'));
+      await tester.pump();
+      var brightest = 0.0;
+      for (var step = 0; step < 5; step += 1) {
+        await tester.pump(const Duration(milliseconds: 60));
+        brightest = math.max(brightest, rays()!.progress);
+      }
+      expect(brightest, greaterThan(0.5), reason: '中途最亮');
 
       await tester.pumpAndSettle();
-      expect(iconScale(tester, '项目'), closeTo(1, 0.001), reason: '弹完要回到原大小');
+      expect(rays()!.progress, 0, reason: '亮完要收干净');
     });
 
     testWidgets('点已经选中的那一项：照样有反馈', (tester) async {
       await pumpNav(tester);
 
       // 起点就是第 0 页，再点一次"灵感"
-      await tester.tap(find.text('灵感'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(iconScale(tester, '灵感'), greaterThan(1.05));
+      expect(await tapAndWatch(tester, '灵感'), isTrue);
 
       await tester.pumpAndSettle();
-      expect(iconScale(tester, '灵感'), closeTo(1, 0.001));
+      expect(iconIsMoving(tester, '灵感'), isFalse);
     });
 
-    testWidgets('滑动到别页时，新选中的那一项也会弹一下', (tester) async {
+    testWidgets('滑动到别页时，新选中的那一项也会动一下', (tester) async {
       await pumpNav(tester);
-      expect(iconScale(tester, '事件'), closeTo(1, 0.001));
+      expect(iconIsMoving(tester, '事件'), isFalse);
 
       hostKey.currentState!.dragTo(2); // 滑到第 2 页（事件）
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 120));
-      expect(iconScale(tester, '事件'), greaterThan(1.05));
+      var moved = false;
+      for (var step = 0; step < 5; step += 1) {
+        await tester.pump(const Duration(milliseconds: 60));
+        if (iconIsMoving(tester, '事件')) moved = true;
+      }
+      expect(moved, isTrue);
 
       await tester.pumpAndSettle();
-      expect(iconScale(tester, '事件'), closeTo(1, 0.001));
+      expect(iconIsMoving(tester, '事件'), isFalse);
     });
   });
 }

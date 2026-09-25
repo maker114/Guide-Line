@@ -10,6 +10,7 @@ import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
 import 'more/due_page.dart';
 import 'more/more_tab.dart';
+import 'nav_icon_motion.dart';
 import 'projects/project_tab.dart';
 import 'theme/shape_tokens.dart';
 
@@ -62,18 +63,9 @@ double _navStretchAt(double progress) =>
 @visibleForTesting
 const Key navIndicatorKey = Key('AppBottomNav.indicator');
 
-/// 某一项**图标缩放层**的 Key：用例靠它量那点"弹一下"。
+/// 某一项**图标动画层**的 Key：用例靠它判断"这一项动起来了没有"。
 @visibleForTesting
 Key navIconKey(String label) => Key('AppBottomNav.icon.$label');
-
-/// 图标"弹一下"的时长与幅度。
-///
-/// 幅度刻意小（放大 18%）：导航是要反复点的东西，动作一大就成了噪音。
-const Duration _navIconPopDuration = Duration(milliseconds: 240);
-const double _navIconPopScale = 1.18;
-
-/// 实心 / 空心图标交叉淡入的时长（与"弹一下"同量级，看着是一件事）。
-const Duration _navIconFadeDuration = Duration(milliseconds: 160);
 
 /// 选中指示器的几何：进度 [t]（0 → 1）时，宽 [nominalWidth] 的胶囊从 [fromLeft]
 /// 滑到 [toLeft]，返回它此刻的 `left` 与 `width`。
@@ -116,14 +108,14 @@ const Duration _navIconFadeDuration = Duration(milliseconds: 160);
 /// 靠 `Stack` 定位并做滑动动画 —— 每项各画一个就只能"淡入淡出"，
 /// 做不到"滑过去 + 途中拉长"。
 ///
-/// 它自己负责**图标那点小动画**（实机反馈"点击选中的时候加个小动画"）：
-///   · 点一下 → 图标弹一下（放大到 [_navIconPopScale] 再回位）；
-///   · 变成选中 / 取消选中时同样弹一下，并交叉淡入实心图标。
+/// 它自己负责**图标那一下**（实机反馈：每个图标该有自己的一下，见 [NavIconMotion]）：
+/// 点一下、以及选中状态变化时播一次；四种手势都是瞬态的，播完与静止时一模一样。
 class _NavItem extends StatefulWidget {
   const _NavItem({
     required this.icon,
     required this.selectedIcon,
     required this.label,
+    required this.motion,
     required this.selected,
     required this.onTap,
     this.badgeCount = 0,
@@ -132,6 +124,7 @@ class _NavItem extends StatefulWidget {
   final IconData icon;
   final IconData selectedIcon;
   final String label;
+  final NavIconMotion motion;
   final bool selected;
   final VoidCallback onTap;
   final int badgeCount;
@@ -141,25 +134,26 @@ class _NavItem extends StatefulWidget {
 }
 
 class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin {
-  /// `0 → 1` 走完就是"弹一下"。
-  ///
-  /// 只有一个控制器：交叉淡入交给 `AnimatedSwitcher`，这里只管缩放，
-  /// 两个动画都挂在同一个"选中/点击"事件上，不会各自跑偏。
-  late final AnimationController _pop = AnimationController(
+  /// `0 → 1` 走完就是"动一下"。
+  late final AnimationController _motion = AnimationController(
     vsync: this,
-    duration: _navIconPopDuration,
-  );
+    duration: navIconMotionDuration,
+  )..addStatusListener((status) {
+      // 播完回到 0：四种手势都按"进度 0 = 静止"来画，这样动画结束后
+      // 画布上不会留下任何东西，也省掉了"要不要 reset"的判断
+      if (status == AnimationStatus.completed && mounted) _motion.value = 0;
+    });
 
   @override
   void didUpdateWidget(_NavItem oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 选中状态变了（点底栏切页、或者滑动过半格）也弹一下
-    if (widget.selected != oldWidget.selected) _pop.forward(from: 0);
+    // 选中状态变了（点底栏切页、或者滑动过半格）也动一下
+    if (widget.selected != oldWidget.selected) _motion.forward(from: 0);
   }
 
   @override
   void dispose() {
-    _pop.dispose();
+    _motion.dispose();
     super.dispose();
   }
 
@@ -174,7 +168,7 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
       child: InkWell(
         onTap: () {
           // 点**已经选中**的那一项也要有反馈 —— 否则"我点到了吗"只能看页面有没有动
-          _pop.forward(from: 0);
+          _motion.forward(from: 0);
           widget.onTap();
         },
         // 指示器是胶囊，水波纹也跟着走胶囊 —— 圆形的波纹会溢出到相邻格子
@@ -187,25 +181,15 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
               Badge.count(
                 count: widget.badgeCount,
                 isLabelVisible: widget.badgeCount > 0,
-                child: AnimatedBuilder(
-                  animation: _pop,
-                  builder: (context, child) => Transform.scale(
-                    key: navIconKey(widget.label),
-                    // `Transform.scale` 只影响绘制、不改布局尺寸 ——
-                    // 放大时不会把这一格撑高（1.6 倍字体下尤其重要）
-                    scale: 1 + (_navIconPopScale - 1) * math.sin(math.pi * _pop.value),
-                    child: child,
-                  ),
-                  child: AnimatedSwitcher(
-                    duration: _navIconFadeDuration,
-                    child: Icon(
-                      widget.selected ? widget.selectedIcon : widget.icon,
-                      // key 让 AnimatedSwitcher 知道"换图标了"，才会做交叉淡入
-                      key: ValueKey<bool>(widget.selected),
-                      size: 22,
-                      color: foreground,
-                    ),
-                  ),
+                child: NavIconMotionView(
+                  key: navIconKey(widget.label),
+                  motion: widget.motion,
+                  icon: widget.icon,
+                  selectedIcon: widget.selectedIcon,
+                  selected: widget.selected,
+                  color: foreground,
+                  flashColor: scheme.primary,
+                  animation: _motion,
                 ),
               ),
               Text(
@@ -296,6 +280,7 @@ class AppBottomNav extends StatelessWidget {
                       icon: Icons.lightbulb_outline,
                       selectedIcon: Icons.lightbulb,
                       label: '灵感',
+                      motion: NavIconMotion.bulbGlow,
                       selected: index == 0,
                       onTap: () => onSelect(0),
                     ),
@@ -303,6 +288,7 @@ class AppBottomNav extends StatelessWidget {
                       icon: Icons.account_tree_outlined,
                       selectedIcon: Icons.account_tree,
                       label: '项目',
+                      motion: NavIconMotion.treeSway,
                       selected: index == 1,
                       onTap: () => onSelect(1),
                     ),
@@ -310,6 +296,7 @@ class AppBottomNav extends StatelessWidget {
                       icon: Icons.timeline_outlined,
                       selectedIcon: Icons.timeline,
                       label: '事件',
+                      motion: NavIconMotion.lineFold,
                       selected: index == 2,
                       onTap: () => onSelect(2),
                     ),
@@ -319,6 +306,7 @@ class AppBottomNav extends StatelessWidget {
                       icon: Icons.more_horiz,
                       selectedIcon: Icons.more_horiz,
                       label: '更多',
+                      motion: NavIconMotion.dotsSpin,
                       selected: index == 3,
                       badgeCount: overdueCount,
                       onTap: () => onSelect(3),
