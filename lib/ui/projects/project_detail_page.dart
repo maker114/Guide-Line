@@ -124,19 +124,34 @@ class ProjectDetailPage extends StatelessWidget {
               ),
               // 「实现」由两部分组成：上面的**待办清单**（结构化、可勾选），
               // 下面的**正文**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
-              // 两者并存：清单是"要做什么"的拆分，正文是"整体怎么做"的说明。
-              ProjectChecklist(
-                app: app,
-                project: project,
-                onSplitFromImplementation: () => _splitIntoItems(context, project),
-              ),
-              _ImplementationField(project: project, onSubmit: (value) {
-                // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
-                final error = value.trim().isEmpty
+              // 两者都套在与「目的」同一个 `_FieldCard` 里，一页只留一种观感。
+              _FieldCard(
+                title: '实现清单',
+                trailing: project.items.isEmpty
                     ? null
-                    : app.run(() => ws.replaceImplementation(project.id, value));
-                if (error != null) showToast(context, error, error: true);
-              }),
+                    : Text(
+                        '${project.itemsDoneCount}/${project.items.length}',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                child: ProjectChecklist(
+                  app: app,
+                  project: project,
+                  onSplitFromImplementation: () => _splitIntoItems(context, project),
+                ),
+              ),
+              _FieldCard(
+                title: '实现正文',
+                child: _ImplementationBody(
+                  value: project.implementation,
+                  hasItems: project.items.isNotEmpty,
+                  onSubmit: (value) {
+                    // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
+                    if (value.trim().isEmpty) return;
+                    final error = app.run(() => ws.replaceImplementation(project.id, value));
+                    if (error != null) showToast(context, error, error: true);
+                  },
+                ),
+              ),
               _ChildrenField(app: app, project: project, children: children),
               _InspirationsField(
                 app: app,
@@ -211,67 +226,69 @@ class ProjectDetailPage extends StatelessWidget {
   }
 }
 
-/// 「实现」正文：与清单并存的那一段整体说明。
+/// 「实现正文」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
 ///
-/// 它是三样东西的共同落点 —— 灵感合并写进来、AI 整理写回来、交接导出从这里取。
-/// 清单为空时它就是主角；清单不为空时它退成"整理稿"，所以默认收起来。
-class _ImplementationField extends StatefulWidget {
-  const _ImplementationField({required this.project, required this.onSubmit});
+/// 正文是三样东西的共同落点 —— 灵感合并写进来、AI 整理写回来、交接导出从这里取。
+/// 清单为空时它就是主角，默认展开；有清单时它退成"整理稿"，默认收起，
+/// 免得一屏全是字。
+class _ImplementationBody extends StatefulWidget {
+  const _ImplementationBody({
+    required this.value,
+    required this.hasItems,
+    required this.onSubmit,
+  });
 
-  final Project project;
+  final String value;
+  final bool hasItems;
   final ValueChanged<String> onSubmit;
 
   @override
-  State<_ImplementationField> createState() => _ImplementationFieldState();
+  State<_ImplementationBody> createState() => _ImplementationBodyState();
 }
 
-class _ImplementationFieldState extends State<_ImplementationField> {
+class _ImplementationBodyState extends State<_ImplementationBody> {
   bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final value = widget.project.implementation;
-    final hasItems = widget.project.items.isNotEmpty;
+    final value = widget.value;
+    final empty = value.trim().isEmpty;
+    final canCollapse = !empty && widget.hasItems;
+    final showEditor = !canCollapse || _expanded;
+
+    if (!canCollapse) {
+      return _editor(theme, value);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Text('实现正文', style: theme.textTheme.labelLarge),
-              const SizedBox(width: 8),
-              Text(
-                value.trim().isEmpty ? '还没有内容' : '${value.trim().length} 字',
-                style: theme.textTheme.labelSmall,
-              ),
-              const Spacer(),
-              // 清单为空时正文就是主内容，默认展开；有清单时默认收起，免得两屏都是字
-              if (value.trim().isNotEmpty)
-                IconButton(
-                  tooltip: _expanded ? '收起' : '展开',
-                  icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                ),
-            ],
-          ),
-        ),
-        if (_expanded || value.trim().isEmpty || !hasItems)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: InlineTextField(
-              value: value,
-              hint: '怎么做 —— 灵感合并、AI 整理都会写到这里',
-              minLines: 1,
-              maxLines: 12,
-              allowEmpty: true,
-              textStyle: theme.textTheme.bodyMedium,
-              onSubmitted: widget.onSubmit,
+        Row(
+          children: <Widget>[
+            Text('${value.trim().length} 字', style: theme.textTheme.labelSmall),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: () => setState(() => _expanded = !_expanded),
+              icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more, size: 18),
+              label: Text(_expanded ? '收起' : '展开'),
             ),
-          ),
+          ],
+        ),
+        if (showEditor) _editor(theme, value),
       ],
+    );
+  }
+
+  Widget _editor(ThemeData theme, String value) {
+    return InlineTextField(
+      value: value,
+      hint: '怎么做 —— 灵感合并、AI 整理都会写到这里',
+      minLines: 1,
+      maxLines: 12,
+      allowEmpty: true,
+      textStyle: theme.textTheme.bodyMedium,
+      onSubmitted: widget.onSubmit,
     );
   }
 }
@@ -415,6 +432,49 @@ class _DateField extends StatelessWidget {
   }
 }
 
+/// 一个"带轻阴影的字段卡"（项目详情里「目的 / 实现清单 / 实现正文」共用）。
+///
+/// 抽出来是为了让三块**长得一样**：以前「目的」是 `Card(elevation: 0)`
+/// （其实没有阴影），清单与正文则是裸标题 + 内容 —— 同一页里三种观感。
+///
+/// `elevation` 取 1：要的是"轻微浮起"的层次，不是卡片式的大阴影。
+class _FieldCard extends StatelessWidget {
+  const _FieldCard({required this.title, this.trailing, required this.child});
+
+  final String title;
+  final Widget? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 1,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Text(title, style: theme.textTheme.labelLarge),
+                  const Spacer(),
+                  ?trailing,
+                ],
+              ),
+              const SizedBox(height: 4),
+              child,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TextField extends StatelessWidget {
   const _TextField({
     required this.title,
@@ -431,32 +491,19 @@ class _TextField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(title, style: theme.textTheme.labelLarge),
-              const SizedBox(height: 4),
-              InlineTextField(
-                value: value,
-                hint: hint,
-                minLines: 1,
-                maxLines: 12,
-                allowEmpty: true,
-                hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.outline,
-                  fontStyle: FontStyle.italic,
-                ),
-                onSubmitted: onSubmitted,
-              ),
-            ],
-          ),
+    return _FieldCard(
+      title: title,
+      child: InlineTextField(
+        value: value,
+        hint: hint,
+        minLines: 1,
+        maxLines: 12,
+        allowEmpty: true,
+        hintStyle: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.outline,
+          fontStyle: FontStyle.italic,
         ),
+        onSubmitted: onSubmitted,
       ),
     );
   }

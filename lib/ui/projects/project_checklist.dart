@@ -33,44 +33,36 @@ class ProjectChecklist extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final items = project.items;
-    final done = project.itemsDoneCount;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 8, 0),
-          child: Row(
-            children: <Widget>[
-              Text('实现清单', style: theme.textTheme.labelLarge),
-              const SizedBox(width: 8),
-              if (items.isNotEmpty)
-                Text('$done/${items.length} 已完成', style: theme.textTheme.labelSmall),
-              const Spacer(),
-              if (items.isNotEmpty)
-                PopupMenuButton<String>(
-                  tooltip: '清单操作',
-                  onSelected: (value) {
-                    switch (value) {
-                      case 'split':
-                        onSplitFromImplementation();
-                        break;
-                      case 'clear':
-                        _confirmClear(context);
-                        break;
-                    }
-                  },
-                  itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                    PopupMenuItem<String>(value: 'split', child: Text('清空后从正文重拆…')),
-                    PopupMenuItem<String>(value: 'clear', child: Text('清空清单')),
-                  ],
-                ),
-            ],
+        // 标题与进度由外面的 `_FieldCard` 给（那里显示 n/m），
+        // 这里只保留"清单操作"菜单，免得同一块出现两个「实现清单」。
+        if (items.isNotEmpty)
+          Align(
+            alignment: Alignment.centerRight,
+            child: PopupMenuButton<String>(
+              tooltip: '清单操作',
+              onSelected: (value) {
+                switch (value) {
+                  case 'split':
+                    onSplitFromImplementation();
+                    break;
+                  case 'clear':
+                    _confirmClear(context);
+                    break;
+                }
+              },
+              itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                PopupMenuItem<String>(value: 'split', child: Text('清空后从正文重拆…')),
+                PopupMenuItem<String>(value: 'clear', child: Text('清空清单')),
+              ],
+            ),
           ),
-        ),
         if (items.isEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+            padding: const EdgeInsets.only(top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[

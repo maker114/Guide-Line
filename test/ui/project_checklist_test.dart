@@ -94,7 +94,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.items.single.text, '写解析层');
-    expect(find.text('0/1 已完成'), findsOneWidget);
+    // 进度文案现在是卡片标题右侧的 n/m（原来写作「n/m 已完成」）
+    expect(find.text('0/1'), findsWidgets);
   });
 
   testWidgets('打勾：只改勾选状态，项目状态不受影响', (tester) async {
@@ -115,7 +116,7 @@ void main() {
       NodeStatus.pending,
       reason: '勾完清单也不该把项目变成已完成 —— 清单不参与判定',
     );
-    expect(find.text('1/1 已完成'), findsOneWidget);
+    expect(find.text('1/1'), findsWidgets);
   });
 
   testWidgets('编辑条目：弹窗改完写回数据', (tester) async {
@@ -171,7 +172,7 @@ void main() {
     // 有清单时正文默认收起：内容不在树里
     expect(find.text('整理后的整体说明'), findsNothing);
 
-    await tester.tap(find.byTooltip('展开'));
+    await tester.tap(find.text('展开'));
     await tester.pumpAndSettle();
     expect(find.text('整理后的整体说明'), findsOneWidget);
   });
