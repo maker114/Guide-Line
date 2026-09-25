@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 
+import 'scroll_finders.dart';
+
 /// 灵感页的新接线（灵感整理第 2、6、9 条）：
 ///   · 点一条 → 动作面板里有「编辑内容」，改完落盘；
 ///   · 长按任一条进入多选，批量分配 / 丢弃；
@@ -161,7 +163,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('这条灵感要合并'),
       120,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
     expect(find.text('待处理灵感 1'), findsOneWidget);
@@ -190,7 +192,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('灵感原文'),
       120,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('灵感原文'));
@@ -234,6 +236,31 @@ void main() {
     final captured = app.ws.liveInspirations.single;
     expect(captured.text, '写下就归好类的灵感');
     expect(captured.projectId, project.id, reason: '归属应当在书写时就定下来');
+  });
+
+  testWidgets('书写框更高了，且「记下」按钮不随归属标签长短移动', (tester) async {
+    final app = await boot();
+    const longName = '一个名字特别长的项目名称用来把标签撑到最宽';
+    app.ws.createProject(title: longName);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 三行起步（实机反馈"稍微拉长一点"）
+    expect(tester.widget<TextField>(find.byType(TextField).first).minLines, 3);
+
+    final before = tester.getRect(find.text('记下'));
+
+    await tester.tap(find.text('未分配'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(longName).last);
+    await tester.pumpAndSettle();
+    expect(find.text(longName), findsOneWidget, reason: '归属按钮上要显示选中的项目');
+
+    final after = tester.getRect(find.text('记下'));
+    expect(after.left, closeTo(before.left, 0.01),
+        reason: '「记下」的位置不该跟着左侧标签跑');
+    expect(after.width, closeTo(before.width, 0.01));
   });
 
   testWidgets('标签功能已移除：条目上不显示标签，动作面板里也没有加标签入口', (tester) async {

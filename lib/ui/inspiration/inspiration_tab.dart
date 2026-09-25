@@ -11,6 +11,7 @@ import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
+import '../theme/shape_tokens.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -228,7 +229,9 @@ class InspirationTabState extends State<InspirationTab> {
               TextField(
                 controller: _capture,
                 focusNode: _focus,
-                minLines: 2,
+                // 三行起步（实机反馈"稍微拉长一点"）：速记常常一次写两三句，
+                // 两行的高度写着写着就要滚，三行才够一口气写完
+                minLines: 3,
                 maxLines: 8,
                 textInputAction: TextInputAction.newline,
                 style: theme.textTheme.bodyLarge,
@@ -247,27 +250,47 @@ class InspirationTabState extends State<InspirationTab> {
               ),
               Row(
                 children: <Widget>[
-                  // 归属选择：一个胶囊小按钮，一眼看出这条灵感将归到哪儿
-                  Flexible(
-                    child: TextButton.icon(
-                      onPressed: _pickCaptureProject,
-                      icon: ProjectMarker(color: project?.color, size: 12),
-                      label: Text(
-                        project?.title ?? '未分配',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelMedium,
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: const StadiumBorder(),
-                        visualDensity: VisualDensity.compact,
+                  // 归属选择：一个胶囊小按钮，一眼看出这条灵感将归到哪儿。
+                  // 它占**左侧剩余空间**（项目名长了就地省略），「记下」由
+                  // `Expanded` 之后的固定位置兜住 —— 按钮的位置不跟着标签长短跑
+                  // （实机反馈：改个项目名，记下按钮就挪了）。
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: InkWell(
+                        onTap: _pickCaptureProject,
+                        borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              ProjectMarker(color: project?.color, size: 12),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  project?.title ?? '未分配',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelMedium,
+                                ),
+                              ),
+                              const SizedBox(width: 2),
+                              Icon(
+                                Icons.expand_more,
+                                size: 16,
+                                color: theme.colorScheme.outline,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   FilledButton.tonalIcon(
                     onPressed: _save,
                     icon: const Icon(Icons.send, size: 18),

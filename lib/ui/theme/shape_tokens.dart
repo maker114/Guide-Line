@@ -28,7 +28,7 @@ abstract final class AppShapes {
 
   /// 卡片内的方形快选块（参考图的「拍照 / 照片 / 本地文件」）。
   static const RoundedRectangleBorder chip = RoundedRectangleBorder(
-    borderRadius: BorderRadius.all(Radius.circular(16)),
+    borderRadius: BorderRadius.all(Radius.circular(chipRadius)),
   );
 
   /// 卡片内的小字段 / 值标签底。
@@ -64,6 +64,9 @@ abstract final class AppShapes {
   /// 圆角半径的"只取数值"版本，给需要自己拼 `BorderRadius` 的地方用
   /// （例如只圆某一边、或给 `Container` 的 `decoration` 用）。
   static const double cardRadius = 20;
+
+  /// 卡片内快选块的半径（`chip` 用的就是它）。
+  static const double chipRadius = 16;
 
   static const double sheetRadius = 28;
 
