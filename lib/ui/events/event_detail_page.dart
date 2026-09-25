@@ -16,6 +16,9 @@ import 'fold_toggle_row.dart';
 import 'task_actions.dart';
 import 'task_fold.dart';
 
+/// 展开 / 收起箭头的旋转时长（与项目页、事件页同一个节奏）。
+const Duration _foldDuration = Duration(milliseconds: 180);
+
 /// 事件详情：**一条任务线的可视化**。
 ///
 /// 渲染规则（设计文档 4.9 / ADR-036 / ADR-053）：
@@ -210,7 +213,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     // 相邻节点之间画一道连线，表示"接着做"
                     if (i > 0 && !foldedIds.contains(mainLine[i - 1].id))
                       const _VerticalConnector(),
-                    _TaskBox(host: this, task: mainLine[i]),
+                    // 每个节点框按 id 认身份：展开 / 收起自动收起的节点时，后面的框
+                    // 会整体往上挪，按位置错配就会把它们行内的动画重放一遍（实机反馈）
+                    KeyedSubtree(
+                      key: ValueKey<String>('node-${mainLine[i].id}'),
+                      child: _TaskBox(host: this, task: mainLine[i]),
+                    ),
                   ],
               ],
               const SizedBox(height: 16),
@@ -396,11 +404,14 @@ class _TaskBox extends StatelessWidget {
             ),
           if (expanded)
             for (final child in children)
-              _TaskLine(
-                host: host,
-                task: child,
-                indent: 1,
-                blocked: host._blocked(child),
+              KeyedSubtree(
+                key: ValueKey<String>('child-${child.id}'),
+                child: _TaskLine(
+                  host: host,
+                  task: child,
+                  indent: 1,
+                  blocked: host._blocked(child),
+                ),
               ),
           // 正在录下级时**不受折叠状态影响**：已完成 / 已搁置的任务默认是折叠的，
           // 如果这里再串上 `expanded`，「点新建子任务」就会什么都不发生 ——
@@ -575,7 +586,14 @@ class _TaskLine extends StatelessWidget {
                 iconSize: 18,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                icon: Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                // 箭头**转过去**而不是换图标（与项目页 / 事件页同一个节奏）：
+                // `expand_more` 朝下，展开时翻 180° 变成朝上
+                icon: AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: _foldDuration,
+                  curve: Curves.easeOutCubic,
+                  child: const Icon(Icons.expand_more),
+                ),
                 onPressed: onToggle,
               ),
         ],

@@ -123,14 +123,30 @@ void main() {
 
     expect(find.text('第四步'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.expand_more).first);
+    // 箭头现在只有一个 `chevron_right`（靠旋转表达展开 / 收起），所以数它的朝向
+    double arrowTurns() => tester
+        .widget<RotationTransition>(
+          find.byType(RotationTransition).first,
+        )
+        .turns
+        .value;
+    expect(arrowTurns(), closeTo(0.25, 0.001), reason: '展开态：箭头朝下');
+
+    await tester.tap(find.byIcon(Icons.chevron_right).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 90));
+    final middle = arrowTurns();
+    expect(middle, greaterThan(0.02), reason: '箭头应当正在转');
+    expect(middle, lessThan(0.23));
     await tester.pumpAndSettle();
     expect(find.text('第四步'), findsNothing, reason: '收起后卡里不该还有任务行');
+    expect(arrowTurns(), closeTo(0, 0.001), reason: '收起态：箭头朝右');
     expect(app.isExpanded(event.id), isFalse, reason: '折叠状态要记进偏好');
 
     await tester.tap(find.byIcon(Icons.chevron_right).first);
     await tester.pumpAndSettle();
     expect(find.text('第四步'), findsOneWidget);
+    expect(arrowTurns(), closeTo(0.25, 0.001));
     expect(app.isExpanded(event.id), isTrue);
   });
 

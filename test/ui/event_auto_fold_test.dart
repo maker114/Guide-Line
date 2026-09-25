@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/task_status_button.dart';
 
 /// 事件页的「已完成老节点自动收起」。
 ///
@@ -91,5 +92,46 @@ void main() {
     expect(find.text('一'), findsOneWidget);
     expect(find.text('二'), findsOneWidget);
     expect(find.text('三'), findsOneWidget);
+  });
+
+  testWidgets('展开 / 收起自动收起的节点，不会让别的节点重放状态动画', (tester) async {
+    // 状态交错是**故意的**：位置错配时"这个坑换成另一条任务"才会显出差异
+    // （全是同一个状态的话，换过去也看不出来 —— 那样这条用例就白写了）
+    await openEventWith(tester, <({String title, bool done})>[
+      (title: 'a 已完成', done: true),
+      (title: 'b 已完成', done: true),
+      (title: 'c 进行中', done: false),
+      (title: 'd 已完成', done: true),
+      (title: 'e 进行中', done: false),
+    ]);
+
+    // 自动收起：留当前节点（c）的上一个（b），只收 a
+    expect(find.text('a 已完成'), findsNothing);
+    expect(find.textContaining('另有 1 个已完成节点'), findsOneWidget);
+
+    // 状态按钮的过渡用 `ScaleTransition`：静止时每个按钮恰好一个；
+    // 一旦有过渡在跑，同一个按钮会同时挂新旧两个 → 数量变多
+    int transitions() => tester
+        .widgetList<ScaleTransition>(
+          find.descendant(
+            of: find.byType(TaskStatusButton),
+            matching: find.byType(ScaleTransition),
+          ),
+        )
+        .length;
+
+    // 可见 4 个节点（b、c、d、e）
+    expect(transitions(), 4);
+
+    await tester.tap(find.textContaining('另有 1 个已完成节点'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // 展开后 5 个节点；**不该**多出过渡（多出来就说明后半段节点被按位置错配了）
+    expect(find.text('a 已完成'), findsOneWidget);
+    expect(transitions(), 5, reason: '别的节点不该被卷入状态图标的过渡动画');
+
+    await tester.pumpAndSettle();
+    expect(transitions(), 5);
   });
 }

@@ -14,6 +14,9 @@ import 'event_detail_page.dart';
 import 'fold_toggle_row.dart';
 import 'task_fold.dart';
 
+/// 展开 / 收起箭头的旋转时长（与项目页同一个节奏）。
+const Duration _foldDuration = Duration(milliseconds: 180);
+
 /// 事件 Tab：**任务线的入口列表**，与项目页同一套观感。
 ///
 /// 实机反馈：事件页原来只是一行行"事件名 + 主线 3/5"，看不出这条线在做哪一步；
@@ -43,8 +46,9 @@ class _EventTabState extends State<EventTab> {
 
   @override
   Widget build(BuildContext context) {
-    final events = _app.ws.liveEvents.where((e) => !e.archived).toList(growable: false)
-      ..sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
+    final events =
+        _app.ws.liveEvents.where((e) => !e.archived).toList(growable: false)
+          ..sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -81,49 +85,64 @@ class _EventTabState extends State<EventTab> {
                 // **一个事件一张卡**（与项目页同一种观感）：卡内靠"同框"表达归属，
                 // 卡与卡之间留空隙 —— 这是"两个不同事件"的唯一线索。
                 for (final event in events)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-                    child: Card(
-                      margin: EdgeInsets.zero,
-                      elevation: 1,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          if (_renamingId == event.id)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              child: InlineTextField(
-                                value: event.name,
-                                autofocus: true,
-                                hint: '事件名',
-                                textStyle: Theme.of(context).textTheme.bodyLarge,
-                                onSubmitted: (name) => _app.run(
-                                  () => _app.ws.updateEvent(event.id, name: name),
+                  KeyedSubtree(
+                    // 用 id 当身份：折叠 / 展开某张卡时，后面的卡片要**整体搬家**，
+                    // 不能让它们的内容按"第几个"去和上一帧错配 —— 一错配，
+                    // 行内的动画（勾选图标那种）就会重新播一遍（实机反馈）
+                    key: ValueKey<String>('event-${event.id}'),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                      child: Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 1,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            if (_renamingId == event.id)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
                                 ),
-                                onEditClosed: () {
-                                  if (mounted) setState(() => _renamingId = null);
-                                },
+                                child: InlineTextField(
+                                  value: event.name,
+                                  autofocus: true,
+                                  hint: '事件名',
+                                  textStyle: Theme.of(context)
+                                      .textTheme
+                                      .bodyLarge,
+                                  onSubmitted: (name) => _app.run(
+                                    () => _app.ws.updateEvent(
+                                      event.id,
+                                      name: name,
+                                    ),
+                                  ),
+                                  onEditClosed: () {
+                                    if (mounted) {
+                                      setState(() => _renamingId = null);
+                                    }
+                                  },
+                                ),
+                              )
+                            else
+                              _EventCardHeader(
+                                app: _app,
+                                event: event,
+                                onStartRename: () =>
+                                    setState(() => _renamingId = event.id),
                               ),
-                            )
-                          else
-                            _EventCardHeader(
-                              app: _app,
-                              event: event,
-                              onStartRename: () =>
-                                  setState(() => _renamingId = event.id),
+                            // 展开 / 收起用 `AnimatedSize` 做**高度过渡**：直接重建列表
+                            // 会因行数突变"跳"一下，看着像动画坏了（项目页踩过同一个坑）。
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 200),
+                              curve: Curves.easeOutCubic,
+                              alignment: Alignment.topCenter,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: _buildLine(context, event),
+                              ),
                             ),
-                          // 展开 / 收起用 `AnimatedSize` 做**高度过渡**：直接重建列表
-                          // 会因行数突变"跳"一下，看着像动画坏了（项目页踩过同一个坑）。
-                          AnimatedSize(
-                            duration: const Duration(milliseconds: 200),
-                            curve: Curves.easeOutCubic,
-                            alignment: Alignment.topCenter,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: _buildLine(context, event),
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -164,11 +183,19 @@ class _EventTabState extends State<EventTab> {
     final revealed = _revealedLines.contains(event.id);
     final visible = revealed
         ? mainLine
-        : mainLine.where((t) => !autoFolded.contains(t.id)).toList(growable: false);
+        : mainLine
+              .where((t) => !autoFolded.contains(t.id))
+              .toList(growable: false);
     final muted = _app.ws.isEventMutedForDue(event.id);
 
     return <Widget>[
-      for (final task in visible) _EventTaskRow(app: _app, task: task, muted: muted),
+      for (final task in visible)
+        KeyedSubtree(
+          // 同上：行也要有身份。展开 / 收起自动收起的节点时，后面的行会整体挪位，
+          // 按位置错配就会把它们行内的动画重放一遍（实机反馈）
+          key: ValueKey<String>('task-${task.id}'),
+          child: _EventTaskRow(app: _app, task: task, muted: muted),
+        ),
       if (autoFolded.isNotEmpty)
         FoldToggleRow(
           hiddenCount: autoFolded.length,
@@ -229,7 +256,13 @@ class _EventCardHeader extends StatelessWidget {
             )
           : IconButton(
               tooltip: expanded ? '收起任务线' : '展开任务线',
-              icon: Icon(expanded ? Icons.expand_more : Icons.chevron_right),
+              // 箭头**转过去**（与项目页同一个节奏），不是换一个图标
+              icon: AnimatedRotation(
+                turns: expanded ? 0.25 : 0,
+                duration: _foldDuration,
+                curve: Curves.easeOutCubic,
+                child: const Icon(Icons.chevron_right),
+              ),
               onPressed: () => app.setExpanded(event.id, expanded: !expanded),
             ),
       title: Text(
@@ -272,7 +305,9 @@ class _EventCardHeader extends StatelessWidget {
               onStartRename();
               break;
             case 'archive':
-              final error = app.run(() => app.ws.setEventArchived(event.id, true));
+              final error = app.run(
+                () => app.ws.setEventArchived(event.id, true),
+              );
               if (!context.mounted) return;
               showToast(
                 context,
@@ -307,13 +342,15 @@ class _EventCardHeader extends StatelessWidget {
       message: taskCount == 0
           ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
           : '「${event.name}」及其整条任务线（$taskCount 个任务）会被一起删除。'
-              '可在「更多 → 归档区 → 回收站」恢复。',
+                '可在「更多 → 归档区 → 回收站」恢复。',
       confirmLabel: '删除',
       danger: true,
     );
     if (!ok || !context.mounted) return;
     final error = app.run(() => app.ws.deleteEvent(event.id));
-    if (error != null && context.mounted) showToast(context, error, error: true);
+    if (error != null && context.mounted) {
+      showToast(context, error, error: true);
+    }
   }
 }
 
@@ -337,7 +374,8 @@ class _EventTaskRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final due = describeDate(task.dueAt);
-    final overdue = !muted && isOverdue(task.dueAt) && task.status != NodeStatus.done;
+    final overdue =
+        !muted && isOverdue(task.dueAt) && task.status != NodeStatus.done;
     final done = task.status != NodeStatus.pending;
 
     return ListTile(

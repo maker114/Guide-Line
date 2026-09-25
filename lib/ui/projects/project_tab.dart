@@ -10,6 +10,9 @@ import '../common/labels.dart';
 import 'project_actions.dart';
 import 'project_detail_page.dart';
 
+/// 展开 / 收起箭头的旋转时长（项目页与事件页共用同一个节奏）。
+const Duration _foldDuration = Duration(milliseconds: 180);
+
 /// 项目 Tab：**项目树（≤ 3 层）**。
 ///
 /// 手机上没有树控件的余地，所以用「扁平化 + 缩进 + 展开箭头」渲染：
@@ -107,7 +110,10 @@ class _ProjectTabState extends State<ProjectTab> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: <Widget>[
-                          _buildTile(group.root),
+                          KeyedSubtree(
+                            key: ValueKey<String>(group.root.project.id),
+                            child: _buildTile(group.root),
+                          ),
                           AnimatedSize(
                             duration: const Duration(milliseconds: 200),
                             curve: Curves.easeOutCubic,
@@ -115,10 +121,17 @@ class _ProjectTabState extends State<ProjectTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
-                                for (final child in group.children) _buildTile(child),
+                                for (final child in group.children)
+                                  KeyedSubtree(
+                                    key: ValueKey<String>(child.project.id),
+                                    child: _buildTile(child),
+                                  ),
                                 if (_addingChildOf == group.root.project.id)
                                   Padding(
-                                    padding: const EdgeInsets.only(left: 40, bottom: 6),
+                                    padding: const EdgeInsets.only(
+                                      left: 40,
+                                      bottom: 6,
+                                    ),
                                     child: InlineComposer(
                                       label: '新建子项目',
                                       hint: '子项目名',
@@ -205,7 +218,9 @@ List<_ProjectGroup> _groupByRoot(List<_ProjectRow> rows) {
 
   void flush() {
     if (currentRoot.isEmpty) return;
-    groups.add(_ProjectGroup(root: currentRoot.first, children: currentChildren));
+    groups.add(
+      _ProjectGroup(root: currentRoot.first, children: currentChildren),
+    );
     currentRoot = <_ProjectRow>[];
     currentChildren = <_ProjectRow>[];
   }
@@ -283,43 +298,68 @@ class _ProjectTile extends StatelessWidget {
       // 而不是靠字号或分割线（实机反馈：原来的缩进差看不出来）
       contentPadding: EdgeInsets.only(left: isChild ? 36 : 4, right: 4),
       minLeadingWidth: isChild ? 18 : null,
-      leading: row.childCount == 0
-          ? Padding(
-              padding: EdgeInsets.only(left: isChild ? 0 : 12),
-              child: isChild
-                  // 子项目用标识色小圆点：比状态图标轻，色点本身也表达归属
-                  ? ProjectMarker(color: project.color, size: 12)
-                  : Icon(
-                      nodeStatusIcon(project.status),
-                      size: 20,
-                      color: nodeStatusColor(project.status, theme.colorScheme),
-                    ),
-            )
-          : IconButton(
-              tooltip: row.expanded ? '收起' : '展开',
-              visualDensity: isChild ? VisualDensity.compact : null,
-              iconSize: isChild ? 18 : null,
-              icon: Icon(
-                row.expanded ? Icons.expand_more : Icons.chevron_right,
-              ),
-              onPressed: () =>
-                  app.setExpanded(project.id, expanded: !row.expanded),
-            ),
+      // 左侧图标**槽位宽度固定**（实机反馈"第一条的左侧没有对齐"）：
+      // 展开箭头是 `IconButton`、状态图标是 `Icon`，两者宽度本来就不同，
+      // 各画各的会把标题挤到不同的竖线上 —— 有子项目的、没子项目的、
+      // 有没有标识色的，标题必须都在同一条线上。
+      leading: SizedBox(
+        width: isChild ? 18 : 40,
+        child: Center(
+          child: row.childCount == 0
+              ? (isChild
+                    // 子项目用标识色小圆点：比状态图标轻，色点本身也表达归属
+                    ? ProjectMarker(color: project.color, size: 12)
+                    : Icon(
+                        nodeStatusIcon(project.status),
+                        size: 20,
+                        color: nodeStatusColor(
+                          project.status,
+                          theme.colorScheme,
+                        ),
+                      ))
+              : IconButton(
+                  tooltip: row.expanded ? '收起' : '展开',
+                  iconSize: isChild ? 18 : 22,
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints.tightFor(
+                    width: isChild ? 18 : 32,
+                    height: isChild ? 18 : 32,
+                  ),
+                  // 箭头**转过去**而不是换一个图标（实机反馈：加个动画）：
+                  // `chevron_right` 顺时针转 90° 正好是"朝下 = 已展开"
+                  icon: AnimatedRotation(
+                    turns: row.expanded ? 0.25 : 0,
+                    duration: _foldDuration,
+                    curve: Curves.easeOutCubic,
+                    child: const Icon(Icons.chevron_right),
+                  ),
+                  onPressed: () =>
+                      app.setExpanded(project.id, expanded: !row.expanded),
+                ),
+        ),
+      ),
       title: Row(
         children: <Widget>[
           // 标识色（灵感整理第 10 条）：一小段色条，扫一眼就能把项目区分开。
-          // 没设标识色就不占位，树不会因此变宽。子项目已有色点，不再画色条。
-          if (!isChild && colorOfHex(project.color) != null) ...<Widget>[
-            Container(
-              width: 4,
-              height: 16,
-              decoration: BoxDecoration(
-                color: colorOfHex(project.color),
-                borderRadius: BorderRadius.circular(2),
+          // **槽位固定占位**：没设色的行也留出同样宽度，标题才不会一行一个位置
+          // （实机反馈"第一条的左侧没有对齐"）。子项目已有色点，不再画色条。
+          if (!isChild)
+            SizedBox(
+              width: 10,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: colorOfHex(project.color) == null
+                    ? null
+                    : Container(
+                        width: 4,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: colorOfHex(project.color),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
               ),
             ),
-            const SizedBox(width: 6),
-          ],
           Expanded(
             child: Text(
               project.title,
