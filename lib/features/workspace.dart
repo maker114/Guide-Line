@@ -8,6 +8,7 @@ import '../core/models/event.dart';
 import '../core/models/inspiration.dart';
 import '../core/models/project.dart';
 import '../core/models/project_item.dart';
+import '../core/models/project_palette.dart';
 import '../core/models/task.dart';
 import '../core/rules/archive_zone.dart';
 import '../core/rules/cascade.dart';
@@ -253,6 +254,10 @@ class Workspace {
       order: _nextOrder(_siblingOrders(DocName.projects, parentId)),
       completedAt: null,
       createdAt: now,
+      // 新项目**自动分配一个标志色**：空着的话项目树里全是同一个灰图标，
+      // 一眼分不出谁是谁。取"还没被用的"颜色里第一个，用完一轮再从头来 ——
+      // 这样同一层的兄弟项目优先拿到不同的颜色。
+      color: nextProjectColor(),
       updatedAt: now,
       deleted: false,
     );
@@ -383,6 +388,36 @@ class Workspace {
 
     persist();
     return plan;
+  }
+
+  // ---------------------------------------------------------------- 标志色
+
+  /// 自动分配给新项目的标志色：取当前**用得最少**的那个，同数时按色板顺序。
+  ///
+  /// 为什么不是"随机"也不是"按创建顺序轮着来"：
+  ///   · 随机会出现相邻两个项目撞色，正是要避免的；
+  ///   · 单纯轮转在删过项目之后会继续往下走，很快又撞上。
+  /// 取"用得最少"能让颜色分布自动均衡，删项目也会自然把它让出来。
+  ///
+  /// 色板只有一份（`ProjectPalette.hexes`）—— 界面的取色器与这里的自动分配共用，
+  /// 不各写一份（放在 core 是因为 features 不能依赖 ui）。
+  String nextProjectColor() {
+    final used = <String, int>{};
+    for (final project in liveProjects) {
+      final color = project.color;
+      if (color == null) continue;
+      used[color] = (used[color] ?? 0) + 1;
+    }
+    var best = ProjectPalette.hexes.first;
+    var bestCount = used[best] ?? 0;
+    for (final color in ProjectPalette.hexes.skip(1)) {
+      final count = used[color] ?? 0;
+      if (count < bestCount) {
+        best = color;
+        bestCount = count;
+      }
+    }
+    return best;
   }
 
   // ---------------------------------------------------------------- 灵感

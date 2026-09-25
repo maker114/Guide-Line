@@ -254,9 +254,10 @@ class _ProjectTile extends StatelessWidget {
         onSelected: (value) async {
           await _handleMenu(context, value);
         },
+        // 「新建子项目」与「打开详情」都已去掉（按实机反馈）：
+        //   · 打开详情：点这一行本身就是打开详情，菜单里再放一个是重复入口；
+        //   · 新建子项目：进详情页用那个加号建（那里还能顺手填目的/日期）。
         itemBuilder: (_) => const <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(value: 'child', child: Text('新建子项目')),
-          PopupMenuItem<String>(value: 'open', child: Text('打开详情')),
           PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
           PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
           PopupMenuItem<String>(value: 'archive', child: Text('归档')),
@@ -270,12 +271,6 @@ class _ProjectTile extends StatelessWidget {
   Future<void> _handleMenu(BuildContext context, String value) async {
     final project = row.project;
     switch (value) {
-      case 'child':
-        onStartAddChild();
-        break;
-      case 'open':
-        await _open(context);
-        break;
       case 'rename':
         onStartRename();
         break;

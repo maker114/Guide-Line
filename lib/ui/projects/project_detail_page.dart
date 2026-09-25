@@ -13,6 +13,7 @@ import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/status_selector.dart';
 import '../inspiration/merge_editor_page.dart';
+import '../theme/shape_tokens.dart';
 import 'handoff_preview_page.dart';
 import 'project_actions.dart';
 import 'project_checklist.dart';
@@ -554,40 +555,47 @@ class _ChildrenField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
+        // 子项目区整体收在左边距 16 的一条线上，与上面的字段卡左缘对齐；
+        // 条目行本身再往里缩 8，用"缩进"而不是"大间距"表达它是下级。
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-          child: Text('子项目 ${children.length}', style: theme.textTheme.labelLarge),
-        ),
-        InlineComposer(
-          label: '新建子项目',
-          hint: '子项目名',
-          leading: Icons.add,
-          compact: true,
-          onCreate: (title) {
-            final error =
-                app.run(() => app.ws.createProject(title: title, parentId: project.id));
-            if (error != null) showToast(context, error, error: true);
-          },
+          child: Row(
+            children: <Widget>[
+              Text('子项目', style: theme.textTheme.labelLarge),
+              const SizedBox(width: 6),
+              Text('${children.length}', style: theme.textTheme.labelSmall),
+              const Spacer(),
+              // 新建子项目：一个加号（按实机反馈），不再是占一整行文字的入口
+              _AddChildButton(
+                onCreate: (title) {
+                  final error = app.run(
+                    () => app.ws.createProject(title: title, parentId: project.id),
+                  );
+                  if (error != null) showToast(context, error, error: true);
+                },
+              ),
+            ],
+          ),
         ),
         if (children.isEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Text('还没有子项目', style: theme.textTheme.bodySmall),
           )
         else
           for (final child in children)
+            // 比主项目行更紧凑：小图标 + 小字号 + 一行式副标题，
+            // 缩进 24 表达层级（`contentPadding` 同时收紧到 8，
+            // 原来是 `ListTile` 默认的 16 + 20 图标位，显得空）
             ListTile(
-              leading: Icon(
-                nodeStatusIcon(child.status),
-                size: 20,
-                color: nodeStatusColor(child.status, theme.colorScheme),
-              ),
-              title: Text(child.title),
-              subtitle: Text(
-                describeDate(child.date).isEmpty ? '未设置日期' : describeDate(child.date),
-                style: theme.textTheme.labelSmall,
-              ),
-              trailing: const Icon(Icons.chevron_right),
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              contentPadding: const EdgeInsets.only(left: 24, right: 12),
+              minLeadingWidth: 18,
+              leading: ProjectMarker(color: child.color, size: 12),
+              title: Text(child.title, style: theme.textTheme.bodyMedium),
+              subtitle: childSubtitle(theme, child),
+              trailing: const Icon(Icons.chevron_right, size: 18),
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
                   builder: (_) => ProjectDetailPage(app: app, projectId: child.id),
@@ -595,6 +603,91 @@ class _ChildrenField extends StatelessWidget {
               ),
             ),
       ],
+    );
+  }
+}
+
+/// 子项目行的副标题：**一行搞定**（日期或状态），没有就不显示。
+///
+/// 原来固定写「未设置日期」，每条都多一行字，既占地方又没信息量。
+Text? childSubtitle(ThemeData theme, Project child) {
+  if (child.date != null) {
+    return Text(
+      describeDate(child.date),
+      style: theme.textTheme.labelSmall,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+  final status = nodeStatusLabel(child.status);
+  if (status.isEmpty) return null;
+  return Text(status, style: theme.textTheme.labelSmall);
+}
+
+/// 「新建子项目」的加号按钮：点一下旁边就展开输入框。
+class _AddChildButton extends StatefulWidget {
+  const _AddChildButton({required this.onCreate});
+
+  final ValueChanged<String> onCreate;
+
+  @override
+  State<_AddChildButton> createState() => _AddChildButtonState();
+}
+
+class _AddChildButtonState extends State<_AddChildButton> {
+  bool _editing = false;
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isNotEmpty) widget.onCreate(text);
+    _controller.clear();
+    // 保持展开，方便连着建几个
+    _focus.requestFocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_editing) {
+      return IconButton.filledTonal(
+        tooltip: '新建子项目',
+        icon: const Icon(Icons.add, size: 20),
+        visualDensity: VisualDensity.compact,
+        onPressed: () {
+          setState(() => _editing = true);
+          _focus.requestFocus();
+        },
+      );
+    }
+    return SizedBox(
+      width: 200,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focus,
+        autofocus: true,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: '子项目名',
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+          ),
+          suffixIcon: IconButton(
+            tooltip: '收起',
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: () => setState(() => _editing = false),
+          ),
+        ),
+      ),
     );
   }
 }

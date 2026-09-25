@@ -191,40 +191,60 @@ class InspirationTabState extends State<InspirationTab> {
     );
   }
 
-  /// 速记书写区。多行，所以形状走卡片圆角而不是胶囊（《界面规范》§4）。
+  /// 速记书写区。
+  ///
+  /// 按实机反馈改成**与项目「目的」栏同一种设计风格**：外面一张带轻阴影的卡片，
+  /// 上面一行小标题，里面是输入区。以前它是一个裸露的多行 `TextField`，
+  /// 与页面其它块不是一套观感。
   Widget _buildCaptureArea() {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-      child: Stack(
-        children: <Widget>[
-          TextField(
-            controller: _capture,
-            focusNode: _focus,
-            minLines: 3,
-            maxLines: 8,
-            textInputAction: TextInputAction.newline,
-            decoration: const InputDecoration(
-              hintText: '想到什么就先扔进来…',
-              border: OutlineInputBorder(),
-              // 给右下角的发送键留位置，别让文字钻到按钮底下
-              contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 46),
-            ),
-          ),
-          Positioned(
-            right: 8,
-            bottom: 8,
-            // 保存键做成**胶囊**（按实机反馈）：文字 + 图标，比一个圆图标更像按钮
-            child: FilledButton.tonalIcon(
-              onPressed: _save,
-              icon: const Icon(Icons.send, size: 18),
-              label: const Text('记下'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                shape: const StadiumBorder(),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 1,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text('速记', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 6),
+              Stack(
+                children: <Widget>[
+                  TextField(
+                    controller: _capture,
+                    focusNode: _focus,
+                    minLines: 2,
+                    maxLines: 8,
+                    textInputAction: TextInputAction.newline,
+                    decoration: const InputDecoration(
+                      hintText: '想到什么就先扔进来…',
+                      border: OutlineInputBorder(),
+                      // 给右下角的「记下」留位置，别让文字钻到按钮底下
+                      contentPadding: EdgeInsets.fromLTRB(12, 12, 12, 44),
+                    ),
+                  ),
+                  Positioned(
+                    right: 6,
+                    bottom: 6,
+                    // 保存键做成**胶囊**（按实机反馈）
+                    child: FilledButton.tonalIcon(
+                      onPressed: _save,
+                      icon: const Icon(Icons.send, size: 18),
+                      label: const Text('记下'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        shape: const StadiumBorder(),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

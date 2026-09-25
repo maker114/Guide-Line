@@ -48,12 +48,24 @@ class TaskStatusButton extends StatelessWidget {
         onLongPress: blocked ? null : () => pickTaskStatus(context, app, task),
         child: Padding(
           padding: const EdgeInsets.all(8),
-          child: Icon(
-            blocked ? Icons.lock_outline : nodeStatusIcon(task.status),
-            size: size,
-            color: blocked
-                ? scheme.outline
-                : nodeStatusColor(task.status, scheme),
+          // 状态切换时图标淡入淡出 + 轻微缩放：勾选是这一页最高频的操作，
+          // 给一点反馈能让人确认"确实点上了"（小屏上尤其明显）。
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            switchInCurve: Curves.easeOutBack,
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            ),
+            child: Icon(
+              blocked ? Icons.lock_outline : nodeStatusIcon(task.status),
+              // key 让 AnimatedSwitcher 认得出"换图标了"，否则它不会做过渡
+              key: ValueKey<String>(blocked ? 'blocked' : task.status.name),
+              size: size,
+              color: blocked
+                  ? scheme.outline
+                  : nodeStatusColor(task.status, scheme),
+            ),
           ),
         ),
       ),

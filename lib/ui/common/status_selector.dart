@@ -84,20 +84,27 @@ class _Pill extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppShapes.pillRadius),
         child: AnimatedContainer(
+          // 选中态是"小胶囊滑过去"的观感：底色与文字色都走同一个时长，
+          // 160ms 够快不至于拖沓，又不至于闪一下就没了
           duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
           decoration: BoxDecoration(
             color: active ? scheme.primary.withValues(alpha: 0.16) : null,
             borderRadius: BorderRadius.circular(AppShapes.pillRadius),
           ),
-          child: Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge?.copyWith(
+          child: AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            style: (theme.textTheme.labelLarge ?? const TextStyle()).copyWith(
               color: active ? scheme.primary : scheme.onSurfaceVariant,
               fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+            ),
+            child: Text(
+              label,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),

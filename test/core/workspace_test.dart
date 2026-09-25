@@ -8,6 +8,7 @@ import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/models/project_item.dart';
+import 'package:guideline/core/models/project_palette.dart';
 import 'package:guideline/core/rules/completion.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
@@ -215,6 +216,39 @@ void main() {
 
       expect(ws.inspirationInbox.map((i) => i.id), contains(inspiration.id));
       expect(ws.findInspiration(inspiration.id)!.projectId, project.id);
+    });
+  });
+
+  group('项目标志色自动分配', () {
+    test('新建项目自动拿到一个色板里的颜色', () {
+      final project = ws.createProject(title: '第一个');
+      expect(project.color, isNotNull);
+      expect(ProjectPalette.hexes, contains(project.color));
+    });
+
+    test('连续新建会**优先取还没用过的颜色**（同一层不撞色）', () {
+      final colors = <String>[];
+      for (var i = 0; i < 4; i += 1) {
+        colors.add(ws.createProject(title: '项目$i').color!);
+      }
+      expect(colors.toSet().length, 4, reason: '前几个不该撞色');
+    });
+
+    test('删掉项目后它占的颜色会被让出来', () {
+      final first = ws.createProject(title: '先建的');
+      final firstColor = first.color!;
+      ws.deleteProject(first.id);
+
+      // 再建一个：因为原主被删了，"用得最少"应当把它挑回来
+      final next = ws.createProject(title: '后建的');
+      expect(next.color, firstColor, reason: '颜色分布应当自动均衡，删项目就把色让出来');
+    });
+
+    test('子项目也自动分配标志色', () {
+      final root = ws.createProject(title: '根');
+      final child = ws.createProject(title: '子', parentId: root.id);
+      expect(child.color, isNotNull);
+      expect(ProjectPalette.hexes, contains(child.color));
     });
   });
 

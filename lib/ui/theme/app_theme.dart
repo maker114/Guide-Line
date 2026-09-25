@@ -1,34 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../core/json/canonical.dart';
+import '../../core/models/project_palette.dart';
 import '../../core/store/ui_prefs.dart';
 import '../common/urgency.dart';
 import 'shape_tokens.dart';
 
-/// 全应用的**强调色**（`AccentColors`）。
+/// 全应用的**强调色**。
 ///
-/// 色值取自用户给的参考图（12 个 Hex）。它们都是低饱和的"灰调彩色"，
-/// 用作项目标识色、灵感标签这类**需要彼此区分但又不该抢眼**的地方。
-///
-/// 为什么单独放一组而不是直接塞进主题：主题只定**一个主色种子**，
-/// 其余交给 Material 3 推导；这组是"可选项"，与主题无关 ——
-/// 换主题不该把用户挑的标识色换掉。
+/// 色值来自用户给的参考图（12 个 Hex），定义在 `core/models/project_palette.dart`
+/// —— 因为自动分配标志色的 `Workspace` 也要用它，而 features 不能依赖 ui。
 abstract final class AccentColors {
-  /// 参考图里的 12 个色值，按原来的顺序。
-  static const List<String> hexes = <String>[
-    '#AD6868', // 陶红
-    '#B87F56', // 赭
-    '#DECF7C', // 麦黄
-    '#CCE8B6', // 嫩绿
-    '#87C57E', // 草绿
-    '#87C7AD', // 松石
-    '#78D2CA', // 青
-    '#A9BFD5', // 雾蓝
-    '#8280AE', // 灰紫
-    '#DAC1E0', // 藕荷
-    '#A56EA9', // 紫
-    '#A85780', // 梅红
-  ];
+  /// 参考图里的 12 个色值（唯一来源在 core 的 `ProjectPalette`）。
+  static const List<String> hexes = ProjectPalette.hexes;
 }
 
 /// 主题预设。
