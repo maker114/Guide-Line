@@ -168,9 +168,8 @@ class ProjectDetailPage extends StatelessWidget {
   Future<void> _exportHandoff(BuildContext context, Project project) async {
     final markdown = HandoffExport.build(
       project: project,
-      // 事件与项目没有关联字段，所以带全部事件与任务（设计文档 §3.2）
-      events: app.ws.liveEvents,
-      tasks: app.ws.liveTasks,
+      // 只带这个项目的待处理灵感 —— 事件与任务线不再进交接说明（实机反馈：
+      // 事件与项目没有关联字段，全量带过去只会把说明撑长、跑题）
       inspirations: app.ws.liveInspirations
           .where((i) => i.projectId == project.id)
           .toList(growable: false),

@@ -102,16 +102,18 @@ void main() {
     );
   }
 
+  /// `events` / `tasks` 仍然收着，但**不传给导出** —— 有几个用例专门用它们断言
+  /// "事件与任务线不该出现在交接说明里"。
   String build({
     Project? p,
     List<Event> events = const <Event>[],
     List<Task> tasks = const <Task>[],
     List<Inspiration> inspirations = const <Inspiration>[],
   }) {
+    // ignore: unused_local_variable
+    final ignored = (events, tasks);
     return HandoffExport.build(
       project: p ?? project(),
-      events: events,
-      tasks: tasks,
       inspirations: inspirations,
       now: now,
     );
@@ -174,7 +176,7 @@ void main() {
     expect(text, contains('第一段\n\n第二段'));
   });
 
-  test('灵感：只导 pending、倒序、带标签；已丢弃的不出现', () {
+  test('灵感：只导 pending、倒序；已丢弃的不出现', () {
     final text = build(
       inspirations: <Inspiration>[
         inspiration('a', '较早的灵感', createdAt: 1000),
@@ -190,71 +192,49 @@ void main() {
       lessThan(text.indexOf('较早的灵感')),
       reason: '按创建时间倒序，与灵感页一致',
     );
-    expect(text, contains('- 较新的灵感（工作 / 生活）'));
+    // 标签已从界面移除，导出里也不再带（老数据里的标签不再外发）
+    expect(text, contains('- 较新的灵感'));
+    expect(text, isNot(contains('工作 / 生活')));
   });
 
-  test('事件与任务线：主线在前、子任务缩进一层、已完成的打 x', () {
+  test('交接说明里**不再**出现事件与任务线（实机反馈）', () {
     final text = build(
-      events: <Event>[event('e-1', '上线准备')],
-      tasks: <Task>[
-        task('t-2', eventId: 'e-1', title: '第二条主线', order: 2000),
-        task('t-1', eventId: 'e-1', title: '第一条主线', order: 1000, status: NodeStatus.done),
-        task('t-1a', eventId: 'e-1', title: '子任务', parentId: 't-1', type: TaskType.subtask),
+      p: project(title: '重构知识库'),
+      events: <Event>[
+        event('e-1', '上线准备'),
+        event('e-2', '搬家'),
       ],
-    );
-
-    expect(text, contains('## 相关事件与任务线'));
-    expect(text, contains('### 上线准备'));
-    expect(text, contains('- [x] 第一条主线'));
-    expect(text, contains('- [ ] 第二条主线'));
-    expect(text, contains('    - [ ] 子任务（子任务）'));
-    expect(
-      text.indexOf('第一条主线'),
-      lessThan(text.indexOf('第二条主线')),
-      reason: '主线按 order 排',
-    );
-  });
-
-  test('历史的并列任务按子任务标注（类型已废除），截止日跟在后面', () {
-    final text = build(
-      events: <Event>[event('e-1', '出行')],
       tasks: <Task>[
+        task('t-1', eventId: 'e-1', title: '第一条主线', status: NodeStatus.done),
+        task('t-2', eventId: 'e-1', title: '第二条主线', order: 2000),
         task(
-          't-1',
+          't-1a',
           eventId: 'e-1',
-          title: '并列的那条',
-          type: TaskType.parallel,
-          dueAt: '2026-10-01',
+          title: '子任务',
+          parentId: 't-1',
+          type: TaskType.subtask,
         ),
       ],
     );
-    // 导出是给对面那个 AI 看的：`parallel` 已经没有对应概念，
-    // 按"框内的下级"标注即可，不再出现「并列」这种它读不懂的旧类型名
-    expect(text, contains('- [ ] 并列的那条（子任务） — 截止 2026-10-01'));
-    expect(text, isNot(contains('（并列）')));
+
+    expect(text, isNot(contains('相关事件与任务线')));
+    expect(text, isNot(contains('上线准备')));
+    expect(text, isNot(contains('搬家')));
+    expect(text, isNot(contains('第一条主线')));
+    expect(text, isNot(contains('子任务')));
+    // 项目自己的内容照旧
+    expect(text, contains('# 项目：重构知识库'));
   });
 
-  test('没有任务的事件不产生空小节', () {
-    final text = build(
-      events: <Event>[event('e-1', '空事件'), event('e-2', '有任务')],
-      tasks: <Task>[task('t-1', eventId: 'e-2', title: '一条任务')],
-    );
-    expect(text, isNot(contains('空事件')));
-    expect(text, contains('### 有任务'));
-  });
-
-  test('任务或条目里的换行被单行化（否则会把 Markdown 列表拆散）', () {
+  test('条目里的换行被单行化（否则会把 Markdown 列表拆散）', () {
     final text = build(
       p: project(
         items: const <ProjectItem>[
           ProjectItem(id: 'i-1', text: '第一行\n第二行', done: false),
         ],
       ),
-      events: <Event>[event('e-1', '事件')],
-      tasks: <Task>[task('t-1', eventId: 'e-1', title: '标题\n带换行')],
     );
     expect(text, contains('- [ ] 第一行 第二行'));
-    expect(text, contains('- [ ] 标题 带换行'));
     expect(text, isNot(contains('第一行\n第二行')));
   });
 }

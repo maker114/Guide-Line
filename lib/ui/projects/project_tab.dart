@@ -13,6 +13,10 @@ import 'project_detail_page.dart';
 /// 展开 / 收起箭头的旋转时长（项目页与事件页共用同一个节奏）。
 const Duration _foldDuration = Duration(milliseconds: 180);
 
+/// 标识色小色条的 Key：用例靠它确认"没设色的项目用的是灰条，而不是空位"。
+@visibleForTesting
+Key projectColorBarKey(String projectId) => Key('ProjectTile.colorBar.$projectId');
+
 /// 项目 Tab：**项目树（≤ 3 层）**。
 ///
 /// 手机上没有树控件的余地，所以用「扁平化 + 缩进 + 展开箭头」渲染：
@@ -341,23 +345,21 @@ class _ProjectTile extends StatelessWidget {
       title: Row(
         children: <Widget>[
           // 标识色（灵感整理第 10 条）：一小段色条，扫一眼就能把项目区分开。
-          // **槽位固定占位**：没设色的行也留出同样宽度，标题才不会一行一个位置
-          // （实机反馈"第一条的左侧没有对齐"）。子项目已有色点，不再画色条。
+          // **没设色就用中性灰补齐这个位置**（实机反馈）：空着会让标题一列一个位置；
+          // 灰条既把位置占住，又明说"这一项还没有归属色"。子项目已有色点，不再画色条。
           if (!isChild)
-            SizedBox(
-              width: 10,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: colorOfHex(project.color) == null
-                    ? null
-                    : Container(
-                        width: 4,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          color: colorOfHex(project.color),
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Container(
+                key: projectColorBarKey(project.id),
+                width: 4,
+                height: 16,
+                decoration: BoxDecoration(
+                  color:
+                      colorOfHex(project.color) ??
+                      theme.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
           Expanded(
@@ -385,10 +387,15 @@ class _ProjectTile extends StatelessWidget {
           ),
         ],
       ),
-      // 子项目的副标题只留必要信息（日期 / 子项目数），目的那一长串不再重复显示
+      // 子项目的副标题只留必要信息（日期 / 子项目数），目的那一长串不再重复显示。
+      //
+      // **一眼看出没有副标题时给 `null`**（实机反馈"第四条项目没有目标，标题
+      // 略微下移保证居中"）：留一个空副标题占位会让这一行和两行的行一样高、
+      // 内容却都挤在上半截，看着头重脚轻。给它真的没有副标题，ListTile 就按
+      // 单行排版，标题自然竖直居中、行也短一截。
       subtitle: isChild
           ? _childSubtitle(theme, project, row, due, overdue)
-          : _Subtitle(row: row, due: due, overdue: overdue),
+          : _rootSubtitle(theme, project, row, due, overdue),
       trailing: PopupMenuButton<String>(
         tooltip: '更多',
         onSelected: (value) async {
@@ -464,57 +471,49 @@ Widget? _childSubtitle(
   return Row(children: parts);
 }
 
-class _Subtitle extends StatelessWidget {
-  const _Subtitle({
-    required this.row,
-    required this.due,
-    required this.overdue,
-  });
-
-  final _ProjectRow row;
-  final String due;
-  final bool overdue;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final project = row.project;
-    final style = theme.textTheme.labelSmall;
-    return Row(
-      children: <Widget>[
-        if (due.isNotEmpty) ...<Widget>[
-          Icon(
-            Icons.event,
-            size: 13,
-            color: overdue
-                ? theme.colorScheme.error
-                : theme.colorScheme.outline,
-          ),
-          const SizedBox(width: 3),
-          Text(
-            due,
-            style: style?.copyWith(
-              color: overdue ? theme.colorScheme.error : null,
-            ),
-          ),
-          const SizedBox(width: 10),
-        ],
-        if (row.childCount > 0) ...<Widget>[
-          const Icon(Icons.account_tree_outlined, size: 13),
-          const SizedBox(width: 3),
-          Text('${row.childCount} 个子项目', style: style),
-          const SizedBox(width: 10),
-        ],
-        if (project.purpose.isNotEmpty)
-          Expanded(
-            child: Text(
-              project.purpose,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: style,
-            ),
-          ),
-      ],
-    );
-  }
+/// 根项目的副标题：日期 + 子项目数 + 目的（有哪个写哪个）。
+///
+/// **一个都没有时返回 `null`**，而不是塞一个空 `Row`：留着空占位会让这一行
+/// 和两行的行一样高、内容却挤在上半截（实机反馈"第四条项目没有目标"）。
+/// 返回 `null` 之后 ListTile 按单行排版，标题竖直居中、行也短一截。
+Widget? _rootSubtitle(
+  ThemeData theme,
+  Project project,
+  _ProjectRow row,
+  String due,
+  bool overdue,
+) {
+  final style = theme.textTheme.labelSmall;
+  final parts = <Widget>[
+    if (due.isNotEmpty) ...<Widget>[
+      Icon(
+        Icons.event,
+        size: 13,
+        color: overdue ? theme.colorScheme.error : theme.colorScheme.outline,
+      ),
+      const SizedBox(width: 3),
+      Text(
+        due,
+        style: style?.copyWith(color: overdue ? theme.colorScheme.error : null),
+      ),
+      const SizedBox(width: 10),
+    ],
+    if (row.childCount > 0) ...<Widget>[
+      const Icon(Icons.account_tree_outlined, size: 13),
+      const SizedBox(width: 3),
+      Text('${row.childCount} 个子项目', style: style),
+      const SizedBox(width: 10),
+    ],
+    if (project.purpose.isNotEmpty)
+      Expanded(
+        child: Text(
+          project.purpose,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
+      ),
+  ];
+  if (parts.isEmpty) return null;
+  return Row(children: parts);
 }

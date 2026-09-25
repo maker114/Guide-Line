@@ -86,4 +86,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(renderedTurns(), closeTo(0, 0.001), reason: '收起后箭头朝右');
   });
+
+  testWidgets('没设标识色的项目：用灰条补齐那个位置，而不是留空', (tester) async {
+    final app = await boot(tester);
+    final plain = app.ws.liveProjects.firstWhere((p) => p.color == null);
+    final colored = app.ws.liveProjects.firstWhere((p) => p.color != null);
+
+    Color? barColorOf(String projectId) {
+      final widget = tester.widget<Container>(
+        find.byKey(projectColorBarKey(projectId)),
+      );
+      return (widget.decoration as BoxDecoration?)?.color;
+    }
+
+    final scheme = Theme.of(tester.element(find.text('没颜色没子项目'))).colorScheme;
+    expect(barColorOf(plain.id), scheme.outlineVariant, reason: '没设色 = 中性灰条');
+    expect(barColorOf(colored.id), isNot(scheme.outlineVariant), reason: '设了色就是那个色');
+
+    // 两条色条占同样的位置（宽度一致），标题才会对齐
+    expect(
+      tester.getSize(find.byKey(projectColorBarKey(plain.id))).width,
+      tester.getSize(find.byKey(projectColorBarKey(colored.id))).width,
+    );
+  });
+
+  testWidgets('没有副标题的项目：标题竖直居中，不留一截空占位', (tester) async {
+    final app = await boot(tester);
+    final plain = app.ws.liveProjects.firstWhere((p) => p.color == null);
+
+    final tile = tester.widget<ListTile>(
+      find.ancestor(
+        of: find.text('没颜色没子项目'),
+        matching: find.byType(ListTile),
+      ),
+    );
+    expect(tile.subtitle, isNull, reason: '没内容就该没有副标题，而不是空占位');
+
+    // 标题在行内居中（实机反馈：原来头重脚轻）
+    final row = tester.getRect(
+      find.ancestor(
+        of: find.text('没颜色没子项目'),
+        matching: find.byType(ListTile),
+      ),
+    );
+    final text = tester.getRect(find.text('没颜色没子项目'));
+    expect(
+      (text.center.dy - row.center.dy).abs(),
+      lessThan(2),
+      reason: '标题该在这一行里竖直居中（行 ${row.height}）',
+    );
+    expect(plain.id, isNotEmpty);
+  });
 }
