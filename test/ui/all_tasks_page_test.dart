@@ -47,7 +47,7 @@ void main() {
     expect(find.text('共 1 条（含子任务）'), findsOneWidget);
   });
 
-  testWidgets('任务行：任务名与到期日同一行、日期靠右，完成钮最右，没有箭头', (tester) async {
+  testWidgets('任务行：完成圆钮在左，到期日靠右在第二行，第一行只有任务名，没有箭头', (tester) async {
     final app = await boot();
     final event = app.ws.createEvent(name: '一件事');
     app.run(() => app.ws.createTask(eventId: event.id, title: '写解析层', dueAt: dateOffset(3)));
@@ -57,17 +57,17 @@ void main() {
     final title = tester.getRect(find.text('写解析层'));
     final due = tester.getRect(find.textContaining('3 天后'));
     final button = tester.getRect(find.byIcon(Icons.radio_button_unchecked));
+    final eventLabel = tester.getRect(find.text('一件事'));
 
+    expect(button.left, lessThan(title.left), reason: '完成圆钮在最左边（原先的位置）');
     expect(
-      (due.center.dy - title.center.dy).abs(),
+      (due.center.dy - eventLabel.center.dy).abs(),
       lessThan(8),
-      reason: '到期日必须和任务名在同一行',
+      reason: '到期日和所属事件在第二行',
     );
-    expect(title.left, lessThan(due.left), reason: '任务名在左、到期日在它右边');
-    expect(due.right, lessThanOrEqualTo(button.left), reason: '完成圆钮在到期日右边（最右）');
+    expect(due.top, greaterThan(title.bottom), reason: '它在任务名那一行的下面');
+    expect(due.left, greaterThan(eventLabel.left), reason: '到期日靠右');
     expect(find.byIcon(Icons.chevron_right), findsNothing, reason: '箭头去掉了');
-    // 第二行仍是所属事件（小一号的次要信息）
-    expect(find.text('一件事'), findsOneWidget);
   });
 
   testWidgets('任务名比下面那行（所属事件）字号大一档', (tester) async {
