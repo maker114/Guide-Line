@@ -62,6 +62,19 @@ double _navStretchAt(double progress) =>
 @visibleForTesting
 const Key navIndicatorKey = Key('AppBottomNav.indicator');
 
+/// 某一项**图标缩放层**的 Key：用例靠它量那点"弹一下"。
+@visibleForTesting
+Key navIconKey(String label) => Key('AppBottomNav.icon.$label');
+
+/// 图标"弹一下"的时长与幅度。
+///
+/// 幅度刻意小（放大 18%）：导航是要反复点的东西，动作一大就成了噪音。
+const Duration _navIconPopDuration = Duration(milliseconds: 240);
+const double _navIconPopScale = 1.18;
+
+/// 实心 / 空心图标交叉淡入的时长（与"弹一下"同量级，看着是一件事）。
+const Duration _navIconFadeDuration = Duration(milliseconds: 160);
+
 /// 选中指示器的几何：进度 [t]（0 → 1）时，宽 [nominalWidth] 的胶囊从 [fromLeft]
 /// 滑到 [toLeft]，返回它此刻的 `left` 与 `width`。
 ///
@@ -102,7 +115,11 @@ const Key navIndicatorKey = Key('AppBottomNav.indicator');
 /// **不含选中背景**：选中胶囊是整条导航共用的一个，在 `AppBottomNav` 里
 /// 靠 `Stack` 定位并做滑动动画 —— 每项各画一个就只能"淡入淡出"，
 /// 做不到"滑过去 + 途中拉长"。
-class _NavItem extends StatelessWidget {
+///
+/// 它自己负责**图标那点小动画**（实机反馈"点击选中的时候加个小动画"）：
+///   · 点一下 → 图标弹一下（放大到 [_navIconPopScale] 再回位）；
+///   · 变成选中 / 取消选中时同样弹一下，并交叉淡入实心图标。
+class _NavItem extends StatefulWidget {
   const _NavItem({
     required this.icon,
     required this.selectedIcon,
@@ -120,11 +137,46 @@ class _NavItem extends StatelessWidget {
   final int badgeCount;
 
   @override
+  State<_NavItem> createState() => _NavItemState();
+}
+
+class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin {
+  /// `0 → 1` 走完就是"弹一下"。
+  ///
+  /// 只有一个控制器：交叉淡入交给 `AnimatedSwitcher`，这里只管缩放，
+  /// 两个动画都挂在同一个"选中/点击"事件上，不会各自跑偏。
+  late final AnimationController _pop = AnimationController(
+    vsync: this,
+    duration: _navIconPopDuration,
+  );
+
+  @override
+  void didUpdateWidget(_NavItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 选中状态变了（点底栏切页、或者滑动过半格）也弹一下
+    if (widget.selected != oldWidget.selected) _pop.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _pop.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 选中那一项的图标与文字跟胶囊上的前景色走（胶囊是 `secondaryContainer`）
+    final foreground =
+        widget.selected ? scheme.onSecondaryContainer : scheme.onSurfaceVariant;
+
     return Expanded(
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          // 点**已经选中**的那一项也要有反馈 —— 否则"我点到了吗"只能看页面有没有动
+          _pop.forward(from: 0);
+          widget.onTap();
+        },
         // 指示器是胶囊，水波纹也跟着走胶囊 —— 圆形的波纹会溢出到相邻格子
         customBorder: const StadiumBorder(),
         child: SizedBox(
@@ -133,20 +185,35 @@ class _NavItem extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               Badge.count(
-                count: badgeCount,
-                isLabelVisible: badgeCount > 0,
-                child: Icon(
-                  selected ? selectedIcon : icon,
-                  size: 22,
-                  color: scheme.onSurfaceVariant,
+                count: widget.badgeCount,
+                isLabelVisible: widget.badgeCount > 0,
+                child: AnimatedBuilder(
+                  animation: _pop,
+                  builder: (context, child) => Transform.scale(
+                    key: navIconKey(widget.label),
+                    // `Transform.scale` 只影响绘制、不改布局尺寸 ——
+                    // 放大时不会把这一格撑高（1.6 倍字体下尤其重要）
+                    scale: 1 + (_navIconPopScale - 1) * math.sin(math.pi * _pop.value),
+                    child: child,
+                  ),
+                  child: AnimatedSwitcher(
+                    duration: _navIconFadeDuration,
+                    child: Icon(
+                      widget.selected ? widget.selectedIcon : widget.icon,
+                      // key 让 AnimatedSwitcher 知道"换图标了"，才会做交叉淡入
+                      key: ValueKey<bool>(widget.selected),
+                      size: 22,
+                      color: foreground,
+                    ),
+                  ),
                 ),
               ),
               Text(
-                label,
+                widget.label,
                 style: Theme.of(context)
                     .textTheme
                     .labelSmall
-                    ?.copyWith(color: scheme.onSurfaceVariant),
+                    ?.copyWith(color: foreground),
               ),
             ],
           ),

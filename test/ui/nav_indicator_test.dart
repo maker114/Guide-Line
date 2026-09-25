@@ -222,6 +222,52 @@ void main() {
         expect(pill.right, lessThanOrEqualTo(bar.right + 0.01));
       }
     });
+
+    /// 图标那一层当前的缩放倍数（`Transform.scale` 只改绘制，量尺寸量不到）。
+    double iconScale(WidgetTester tester, String label) => tester
+        .widget<Transform>(find.byKey(navIconKey(label)))
+        .transform
+        .getMaxScaleOnAxis();
+
+    testWidgets('点某一项：图标弹一下再回到原大小', (tester) async {
+      await pumpNav(tester);
+
+      expect(iconScale(tester, '项目'), closeTo(1, 0.001), reason: '静止时就是原大小');
+
+      await tester.tap(find.text('项目'));
+      await tester.pump(); // 起帧
+      await tester.pump(const Duration(milliseconds: 120)); // 动画中点
+      expect(iconScale(tester, '项目'), greaterThan(1.05), reason: '途中应当被放大');
+
+      await tester.pumpAndSettle();
+      expect(iconScale(tester, '项目'), closeTo(1, 0.001), reason: '弹完要回到原大小');
+    });
+
+    testWidgets('点已经选中的那一项：照样有反馈', (tester) async {
+      await pumpNav(tester);
+
+      // 起点就是第 0 页，再点一次"灵感"
+      await tester.tap(find.text('灵感'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(iconScale(tester, '灵感'), greaterThan(1.05));
+
+      await tester.pumpAndSettle();
+      expect(iconScale(tester, '灵感'), closeTo(1, 0.001));
+    });
+
+    testWidgets('滑动到别页时，新选中的那一项也会弹一下', (tester) async {
+      await pumpNav(tester);
+      expect(iconScale(tester, '事件'), closeTo(1, 0.001));
+
+      hostKey.currentState!.dragTo(2); // 滑到第 2 页（事件）
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 120));
+      expect(iconScale(tester, '事件'), greaterThan(1.05));
+
+      await tester.pumpAndSettle();
+      expect(iconScale(tester, '事件'), closeTo(1, 0.001));
+    });
   });
 }
 
