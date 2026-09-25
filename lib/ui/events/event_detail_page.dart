@@ -15,6 +15,7 @@ import '../common/task_status_button.dart';
 import '../theme/shape_tokens.dart';
 import 'task_actions.dart';
 import 'task_flow_layout.dart';
+import 'task_fold.dart';
 
 /// 事件详情：**一条任务线的可视化**。
 ///
@@ -359,14 +360,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
     );
   }
 
-  /// 哪些已完成节点该**自动收起**。
-  ///
-  /// 规则（实机反馈）：任务线一长，做完的节点把"现在做到哪"淹没了。
-  /// 所以从**当前的第一个未完成节点**往回看，只保留它的**上一个**节点，
-  /// 再往前的已完成节点一律收起。
-  ///
-  /// 为什么留一个而不是全收：完全没有上下文会让人不知道"这条线走到哪一步了"；
-  /// 留紧邻的那一个既省地方、又给了参照。
+  /// 哪些已完成节点该**自动收起**（规则本身在 `task_fold.dart`，与列表页共用）。
   ///
   /// 只对**主线层**（`depth == 0`）生效：支路内部本来就没几个节点，
   /// 再折叠会看不清支路自己走到哪。支路标题行不受影响。
@@ -374,31 +368,17 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 刻意**不写进偏好**：这是"由数据算出来的展示"，写完就过时；
   /// 用户手动展开过的节点由 `app.isExpanded` 那套偏好负责（显式展开优先）。
   Set<String> _autoFoldedTaskIds(List<FlowRow> rows) {
-    final mainRows = rows
+    final mainTasks = rows
         .where((row) => row.depth == 0 && row.task != null)
+        .map((row) => row.task!)
         .toList(growable: false);
-    if (mainRows.isEmpty) return const <String>{};
-
-    // 第一个未完成的主线节点 = "当前执行到的地方"
-    final frontier = mainRows.indexWhere(
-      (row) => !isTerminal(row.task!.status),
-    );
-    // 全做完了就没有"当前节点"，那就不折叠（否则会把整条线藏起来）
-    if (frontier < 0) return const <String>{};
-
-    final keepFrom = frontier - 1; // 上一个节点也要留着
-    final folded = <String>{};
-    for (var i = 0; i < keepFrom; i += 1) {
-      final task = mainRows[i].task!;
-      if (!isTerminal(task.status)) continue;
+    return autoFoldedMainLineIds(
+      mainTasks,
       // 用户手动展开过的**不折**（显式选择优先于自动规则）
-      if (app.isExpanded(task.id, defaultExpanded: false) &&
-          app.ws.prefs.expandedIds.contains(task.id)) {
-        continue;
-      }
-      folded.add(task.id);
-    }
-    return folded;
+      userExpanded: (id) =>
+          app.isExpanded(id, defaultExpanded: false) &&
+          app.ws.prefs.expandedIds.contains(id),
+    );
   }
 
   /// 相邻两行之间要不要画"接着做"的连线。
