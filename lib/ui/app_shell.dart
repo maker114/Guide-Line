@@ -130,7 +130,9 @@ class _AppShellState extends State<AppShell> {
                 child: NavigationBar(
                   backgroundColor: Colors.transparent,
                   elevation: 0,
-                  height: 56,
+                  // 高度再收一档（56 → 48）：让图标与文字更贴身、整条胶囊更紧凑
+                  // —— 外部宽度不变（左右内边距由 NavigationBar 按 4 个目的地平分）。
+                  height: 48,
                   labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
                   selectedIndex: _index,
                   indicatorShape: const StadiumBorder(),

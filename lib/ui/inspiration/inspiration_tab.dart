@@ -12,7 +12,6 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
 import '../common/tag_editor.dart';
-import '../theme/shape_tokens.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -194,57 +193,57 @@ class InspirationTabState extends State<InspirationTab> {
 
   /// 速记书写区。
   ///
-  /// 按实机反馈：**要外框**（一眼能看出"这里是个输入区"，深色主题下同样成立），
-  /// 但**不要卡片标题**，也不要阅读型输入框那种重边框 ——
-  /// 所以用一个 1px 描边 + 大圆角的容器（`shapeCard` 那一档），无阴影。
+  /// 按实机反馈：**与「目的」那种字段一样的样式，但不要内框** ——
+  /// 所以外面是一张带轻阴影的卡片（`Card(elevation: 1)`，没有标题行），
+  /// 里面直接放一个**无边框**的输入区。之前那版是"外框 + 内框"两层，
+  /// 看着像个表单；再往前那版连外框都没有，又看不出这是输入区。
   Widget _buildCaptureArea() {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(AppShapes.cardRadius),
-          border: Border.all(color: theme.colorScheme.outlineVariant),
-        ),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            TextField(
-              controller: _capture,
-              focusNode: _focus,
-              minLines: 2,
-              maxLines: 8,
-              textInputAction: TextInputAction.newline,
-              style: theme.textTheme.bodyLarge,
-              decoration: InputDecoration(
-                hintText: '「灵感」在此钉下一个锚点……',
-                hintStyle: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.outline,
-                ),
-                // 外框由外层容器给，输入框自己不再画一遍
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                focusedBorder: InputBorder.none,
-                isDense: true,
-                contentPadding: EdgeInsets.zero,
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.tonalIcon(
-                onPressed: _save,
-                icon: const Icon(Icons.send, size: 18),
-                label: const Text('记下'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  shape: const StadiumBorder(),
-                  visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 1,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              TextField(
+                controller: _capture,
+                focusNode: _focus,
+                minLines: 2,
+                maxLines: 8,
+                textInputAction: TextInputAction.newline,
+                style: theme.textTheme.bodyLarge,
+                decoration: InputDecoration(
+                  hintText: '「灵感」在此钉下一个锚点……',
+                  hintStyle: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                  // 无内框：外框由卡片给
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  isDense: true,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
-            ),
-          ],
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  onPressed: _save,
+                  icon: const Icon(Icons.send, size: 18),
+                  label: const Text('记下'),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    shape: const StadiumBorder(),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -439,12 +438,9 @@ class _InspirationTile extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              // 项目标识色也体现在这里：灵感列表里就能按颜色认项目
-              ProjectMarker(
-                color: project?.color,
-                fallbackIcon: project == null ? Icons.inbox_outlined : Icons.folder_outlined,
-                size: 14,
-              ),
+              // 项目标识色也体现在这里：灵感列表里就能按颜色认项目。
+              // 未分配 / 未设色时是灰色空心圆（`ProjectMarker` 自己处理）
+              ProjectMarker(color: project?.color, size: 14),
               const SizedBox(width: 4),
               Expanded(
                 child: GestureDetector(

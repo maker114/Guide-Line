@@ -20,38 +20,37 @@ Color? colorOfHex(String? hex) {
   return value == null ? null : Color(0xFF000000 | value);
 }
 
-/// 项目标识的**统一视觉线索**：设了标识色就显示一个色点，没设就回落到图标。
+/// 项目标识的**统一视觉线索**：
+///   · 有标识色 → **实心圆**（不加任何描边）；
+///   · 没有标识色 → **灰色空心圆**（一眼看出"这个还没分配颜色"）。
+///
+/// 两处都按实机反馈改过：原来有颜色时也描一圈浅灰边，看着像"空心带填充"，
+/// 浅色主题下那圈边还抢了实心圆的边界；未设置时又回落到一个文件夹图标，
+/// 与已设置的圆点不是一套形状，扫一列下来参差不齐。
 ///
 /// 之所以收成一个控件：项目树、灵感列表、分配灵感的选择器都要显示它，
-/// 三处各写一遍迟早会出现"树上有色点、选择器里没有"的不一致。
+/// 三处各写一遍迟早出现"树上是实心圆、选择器里是图标"的不一致。
 class ProjectMarker extends StatelessWidget {
-  const ProjectMarker({
-    super.key,
-    required this.color,
-    this.fallbackIcon = Icons.folder_outlined,
-    this.size = 18,
-  });
+  const ProjectMarker({super.key, required this.color, this.size = 18});
 
-  /// 项目的标识色（`#rrggbb`），`null` 表示未设置
+  /// 项目的标识色（`#rrggbb`），`null` 表示未设置 → 灰色空心圆
   final String? color;
-  final IconData fallbackIcon;
   final double size;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final resolved = colorOfHex(color);
-    if (resolved == null) {
-      return Icon(fallbackIcon, size: size, color: theme.colorScheme.outline);
-    }
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
+        // 有颜色：实心填充、无描边。没颜色：不填充、用灰描边画个空心圆。
         color: resolved,
         shape: BoxShape.circle,
-        // 浅色描边：浅色主题下浅色圆点会与背景糊在一起
-        border: Border.all(color: theme.colorScheme.outlineVariant, width: 1),
+        border: resolved == null
+            ? Border.all(color: theme.colorScheme.outline, width: 1.5)
+            : null,
       ),
     );
   }

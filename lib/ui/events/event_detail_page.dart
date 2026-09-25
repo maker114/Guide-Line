@@ -276,6 +276,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
         // 走向（分叉 / 合流）交给流图，界面只负责把排布结果画出来
         final flow = TaskFlow.of(ws.allTasks, eventId: eventId);
         final flowRows = layoutTaskFlow(flow);
+        // 「已完成的老节点自动收起」：只留**当前节点的上一个节点**
+        // （实机反馈：做完的任务一多，任务线就长得看不清现在做到哪了）
+        final foldedIds = _autoFoldedTaskIds(flowRows);
 
         return Scaffold(
           appBar: AppBar(
@@ -329,13 +332,17 @@ class _EventDetailPageState extends State<EventDetailPage> {
                   ),
                 )
               else
-                for (var i = 0; i < flowRows.length; i += 1) ...<Widget>[
-                  // 主线节点之间、以及同一条支路内部，都画一道连线表示"接着做"；
-                  // 分叉/合流处不画（那里是分合关系，不是次序）
-                  if (i > 0 && _needsConnector(flowRows[i - 1], flowRows[i]))
-                    const _VerticalConnector(),
-                  _buildFlowRow(context, flowRows[i]),
-                ],
+                for (var i = 0; i < flowRows.length; i += 1)
+                  // 被自动收起的已完成老节点：不画它、也不画它前面那条连线
+                  if (!foldedIds.contains(flowRows[i].task?.id)) ...<Widget>[
+                    // 主线节点之间、以及同一条支路内部，都画一道连线表示"接着做"；
+                    // 分叉/合流处不画（那里是分合关系，不是次序）
+                    if (i > 0 &&
+                        _needsConnector(flowRows[i - 1], flowRows[i]) &&
+                        !foldedIds.contains(flowRows[i - 1].task?.id))
+                      const _VerticalConnector(),
+                    _buildFlowRow(context, flowRows[i]),
+                  ],
               const SizedBox(height: 16),
               Card(
                 margin: EdgeInsets.zero,
@@ -350,6 +357,48 @@ class _EventDetailPageState extends State<EventDetailPage> {
         );
       },
     );
+  }
+
+  /// 哪些已完成节点该**自动收起**。
+  ///
+  /// 规则（实机反馈）：任务线一长，做完的节点把"现在做到哪"淹没了。
+  /// 所以从**当前的第一个未完成节点**往回看，只保留它的**上一个**节点，
+  /// 再往前的已完成节点一律收起。
+  ///
+  /// 为什么留一个而不是全收：完全没有上下文会让人不知道"这条线走到哪一步了"；
+  /// 留紧邻的那一个既省地方、又给了参照。
+  ///
+  /// 只对**主线层**（`depth == 0`）生效：支路内部本来就没几个节点，
+  /// 再折叠会看不清支路自己走到哪。支路标题行不受影响。
+  ///
+  /// 刻意**不写进偏好**：这是"由数据算出来的展示"，写完就过时；
+  /// 用户手动展开过的节点由 `app.isExpanded` 那套偏好负责（显式展开优先）。
+  Set<String> _autoFoldedTaskIds(List<FlowRow> rows) {
+    final mainRows = rows
+        .where((row) => row.depth == 0 && row.task != null)
+        .toList(growable: false);
+    if (mainRows.isEmpty) return const <String>{};
+
+    // 第一个未完成的主线节点 = "当前执行到的地方"
+    final frontier = mainRows.indexWhere(
+      (row) => !isTerminal(row.task!.status),
+    );
+    // 全做完了就没有"当前节点"，那就不折叠（否则会把整条线藏起来）
+    if (frontier < 0) return const <String>{};
+
+    final keepFrom = frontier - 1; // 上一个节点也要留着
+    final folded = <String>{};
+    for (var i = 0; i < keepFrom; i += 1) {
+      final task = mainRows[i].task!;
+      if (!isTerminal(task.status)) continue;
+      // 用户手动展开过的**不折**（显式选择优先于自动规则）
+      if (app.isExpanded(task.id, defaultExpanded: false) &&
+          app.ws.prefs.expandedIds.contains(task.id)) {
+        continue;
+      }
+      folded.add(task.id);
+    }
+    return folded;
   }
 
   /// 相邻两行之间要不要画"接着做"的连线。

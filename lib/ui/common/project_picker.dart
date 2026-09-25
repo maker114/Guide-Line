@@ -72,10 +72,7 @@ Future<String?> pickProject(
                       contentPadding: EdgeInsets.only(left: 16.0 + entry.value * 20, right: 16),
                       // 标识色也带到这里：分配灵感时能按颜色认项目，
                       // 与项目树上是同一套视觉线索
-                      leading: ProjectMarker(
-                        color: entry.key.color,
-                        fallbackIcon: Icons.folder_outlined,
-                      ),
+                      leading: ProjectMarker(color: entry.key.color),
                       title: Text(entry.key.title),
                       onTap: () => Navigator.of(sheetContext).pop(entry.key.id),
                     ),
