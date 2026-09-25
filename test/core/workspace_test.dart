@@ -1110,20 +1110,24 @@ void main() {
       expect(entity.toJson().containsKey('title'), isFalse);
     });
 
-    test('「全部排期」含所有排了期的任务，不受截止日限制', () {
-      final event = ws.createEvent(name: '事件');
-      final old = ws.createTask(eventId: event.id, title: '逾期', dueAt: '2026-01-01');
-      final far = ws.createTask(eventId: event.id, title: '很久以后', dueAt: '2027-01-01');
-      ws.createTask(eventId: event.id, title: '没排期');
-      final done = ws.createTask(eventId: event.id, title: '做完了', dueAt: '2026-02-02');
+    test('「接下来的任务」的一览：未完成且未归档，不管有没有排期、也不管事件是否搁置', () {
+      final active = ws.createEvent(name: '在做的事');
+      final dropped = ws.createEvent(name: '先不做了');
+      final overdue = ws.createTask(eventId: active.id, title: '逾期', dueAt: '2026-01-01');
+      final far = ws.createTask(eventId: active.id, title: '很久以后', dueAt: '2027-01-01');
+      final undated = ws.createTask(eventId: active.id, title: '没排期');
+      final inDropped = ws.createTask(eventId: dropped.id, title: '搁置线里的');
+      final done = ws.createTask(eventId: active.id, title: '做完了', dueAt: '2026-02-02');
       ws.setTaskStatus(done.id, NodeStatus.done);
+      ws.setEventStatus(dropped.id, NodeStatus.ignored);
 
       expect(
-        ws.tasksScheduled().map((t) => t.id).toList(),
-        <String>[old.id, far.id],
-        reason: '所有排了期的待处理任务，按日期升序；没排期的与已完成的不算',
+        ws.openTasks().map((t) => t.id).toSet(),
+        <String>{overdue.id, far.id, undated.id, inDropped.id},
+        reason: '已搁置的线也照样列出来 —— 这一页不是催办（实机反馈踩过这个坑）',
       );
-      expect(ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(), <String>[old.id]);
+      // 而"催办"那一侧仍然跳过它
+      expect(ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(), <String>[overdue.id]);
     });
 
     test('启动清理：满 30 天才清，活着的与没到期的一条都不动', () {

@@ -70,16 +70,37 @@ void main() {
     expect(find.text('已完成 / 已搁置'), findsNothing, reason: '连分组头都不该有');
   });
 
-  testWidgets('已搁置事件下的任务不算（放下的线不该继续催）', (tester) async {
+  testWidgets('已搁置事件下的任务**照样列出**（这一页不是催办，是"我还欠着什么"）', (tester) async {
+    // 实机反馈踩到的坑：原来这里跳过了"已搁置的事件"下的任务（从「到期」继承
+    // 过来的规则），结果 9 条未完成的任务全被藏掉、整页空空如也。
+    // 那条规则只在**催办**的地方生效（逾期角标 / 启动横幅）。
     final app = await boot();
     final dropped = app.ws.createEvent(name: '先不做了');
-    app.run(() => app.ws.createTask(eventId: dropped.id, title: '搁置线的任务', dueAt: dateOffset(-1)));
+    app.run(() => app.ws.createTask(eventId: dropped.id, title: '搁置线里的任务', dueAt: dateOffset(-1)));
     app.run(() => app.ws.setEventStatus(dropped.id, NodeStatus.ignored));
 
     await openUpcoming(tester, app);
 
-    expect(find.text('搁置线的任务'), findsNothing);
-    expect(find.textContaining('接下来没有待办'), findsOneWidget);
+    expect(find.text('搁置线里的任务'), findsOneWidget);
+    expect(find.textContaining('接下来没有待办'), findsNothing);
+    // 但"催办"那一侧仍然排除它：逾期角标不该被放下的线拉响
+    expect(app.overdueCount, 0);
+  });
+
+  testWidgets('空的时候把"为什么空"说清楚（逐条对上筛选口径）', (tester) async {
+    final app = await boot();
+    final live = app.ws.createEvent(name: '还开着的线');
+    final done = app.ws.createTask(eventId: live.id, title: '做完了');
+    final ignored = app.ws.createTask(eventId: live.id, title: '搁置了');
+    app.run(() => app.ws.setTaskStatus(done.id, NodeStatus.done));
+    app.run(() => app.ws.setTaskStatus(ignored.id, NodeStatus.ignored));
+
+    await openUpcoming(tester, app);
+
+    expect(find.textContaining('共 2 条任务'), findsOneWidget);
+    expect(find.textContaining('已完成 1 条'), findsOneWidget);
+    expect(find.textContaining('已搁置 1 条'), findsOneWidget);
+    expect(find.textContaining('这一页只列未完成的任务'), findsOneWidget);
   });
 
   testWidgets('「日历」按钮打开任务日历，点一天能看到那天的任务', (tester) async {

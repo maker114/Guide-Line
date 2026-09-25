@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/models/enums.dart';
 import '../common/empty_state.dart';
 import '../common/task_tile.dart';
 import '../common/urgency.dart';
@@ -26,8 +27,8 @@ class UpcomingTasksPage extends StatelessWidget {
       listenable: app,
       builder: (context, _) {
         final colors = UrgencyColors.ofContext(context);
-        // `openTasks()`：未完成、未归档、不在已搁置事件下（放下的线不该继续催），
-        // **不要求有到期日** —— "没有到期日"本来就是紧迫度里的一档
+        // `openTasks()`：未完成、未归档，**不管有没有排期、也不管所属事件是不是
+        // 已搁置** —— 这一页是"我还欠着什么"的一览，不是催办（催办在逾期角标里）
         final tasks = app.ws.openTasks();
         final rows = flattenTaskGroups(
           groupByUrgency(tasks),
@@ -65,10 +66,10 @@ class UpcomingTasksPage extends StatelessWidget {
               const Divider(height: 1),
               Expanded(
                 child: rows.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         icon: Icons.upcoming_outlined,
                         title: '接下来没有待办',
-                        hint: '任务都做完了；或者去「事件」页给这条线排上几条',
+                        hint: _whyEmpty(),
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 24),
@@ -97,5 +98,24 @@ class UpcomingTasksPage extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// 空的时候**说清为什么空**（实机反馈："这一页没有东西，但全部任务里是正常的"）。
+  ///
+  /// 把数字摆出来：共多少条、其中已完成 / 已搁置各多少 —— 剩下的才是"还开着的"。
+  String _whyEmpty() {
+    final ws = app.ws;
+    final all = ws.liveTasks.where((t) => !t.archived).toList(growable: false);
+    if (all.isEmpty) return '还没有任务：去「事件」页给某条线加几条';
+
+    final done = all.where((t) => t.status == NodeStatus.done).length;
+    final ignored = all.where((t) => t.status == NodeStatus.ignored).length;
+
+    final parts = <String>[
+      '共 ${all.length} 条任务',
+      if (done > 0) '已完成 $done 条',
+      if (ignored > 0) '已搁置 $ignored 条',
+    ];
+    return '${parts.join(' · ')}。这一页只列未完成的任务；要看全部（含已完成）切到「全部任务」';
   }
 }

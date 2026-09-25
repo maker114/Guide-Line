@@ -180,33 +180,26 @@ class Workspace {
   /// 到期聚合视图（Q29 / Q41 / Q48）：`due_at` 早于等于 [date] 且未完成、未归档。
   ///
   /// **已搁置事件下的任务不算**（实机反馈）：事件被搁置就是"这条线先不做了"，
-  /// 再让它里面的任务天天出现在「到期」和逾期角标里，等于把已经放下的东西
-  /// 又拽回来催一遍。语义上它仍是一条待处理任务（`status = pending`），
-  /// 只是不再参与"到期"这件事。
+  /// 再让它里面的任务拉响**逾期角标与启动横幅**，等于把已经放下的东西又拽回来
+  /// 催一遍。语义上它仍是一条待处理任务（`status = pending`），只是不参与"催办"。
+  ///
+  /// 注意：这条"跳过已搁置的线"**只在这里生效**（催办）。用户主动打开的列表
+  /// （「接下来的任务」）用 [openTasks]，那里不跳过 —— 否则整页可能是空的。
   List<Task> tasksDueOnOrBefore(String date) => _scheduledTasks(cutoff: date);
 
-  /// **所有排了期**的待处理任务（不管有多远）——「到期」页的「全部排期」档。
+  /// 「接下来的任务」用的一览：**还开着的任务** —— 未完成、未归档，
+  /// **不管有没有排到期日，也不管所属事件是不是已搁置**。
   ///
-  /// 与 [tasksDueOnOrBefore] 同一套口径，只是不设截止日。加它的原因是一条实机
-  /// 反馈：默认停在「今天」时，任务都排在更远的将来，整页看着就是空的。
-  List<Task> tasksScheduled() => _scheduledTasks();
+  /// ⚠️ 这里**故意不像 [tasksDueOnOrBefore] 那样跳过已搁置的事件**
+  /// （2026-09-25 实机反馈确认）：那一页是用户主动打开的任务一览，
+  /// 他要看到全部还欠着的；被隐藏的 9 条任务让整页空空如也，查了半天才发现
+  /// 是这条规则。**"放下的线不该继续催"只在"催"的地方生效** ——
+  /// 逾期角标与启动横幅（[tasksDueOnOrBefore]）。
+  List<Task> openTasks() => liveTasks
+      .where((t) => !t.archived && t.status == NodeStatus.pending)
+      .toList(growable: false);
 
-  /// 「接下来的任务」用的一览：**还开着**的任务 —— 未完成、未归档、不在已搁置
-  /// 事件下，**不管有没有排到期日**。
-  ///
-  /// 与 [tasksScheduled] 只差一条：不要求 `due_at`。页面自己按紧迫度分档，
-  /// "没有到期日"本来就是其中一档。
-  List<Task> openTasks() {
-    final muted = _mutedEventIds();
-    return liveTasks
-        .where((t) =>
-            !t.archived &&
-            t.status == NodeStatus.pending &&
-            !muted.contains(t.eventId))
-        .toList(growable: false);
-  }
-
-  /// 不再参与"到期 / 接下来的任务"的事件 id（已搁置就是"这条线先不做了"）。
+  /// 不再参与"催办"的事件 id（已搁置就是"这条线先不做了"）。
   Set<String> _mutedEventIds() => allEvents
       .where((e) => e.status == NodeStatus.ignored)
       .map((e) => e.id)
