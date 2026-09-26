@@ -49,7 +49,8 @@ void main() {
       for (var step = 0; step <= 20; step += 1) {
         final width = at(step / 20).width;
         expect(width, greaterThanOrEqualTo(nominal - 1e-9));
-        expect(width, lessThanOrEqualTo(nominal + 12 + 1e-9), reason: '拉伸超过上限');
+        expect(width, lessThanOrEqualTo(nominal + navStretchMax + 1e-9),
+            reason: '拉伸超过上限');
         if (width > peak) peak = width;
       }
       expect(peak, greaterThan(nominal + 8), reason: '该拉长的时候要看得出来');
@@ -57,7 +58,114 @@ void main() {
       // 「质量小一点」（实机反馈"太粘滞"）：峰值靠前，后半程就收回大半，
       // 而不是一路鼓到最后几帧才追平
       expect(at(0.4).width, greaterThan(at(0.6).width), reason: '峰值应当在前半程');
-      expect(at(0.9).width - nominal, lessThan(3), reason: '后段应当已经基本收回');
+      expect(at(0.9).width - nominal, lessThan(navStretchMax * 0.25),
+          reason: '后段应当已经收回大半（收得不比原值慢）');
+    });
+
+    test('拖拽的拉伸上限调大一档：12 → 18（×1.5），包络形状不变', () {
+      // 批 C 第 ② 项：12 那一版被"太粘滞"压过头了，拖动时几乎看不出被拉长。
+      // 只把幅度放回一档，包络（峰值位置、后半程提前收）不动。
+      expect(navStretchMaxReduced, 12, reason: '关闭动画时用的是这个原值');
+      expect(navStretchMax, closeTo(navStretchMaxReduced * 1.5, 1e-9));
+
+      double peakWith(double max) {
+        var peak = 0.0;
+        for (var step = 0; step <= 1000; step += 1) {
+          final width = navIndicatorGeometry(
+            t: step / 1000,
+            fromLeft: 0,
+            toLeft: 80,
+            nominalWidth: nominal,
+            stretchMax: max,
+          ).width;
+          peak = math.max(peak, width - nominal);
+        }
+        return peak;
+      }
+
+      // 包络 sin(πt)·(1 − 0.4t) 的峰值在 t ≈ 0.452，约 0.81 × 上限
+      final peak = peakWith(navStretchMax);
+      expect(peak, greaterThan(navStretchMax * 0.80));
+      expect(peak, lessThan(navStretchMax * 0.82));
+      expect(peakWith(navStretchMaxReduced), closeTo(peak / 1.5, 0.05),
+          reason: '退化那一档就是原值，比例正好是 1 : 1.5');
+    });
+
+    test('点按的过冲有界（行程的 3%~5%），而且照样正好落在整数格上', () {
+      // 只取**不贴两端**的跳法：贴边时过冲会被导航条夹住（下一条用例管那个）
+      const jumps = <List<double>>[
+        <double>[0, 80],
+        <double>[80, 160],
+        <double>[160, 80],
+        <double>[240, 160],
+      ];
+      for (final jump in jumps) {
+        final rightward = jump[1] > jump[0];
+        final travel = (jump[1] - jump[0]).abs();
+        final targetEdge = rightward ? jump[1] + nominal : jump[1];
+
+        var overshoot = 0.0;
+        for (var step = 0; step <= 400; step += 1) {
+          final geometry = navIndicatorGeometry(
+            t: step / 400,
+            fromLeft: jump[0],
+            toLeft: jump[1],
+            nominalWidth: nominal,
+            tapSettle: true,
+          );
+          final edge = rightward
+              ? geometry.left + geometry.width
+              : geometry.left;
+          final beyond = rightward ? edge - targetEdge : targetEdge - edge;
+          if (beyond > overshoot) overshoot = beyond;
+        }
+        final ratio = overshoot / travel;
+        expect(ratio, greaterThan(0.03),
+            reason: '$jump 的过冲太小，点按就还是"平"的');
+        expect(ratio, lessThanOrEqualTo(0.05),
+            reason: '$jump 的过冲超过行程的 5%，看着像没对准');
+
+        // 结束值必须与常规曲线**一模一样**：页面翻页读的是同一个连续页位置，
+        // 只要落点一致，过冲就不会留下错位
+        final settled = navIndicatorGeometry(
+          t: 1,
+          fromLeft: jump[0],
+          toLeft: jump[1],
+          nominalWidth: nominal,
+          tapSettle: true,
+        );
+        final plain = at(1, from: jump[0], to: jump[1]);
+        expect(settled.left, closeTo(jump[1], 1e-9), reason: '过冲后要正好停在目标格');
+        expect(settled.width, closeTo(nominal, 1e-9), reason: '落位后收回一格宽');
+        expect(settled.left, closeTo(plain.left, 1e-9));
+        expect(settled.width, closeTo(plain.width, 1e-9));
+      }
+    });
+
+    test('过冲不许把胶囊顶出导航条：贴两端时被夹在栏内', () {
+      const jumps = <List<double>>[
+        <double>[0, 240], // 跳到最右那一格：右边界本来就会顶到栏尾
+        <double>[240, 0], // 跳到最左那一格
+        <double>[80, 0],
+        <double>[160, 240],
+        <double>[0, 80],
+      ];
+      for (final jump in jumps) {
+        for (var step = 0; step <= 400; step += 1) {
+          final geometry = navIndicatorGeometry(
+            t: step / 400,
+            fromLeft: jump[0],
+            toLeft: jump[1],
+            nominalWidth: nominal,
+            tapSettle: true,
+          );
+          expect(geometry.left, greaterThanOrEqualTo(-1e-9),
+              reason: '$jump 在 t=${step / 400} 越出左边界');
+          expect(geometry.left + geometry.width,
+              lessThanOrEqualTo(barWidth + 1e-9),
+              reason: '$jump 在 t=${step / 400} 越出右边界（会从外胶囊头顶出来）');
+        }
+      }
     });
 
     test('鼓起时不会越出导航条（含跨三格、两端起跳）', () {
@@ -83,6 +191,9 @@ void main() {
       // 用户反馈的原话：往右移动时右边界到位之后还会略微往左挪一下。
       // 那是"把中心放在缓动位置上、宽度对称地鼓"造成的回弹；现在拉长全部长在
       // 尾随边上，前导边（右边）就该是单调到位。
+      //
+      // 这条**只管拖拽**（`tapSettle` 默认关）：点按那一下是隔空的，
+      // 故意让它过冲一点点再吸回来（见"点按的过冲有界"那条用例）。
       const jumps = <List<double>>[
         <double>[0, 80],
         <double>[80, 160],
@@ -161,9 +272,13 @@ void main() {
     /// 这里直接改，等价于"手指把页面拖到某个位置"。
     final hostKey = GlobalKey<_HostState>();
 
-    Future<void> pumpNav(WidgetTester tester) async {
+    Future<void> pumpNav(WidgetTester tester, {bool disableAnimations = false}) async {
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: _Host(key: hostKey))),
+        MaterialApp(
+          home: Scaffold(
+            body: _Host(key: hostKey, disableAnimations: disableAnimations),
+          ),
+        ),
       );
     }
 
@@ -224,6 +339,25 @@ void main() {
         expect(pill.left, greaterThanOrEqualTo(bar.left - 0.01));
         expect(pill.right, lessThanOrEqualTo(bar.right + 0.01));
       }
+    });
+
+    testWidgets('关闭动画时退化：拖拽还是被拉长，但幅度回到原上限 12', (tester) async {
+      await pumpNav(tester, disableAnimations: true);
+
+      final barWidth = tester.getRect(find.byType(AppBottomNav)).width;
+      final nominal = barWidth / 4;
+
+      var peak = 0.0;
+      for (final page in <double>[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]) {
+        hostKey.currentState!.dragTo(page);
+        await tester.pump();
+        final width = tester.getRect(find.byKey(navIndicatorKey)).width;
+        peak = math.max(peak, width - nominal);
+      }
+      expect(peak, greaterThan(3), reason: '退化不是"完全不拉伸"，只是回到原来那一档');
+      expect(peak, lessThanOrEqualTo(navStretchMaxReduced + 0.01));
+      expect(peak, lessThan(navStretchMax * 0.9),
+          reason: '明显小于正常那一档，否则等于没退化');
     });
 
     /// 这一项此刻**动起来了没有**：不关心它用的是哪种手势 ——
@@ -412,7 +546,10 @@ void main() {
 }
 
 class _Host extends StatefulWidget {
-  const _Host({super.key});
+  const _Host({super.key, this.disableAnimations = false});
+
+  /// 模拟系统"关闭动画"的无障碍开关（`MediaQuery.disableAnimations`）。
+  final bool disableAnimations;
 
   @override
   State<_Host> createState() => _HostState();
@@ -431,13 +568,20 @@ class _HostState extends State<_Host> {
   }
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-        width: 320,
-        height: 48,
-        child: AppBottomNav(
-          page: _page,
-          // 与真实外壳一致：点某一项 → 页位置跟着过去 → 选中态变化 → 图标动一下
-          onSelect: (index) => dragTo(index.toDouble()),
-        ),
-      );
+  Widget build(BuildContext context) {
+    final nav = SizedBox(
+      width: 320,
+      height: 48,
+      child: AppBottomNav(
+        page: _page,
+        // 与真实外壳一致：点某一项 → 页位置跟着过去 → 选中态变化 → 图标动一下
+        onSelect: (index) => dragTo(index.toDouble()),
+      ),
+    );
+    if (!widget.disableAnimations) return nav;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: true),
+      child: nav,
+    );
+  }
 }

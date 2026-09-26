@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/shell_title.dart';
 
 /// 外壳的**左右滑动切页**（实机反馈）：四个页签排成一排，滑过去就换页，
 /// 底栏那个胶囊跟着手指走。
@@ -48,6 +50,30 @@ void main() {
     final bar = tester.getRect(find.byType(AppBottomNav));
     return tester.getRect(find.byKey(navIndicatorKey)).left - bar.left;
   }
+
+  /// 标题栏里的某个东西（`ShellTitle` 自己的子树，不牵连 `AppBar` 别处）。
+  Finder inTitle(Finder matching) =>
+      find.descendant(of: find.byType(ShellTitle), matching: matching);
+
+  double layerOpacity(WidgetTester tester, int index) => tester
+      .widget<Opacity>(
+        find.descendant(
+          of: find.byKey(shellTitleLayerKey(index)),
+          matching: find.byType(Opacity),
+        ),
+      )
+      .opacity;
+
+  /// 图层被画到离原位多远（`Transform.translate` 的平移量，矩阵第 13 个数）。
+  double layerDx(WidgetTester tester, int index) => tester
+      .widget<Transform>(
+        find.descendant(
+          of: find.byKey(shellTitleLayerKey(index)),
+          matching: find.byType(Transform),
+        ),
+      )
+      .transform
+      .storage[12];
 
   testWidgets('向左滑一下：从灵感页翻到项目页，底栏胶囊跟着过去', (tester) async {
     final app = await boot(tester);
@@ -212,6 +238,202 @@ void main() {
     expect(find.text('事件   1'), findsOneWidget);
     expect(app.prefs.lastTabIndex, 2);
     expect(pillLeft(tester), closeTo(cell * 2, 1));
+  });
+
+  testWidgets('拖动切页时标题也跟着走：交叉淡入淡出 + 轻微横移，拖回来原样还原', (tester) async {
+    await boot(tester);
+    final width = tester.getRect(find.byType(PageView)).width;
+
+    // 静止：只有一个标题，不留动画痕迹（图层 key 也不该存在）
+    expect(inTitle(find.text('灵感')), findsOneWidget);
+    expect(inTitle(find.byType(Opacity)), findsNothing);
+    expect(find.byKey(shellTitleLayerKey(0)), findsNothing);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView)),
+    );
+    await gesture.moveBy(Offset(-width * 0.4, 0));
+    await tester.pump();
+
+    // 过渡中：两页各一层
+    expect(inTitle(find.byType(Opacity)), findsNWidgets(2));
+    expect(inTitle(find.text('项目   1')), findsOneWidget,
+        reason: '第 1 页那一层的数量要按项目页自己的口径算');
+    expect(inTitle(find.text('灵感')), findsOneWidget, reason: '旧标题还在淡出');
+
+    final opacity = <double>[layerOpacity(tester, 0), layerOpacity(tester, 1)];
+    final dx = <double>[layerDx(tester, 0), layerDx(tester, 1)];
+    expect(opacity[0] + opacity[1], closeTo(1, 1e-9), reason: '两层不透明度互补');
+    expect(opacity[1], greaterThan(0.05));
+    expect(opacity[1], lessThan(0.95), reason: '手指停在一半，标题也该停在一半');
+    expect(dx[0], lessThan(0), reason: '往后翻：旧标题朝左淡出');
+    expect(dx[1], greaterThan(0), reason: '往后翻：新标题自右淡入');
+    // 位移与不透明度由**同一个数**算出 —— 这正是"跟手、可回退"的根据
+    expect(dx[0], closeTo(-shellTitleShift * opacity[1], 1e-9));
+    expect(dx[1], closeTo(shellTitleShift * opacity[0], 1e-9));
+    expect(dx[0], greaterThanOrEqualTo(-shellTitleShift - 1e-9));
+    expect(dx[1], lessThanOrEqualTo(shellTitleShift + 1e-9));
+
+    // 拖回起点：标题**原样**回来（不是靠动画补回来的）
+    await gesture.moveBy(Offset(width * 0.4, 0));
+    await tester.pump();
+    expect(inTitle(find.text('灵感')), findsOneWidget);
+    expect(inTitle(find.byType(Opacity)), findsNothing);
+    expect(find.byKey(shellTitleLayerKey(1)), findsNothing);
+
+    // 再拖到同一个位置：读数与第一次逐位一致（只看当前值、不看历史）
+    await gesture.moveBy(Offset(-width * 0.4, 0));
+    await tester.pump();
+    expect(layerOpacity(tester, 0), closeTo(opacity[0], 1e-9));
+    expect(layerOpacity(tester, 1), closeTo(opacity[1], 1e-9));
+    expect(layerDx(tester, 0), closeTo(dx[0], 1e-9));
+    expect(layerDx(tester, 1), closeTo(dx[1], 1e-9));
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    // 松手落位后同样不留图层
+    expect(inTitle(find.byType(Opacity)), findsNothing);
+  });
+
+  testWidgets('点底栏切页时标题也在过渡（与翻页同一条时间线）', (tester) async {
+    await boot(tester);
+
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pump(); // 起帧：ticker 从这一帧开始计时
+    await tester.pump(const Duration(milliseconds: 110)); // 220ms 的一半
+    expect(inTitle(find.byType(Opacity)), findsNWidgets(2), reason: '点按也该有过渡，不是直接换');
+    expect(inTitle(find.text('灵感')), findsOneWidget);
+    expect(inTitle(find.text('项目   1')), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(inTitle(find.text('项目   1')), findsOneWidget);
+    expect(inTitle(find.byType(Opacity)), findsNothing, reason: '落位后收干净');
+  });
+
+  /// 点底栏某一项，并在位移沿途逐帧采样指示器（`animateToPage` 是 220ms）。
+  Future<List<Rect>> tapAndSample(WidgetTester tester, String label) async {
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text(label)),
+    );
+    final samples = <Rect>[];
+    for (var i = 0; i < 34; i += 1) {
+      await tester.pump(const Duration(milliseconds: 8));
+      samples.add(tester.getRect(find.byKey(navIndicatorKey)));
+    }
+    await tester.pumpAndSettle();
+    return samples;
+  }
+
+  testWidgets('点按切换：指示器轻微过冲（一格行程的 3%~5%）再吸回，落位与页面一致', (tester) async {
+    await boot(tester);
+    final bar = tester.getRect(find.byType(AppBottomNav));
+    final cell = bar.width / 4;
+
+    // 灵感 → 事件：跨两格，且目标不是最右那一格（贴边时过冲会被夹在栏内）。
+    // 过冲是**按相邻两格之间那一段**算的（几何就是这么喂的），
+    // 所以量纲是"一格行程"，与纯函数那条用例同口径。
+    final samples = await tapAndSample(tester, '事件');
+    final target = bar.left + cell * 3;
+    final peak = samples.map((rect) => rect.right).reduce(math.max);
+
+    expect(peak, greaterThan(target + 1),
+        reason: '点按应当有过冲；"感觉不到惯性"就是少了这一下');
+    expect(peak, lessThanOrEqualTo(target + cell * 0.05 + 0.5),
+        reason: '过冲不许超过一格行程的 5%，否则看着像没对准');
+    expect(peak, greaterThanOrEqualTo(target + cell * 0.03 - 0.5),
+        reason: '过冲也不能小到看不出来');
+
+    // 落位：页面、底栏、标题三者一致（结束值相同，过冲不留错位）
+    expect(find.text('事件   1'), findsOneWidget);
+    expect(pillLeft(tester), closeTo(cell * 2, 1));
+    expect(tester.getRect(find.byKey(navIndicatorKey)).right, closeTo(target, 1));
+  });
+
+  testWidgets('点按切到最右那一格：过冲被夹住，胶囊不顶出导航条', (tester) async {
+    await boot(tester);
+    final bar = tester.getRect(find.byType(AppBottomNav));
+    final cell = bar.width / 4;
+
+    final samples = await tapAndSample(tester, '更多');
+    for (final rect in samples) {
+      expect(rect.left, greaterThanOrEqualTo(bar.left - 0.01), reason: '顶出左端');
+      expect(rect.right, lessThanOrEqualTo(bar.right + 0.01), reason: '顶出右端');
+    }
+    expect(pillLeft(tester), closeTo(cell * 3, 1), reason: '照样要正好停在最后一格');
+  });
+
+  testWidgets('连点两次：后一次点按的过冲不被前一次的收尾抹掉', (tester) async {
+    await boot(tester);
+    final bar = tester.getRect(find.byType(AppBottomNav));
+    final cell = bar.width / 4;
+
+    // 第一次还没跑完就点第二次：前一次的 future 会因为被接管而立刻完成，
+    // 收尾时必须认得出"这不是我这一程"，否则后一次就悄悄变成没有过冲的普通位移
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('事件')),
+    );
+    await tester.pump();
+
+    final target = bar.left + cell * 3;
+    var peak = 0.0;
+    for (var i = 0; i < 34; i += 1) {
+      await tester.pump(const Duration(milliseconds: 8));
+      peak = math.max(peak, tester.getRect(find.byKey(navIndicatorKey)).right);
+    }
+    await tester.pumpAndSettle();
+    expect(peak, greaterThan(target + 1), reason: '后一次点按照样应当有过冲');
+    expect(pillLeft(tester), closeTo(cell * 2, 1), reason: '最终停在「事件」那一格');
+  });
+
+  testWidgets('关闭动画时：点按不过冲、拉伸回到原值，标题直接切换不做位移', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    app.ws.createProject(title: '一个项目');
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(disableAnimations: true),
+          child: child!,
+        ),
+        home: AppShell(app: app),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // ---- 标题：不做位移、不留两层，直接切到离得最近的那一页
+    final pageWidth = tester.getRect(find.byType(PageView)).width;
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView)),
+    );
+    await gesture.moveBy(Offset(-pageWidth * 0.7, 0));
+    await tester.pump();
+    expect(inTitle(find.byType(Transform)), findsNothing, reason: '关闭动画时不做位移');
+    expect(inTitle(find.byType(Opacity)), findsNothing, reason: '也不做交叉淡入淡出');
+    expect(inTitle(find.text('项目   1')), findsOneWidget,
+        reason: '直接切到离得最近的那一页（此刻已经过半）');
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // ---- 底栏：点按不过冲、拉伸回到原值（此刻在项目页，点「事件」走一格）
+    final bar = tester.getRect(find.byType(AppBottomNav));
+    final cell = bar.width / 4;
+    final samples = await tapAndSample(tester, '事件');
+    final target = bar.left + cell * 3;
+
+    expect(samples.map((rect) => rect.right).reduce(math.max),
+        lessThanOrEqualTo(target + 0.01),
+        reason: '关闭动画时点按不该有过冲');
+    final peakWidth =
+        samples.map((rect) => rect.width).reduce(math.max) - cell;
+    expect(peakWidth, greaterThan(3), reason: '退化不是"完全不拉伸"，只是回到原来那一档');
+    expect(peakWidth, lessThanOrEqualTo(navStretchMaxReduced + 0.01),
+        reason: '拉伸回到原上限 12');
   });
 
   testWidgets('切过去再切回来不丢状态（保活）', (tester) async {

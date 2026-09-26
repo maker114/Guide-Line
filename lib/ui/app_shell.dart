@@ -14,6 +14,7 @@ import 'more/more_tab.dart';
 import 'more/upcoming_page.dart';
 import 'nav_icon_motion.dart';
 import 'projects/project_tab.dart';
+import 'shell_title.dart';
 import 'theme/shape_tokens.dart';
 
 /// 底部导航的形状参数（自绘，改动时这几个要一起看）。
@@ -63,17 +64,45 @@ double navCellWidth(double availableWidth) =>
 /// [_navStretchAt]）合起来才是"质量小一点"。
 const Duration _navSlideDuration = Duration(milliseconds: 220);
 
-/// 惯性拉伸的上限（dp）：跳三格也不会拉成一条香肠。
+/// 拖拽时惯性拉伸的上限（dp）：跳三格也不会拉成一条香肠。
 ///
-/// 从 20 收到 12：拉伸越小，"被拖着走"的黏滞感越弱。
-const double _navStretchMax = 12;
+/// **原值 12 → 新值 18（×1.5，2026-09-26 批 C 第 ② 项）**。
+/// 为什么调大：12 那一版是被"太粘滞、像质量很大"压下来的，但压过头了 ——
+/// 拖动时几乎看不出被拖长，用户反馈"感觉不到惯性"。这次只把**幅度**放回一档，
+/// 包络形状（峰值靠前半程、后半程提前收）不动，所以不会退回"拖到最后才追平"。
+const double navStretchMax = 18;
+
+/// 关闭动画（`MediaQuery.disableAnimations`）时的拉伸上限：**回到原值 12**。
+///
+/// 无障碍开关打开时，一切"惯性"都该退化成直接到达 —— 拉伸本身就是运动感的一部分。
+const double navStretchMaxReduced = 12;
+
+/// 点按切换时指示器那一下的曲线：**轻微过冲，再吸回目标格**。
+///
+/// `Cubic(0.34, 1.35, 0.64, 1)` 是 `easeOutBack` 的收小版：峰值 ≈ 1.041，
+/// 也就是最多多走**行程的 4.1%**（要求 3~5% 以内）。
+///
+/// 这里的"行程"是**相邻两格之间**那一段 —— 指示器每次只喂一个区间
+/// （`fromIndex` 到 `fromIndex + 1`），跨两格的点按由两段接起来，
+/// 所以过冲的**绝对**幅度 ≈ 一格的 4%：360dp 屏上一格 80dp → 约 3dp，
+/// 800dp 测试面上一格 200dp → 约 8dp。**不会**因为跳三格就涨成一大截。
+///
+/// 为什么不直接用 `easeOutBack`：它的峰值 ≈ 1.10，落位前多走 10% 行程，
+/// 一格就多走 8dp，看着像没对准。
+///
+/// 它只作用在**前导边**上，且 `t = 1` 时与 `easeOutCubic` 一样落在目标格 ——
+/// 页面翻页（`animateToPage`）与指示器读的是同一个连续页位置，
+/// **结束值一致**，所以过冲不会留下错位。
+const Curve navTapSettleCurve = Cubic(0.34, 1.35, 0.64, 1);
 
 /// 惯性拉伸量（dp）：随进度**鼓起再收回**。
 ///
 /// `sin(πt)` 负责"两头 0、中间最大"，再乘 `(1 - 0.4t)` 让它在后半程**提前**收 ——
 /// 只靠 `sin(πt)` 的话，尾随边会一路拖到最后一两帧才追平，那正是"粘滞"的来源。
-double _navStretchAt(double progress) =>
-    _navStretchMax * math.sin(math.pi * progress) * (1 - 0.4 * progress);
+///
+/// [max] 由调用方给：正常是 [navStretchMax]，关闭动画时是 [navStretchMaxReduced]。
+double _navStretchAt(double progress, double max) =>
+    max * math.sin(math.pi * progress) * (1 - 0.4 * progress);
 
 /// 选中指示器的 Key：用例靠它量"滑到哪儿了、此刻多宽"。
 @visibleForTesting
@@ -97,25 +126,41 @@ Key navIconKey(String label) => Key('AppBottomNav.icon.$label');
 /// 不像惯性，像没对准。让尾随边单独落后，前导边就是单调到位，
 /// 拉伸感一点没少，却不会有回弹。
 ///
-/// 因为前导边始终落在起点与终点之间、尾随边落在它后面，胶囊**不会越出导航条**
-/// （最左 / 最右那格起步时正好贴边，之后只会更靠里），所以这里不需要夹取。
+/// 两个可选开关（2026-09-26 批 C 第 ② 项）：
+///   · [tapSettle]：这次位移是**点按**引起的（`animateToPage`），前导边改走
+///     [navTapSettleCurve]（轻微过冲 + 吸回）。**拖动时不要开** ——
+///     手指还在屏幕上，过冲会变成"不跟手"。开了它前导边会短暂越过目标格，
+///     所以要用 [barWidth] 夹住，别让它顶到导航条外面。
+///   · [stretchMax]：拉伸上限。正常 [navStretchMax]，
+///     关闭动画时 [navStretchMaxReduced]。
 ({double left, double width}) navIndicatorGeometry({
   required double t,
   required double fromLeft,
   required double toLeft,
   required double nominalWidth,
+  double stretchMax = navStretchMax,
+  bool tapSettle = false,
+  double? barWidth,
 }) {
   final progress = t.clamp(0.0, 1.0);
-  final eased = Curves.easeOutCubic.transform(progress);
-  final width = nominalWidth + _navStretchAt(progress);
+  final eased = (tapSettle ? navTapSettleCurve : Curves.easeOutCubic)
+      .transform(progress);
+  final width = nominalWidth + _navStretchAt(progress, stretchMax);
+
+  // 导航条的右边界：一格宽 × 格数就是栏宽（指示器一直是一格宽）
+  final limit = barWidth ?? nominalWidth * AppBottomNav.itemCount;
 
   if (toLeft >= fromLeft) {
     // 向右：前导边是右边，先到位；宽度长在左边（尾随边落后再追平）
     final right = fromLeft + nominalWidth + (toLeft - fromLeft) * eased;
-    return (left: right - width, width: width);
+    // 过冲时右边界会短暂越过目标格；越过**导航条**就不行了（会从外胶囊头顶出来），
+    // 所以在这里夹住。跳最后一格时正好顶住端部：过冲退化成"顶到位"。
+    final bounded = right > limit ? limit : right;
+    return (left: bounded - width, width: width);
   }
   // 向左：前导边是左边，先到位；宽度长在右边
-  return (left: fromLeft + (toLeft - fromLeft) * eased, width: width);
+  final left = fromLeft + (toLeft - fromLeft) * eased;
+  return (left: left < 0 ? 0 : left, width: width);
 }
 
 /// 底部导航的一项：可点的方块（图标在上、文字在下）。
@@ -235,17 +280,23 @@ class _NavItemState extends State<_NavItem> with SingleTickerProviderStateMixin 
 ///
 /// [page] 是**连续**的页位置（`0.0` = 灵感、`1.5` = 项目与事件之间），
 /// 由外层的 `PageController` 驱动 —— 左右滑动切页时指示器就跟着手指走。
+///
+/// [tapSettle]：这次位移是不是**点按**引起的。点按是"隔空"的，
+/// 所以让指示器多走一点再过冲吸回（[_navStretchAt] 那套跟手逻辑之外的第二条动效）；
+/// 拖动时手指就在屏幕上，任何过冲都会读成"不跟手"，这时必须关掉它。
 class AppBottomNav extends StatelessWidget {
   const AppBottomNav({
     super.key,
     required this.page,
     required this.onSelect,
     this.overdueCount = 0,
+    this.tapSettle = false,
   });
 
   final ValueListenable<double> page;
   final ValueChanged<int> onSelect;
   final int overdueCount;
+  final bool tapSettle;
 
   /// 底栏有几格。**速记胶囊的宽度也按它算**（见 [navCellWidth]），所以是公开的。
   static const int itemCount = 4;
@@ -253,6 +304,8 @@ class AppBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 无障碍：系统要求关掉动画时，拉伸回到原值、点按不再过冲（见 [navStretchMaxReduced]）
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         // 指示器与**一格同宽**：最左那格 left = 0、最右那格 right = 栏宽，
@@ -275,6 +328,10 @@ class AppBottomNav extends StatelessWidget {
               fromLeft: nominalWidth * fromIndex,
               toLeft: nominalWidth * toIndex,
               nominalWidth: nominalWidth,
+              stretchMax:
+                  reduceMotion ? navStretchMaxReduced : navStretchMax,
+              tapSettle: tapSettle && !reduceMotion,
+              barWidth: constraints.maxWidth,
             );
             // 图标在过半格时切到"选中"那一版（与页面翻过去同步）
             final index = current.round();
@@ -492,7 +549,19 @@ class _AppShellState extends State<AppShell> {
   ///
   /// 单独用一个 `ValueNotifier` 而不是每次 `setState`：滑动过程中这玩意儿
   /// 每帧都在变，让整个外壳跟着重建太浪费 —— 只有底栏需要它。
+  ///
+  /// 标题栏（[ShellTitle]）也读它：标题与底栏同一个数、同一条曲线，
+  /// 拖动切页时两者节奏才一致。
   final ValueNotifier<double> _pageProgress = ValueNotifier<double>(0);
+
+  /// 这次位移是不是**点按**引起的（`animateToPage` 正在跑）。
+  ///
+  /// 底栏靠它区分两条路径：点按给一点过冲（"吸住"的收尾感），
+  /// 拖动不给（手指就在屏幕上，过冲会显得不跟手）。
+  bool _tapAnimating = false;
+
+  /// 点按动画的序号：只有**最后发起的那一次**跑完才许把 [_tapAnimating] 收掉。
+  int _tapAnimationId = 0;
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
 
@@ -502,7 +571,7 @@ class _AppShellState extends State<AppShell> {
   /// 用户看过一次、表示知道了，就没有理由每次重建界面再念一遍。
   bool _trashNoticeClosed = false;
 
-  /// 标题栏文案。
+  /// 第 [index] 页的标题栏文案。
   ///
   /// 项目页与事件页都要**带上数量**（实机反馈「项目   4」）：数量原来在正文第一行
   /// （「共 4 个项目 / 共 2 个事件」），与标题分居两行、白占一行高度。
@@ -511,14 +580,17 @@ class _AppShellState extends State<AppShell> {
   /// 项目页数的是"根层有几条"（分类或目标都算一条，分类里面的一律不数）；
   /// 事件页数的是未归档事件数。以前这里取的是"列表里画出来的行数"，
   /// 一收起分类数字就变小 —— 正文那两行计数因此一并去掉了。
-  String _titleFor(AppController app) {
-    switch (_index) {
+  ///
+  /// 翻页过渡中会**同时**问两页要标题，所以这点必须按**传进来的页号**算、
+  /// 不能读 `_index`：否则过渡中两层写的都是同一页的数。
+  String _titleAt(AppController app, int index) {
+    switch (index) {
       case 1:
         return '${_titles[1]}   ${rootProjectCount(app)}';
       case 2:
         return '${_titles[2]}   ${visibleEventCount(app)}';
       default:
-        return _titles[_index];
+        return _titles[index.clamp(0, _titles.length - 1)];
     }
   }
 
@@ -561,14 +633,29 @@ class _AppShellState extends State<AppShell> {
   /// 滑动切页走的是另一条路（`onPageChanged`），两条最终都落到 `_index` 与偏好上。
   void _selectTab(int index) {
     if (index == _index) return;
-    setState(() => _index = index);
+    // 本次点按的编号：连点两次时，**前一次** `animateToPage` 的 future 会因为被接管
+    // 而立刻完成，没有这个号就会把后一次还没跑完的过冲标记提前收掉
+    final id = ++_tapAnimationId;
+    setState(() {
+      _index = index;
+      // 点按是"隔空"的：这一程让指示器带一点过冲再吸回目标格（见 [navTapSettleCurve]）
+      _tapAnimating = true;
+    });
     widget.app.setLastTab(index);
     // 与指示器同一个时长与曲线：页面滑过去的同时胶囊也滑过去
-    _pages.animateToPage(
-      index,
-      duration: _navSlideDuration,
-      curve: Curves.easeOutCubic,
-    );
+    _pages
+        .animateToPage(
+          index,
+          duration: _navSlideDuration,
+          curve: Curves.easeOutCubic,
+        )
+        .whenComplete(() {
+      // 落位后收掉"点按"标记。这一步重建**不会让胶囊跳一下**：
+      // 过冲曲线的终点与常规曲线一致（都正好落在整数格上）。
+      if (mounted && _tapAnimationId == id) {
+        setState(() => _tapAnimating = false);
+      }
+    });
   }
 
   /// 滑动结束时（或滑过一半时）由 `PageView` 通知：标题、FAB、偏好都跟着走。
@@ -581,7 +668,13 @@ class _AppShellState extends State<AppShell> {
   /// 切到灵感页并把光标放进输入框 —— 「记一笔」的代价必须足够小。
   void _goCapture() {
     if (!mounted) return;
-    setState(() => _index = 0);
+    setState(() {
+      _index = 0;
+      // `jumpToPage` 没有位移过程，别把上一次点按的过冲标记留在身上
+      //（序号也往后走一格，正在飞的那次点按动画跑完时就不再收标记了）
+      _tapAnimationId += 1;
+      _tapAnimating = false;
+    });
     widget.app.setLastTab(0);
     // 用 `jumpToPage` 而不是动画：冷启动时输入框还没建出来，动画会让"聚焦"
     // 晚一帧，抢不到键盘（HyperOS 上实测会被系统丢掉）
@@ -599,7 +692,15 @@ class _AppShellState extends State<AppShell> {
         final app = widget.app;
         return Scaffold(
           appBar: AppBar(
-            title: Text(_titleFor(app)),
+            // 标题跟着**连续页位置**走（交叉淡入淡出 + 轻微横移），
+            // 与底栏滑块、页面翻页共用同一个数 —— 拖动切页时不再"啪"地换掉。
+            // 标题栏其余元素（下面那个只在「更多」页出现的入口）**不跟着动**：
+            // 它们仍按整数页号 `_index` 出现 / 消失。
+            title: ShellTitle(
+              page: _pageProgress,
+              pageCount: _titles.length,
+              titleAt: (index) => _titleAt(app, index),
+            ),
             actions: <Widget>[
               if (_index == 3)
                 TextButton(
@@ -691,6 +792,7 @@ class _AppShellState extends State<AppShell> {
                 child: AppBottomNav(
                   page: _pageProgress,
                   overdueCount: app.overdueCount,
+                  tapSettle: _tapAnimating,
                   onSelect: _selectTab,
                 ),
               ),
