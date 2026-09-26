@@ -46,6 +46,18 @@
     `docs/spec/数据契约.md` 里的样本前置检查脚本说明、`docs/plan/mobile-v1-计划.md` 的前情
     （历史版本的 CHANGELOG 条目按「当时的记录不改写」原则保持原样）
 
+### 调研
+
+- **桌面小组件：可行性实测完成，结论是"技术可行、但小米不让上桌面"**（无代码改动）
+  - 用一个临时独立小程序（`.tools/widget-spike/`，gitignore 内，全程不动主工程）在小米 15 Pro
+    （HyperOS OS3.0 / Android 16）上跑通：系统登记 provider、`:widgetProvider` 独立进程读共享快照、
+    RemoteViews 渲染（含 `values-night` 深色）、点击回传 `ACTION_CAPTURE`
+  - 卡点：`requestPinAppWidget()` 被小米劫持到"只含已审核 Widget"的详情页；
+    小部件中心的「安卓小部件」分类不收录侧载 App 的原生小部件（声明与知乎/支付宝逐条一致仍不出现）
+  - 三条出路与代价、以及下次开工要避的坑，见
+    [`docs/plan/桌面小组件-可行性结论.md`](docs/plan/桌面小组件-可行性结论.md)
+    （**只留这份报告**：验证程序与全部中间产物已删除）
+
 <!-- 下一个版本记在这里。 -->
 
 ---

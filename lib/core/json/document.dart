@@ -28,10 +28,6 @@ class Document {
 
   Iterable<Task> get taskItems => items.whereType<Task>();
 
-  int get liveCount => items.where((e) => !e.deleted).length;
-
-  int get tombstoneCount => items.where((e) => e.deleted).length;
-
   /// 序列化形态：**只有 `items`**。单条记录的字段顺序仍由《数据契约》约束。
   Map<String, dynamic> toJson() => <String, dynamic>{
         'items': items.map((e) => e.toJson()).toList(growable: false),

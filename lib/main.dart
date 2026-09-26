@@ -27,7 +27,7 @@ Future<void> main() async {
 ///   `lib/platform` 平台适配层（唯一允许出现平台判断的地方）
 ///
 /// 以上边界由 `test/core/architecture_test.dart` 扫描源码守护。
-/// （原双端方案的同步层与云函数已随电脑端成果归档，见 `archive/desktop-v1/`。）
+/// （原双端方案的同步层与云函数已随电脑端成果一起搁置，那份代码只留在 git 历史里。）
 class GuidelineApp extends StatelessWidget {
   const GuidelineApp({super.key, required this.controller});
 

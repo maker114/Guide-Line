@@ -31,8 +31,6 @@ class AppInfo {
 
   static const String displayName = 'Guide Line';
 
-  static const String technicalName = 'GuideLine';
-
   static const String version = '1.1.0';
 
   static const String buildNumber = '2';
@@ -43,5 +41,6 @@ class AppInfo {
   /// 发版时必然漏一个（1.0.0 就是漏到 1.1.0 才发现），所以这里拼出来给界面用。
   static const String versionLabel = '$version+$buildNumber';
 
+  /// Android 包名（真正的权威在 `android/app/build.gradle.kts`）。
   static const String packageName = 'com.maker.guideline';
 }
