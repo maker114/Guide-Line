@@ -14,14 +14,18 @@ import '../common/project_picker.dart';
 Future<void> moveProjectAction(
   BuildContext context,
   AppController app,
-  String projectId,
-) async {
+  String projectId, {
+  String title = '移动到…',
+}) async {
   final picked = await pickProject(
     context,
     app,
-    title: '移动到…',
+    title: title,
     allowNone: true,
     excludeSubtreeOf: projectId,
+    // 移动侧与灵感侧相反：**移进一个分类正是"建分类"的做法**，分类照常可选。
+    // 只有"灵感的落点"才限定为目标（Q2）。
+    requireTarget: false,
   );
   if (picked == null || !context.mounted) return;
   final parentId = picked == pickNone ? null : picked;

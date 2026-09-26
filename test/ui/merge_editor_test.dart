@@ -9,9 +9,12 @@ import 'package:guideline/ui/inspiration/merge_editor_page.dart';
 import 'scroll_finders.dart';
 
 /// 合并编辑器的**三种选择**（实机反馈）：
-///   1. 编辑框里是**当前的「实现计划」**，照着灵感手改完点「保存」→ 替换正文；
+///   1. 编辑框里是**当前的「如何解决」**，照着灵感手改完点「保存」→ 替换正文；
 ///   2. 「追加原文」把灵感原文**另起一行**接到正文末尾（仍要点保存）；
 ///   3. 「作为清单条目」不碰正文，直接把它追加成清单的新一条。
+///
+/// 另外守住 Q2 的一条边界：**落点只能是目标** —— 给分类打开这一页时，
+/// 三种选择一个都不给，只说明"分类不装灵感"。
 void main() {
   late Directory tempDir;
 
@@ -61,7 +64,7 @@ void main() {
     return field.controller!.text;
   }
 
-  testWidgets('一进来就显示当前的「实现计划」', (tester) async {
+  testWidgets('一进来就显示当前的「如何解决」', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '项目甲');
     app.run(() => app.ws.updateProject(project.id, implementation: '已有的计划\n第二行'));
@@ -70,7 +73,8 @@ void main() {
     await openMergeEditor(tester, app, '项目甲', '这条灵感要合并');
 
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
-    expect(find.text('实现计划（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('实现计划（可编辑）'), findsNothing, reason: 'Q4：字段改称「如何解决」');
     expect(editorText(tester), '已有的计划\n第二行');
   });
 
@@ -121,14 +125,14 @@ void main() {
       <String>['原来就有的条目', '灵感原文'],
       reason: '作为清单的一项**放在清单后面**',
     );
-    expect(reloaded.implementation, '已有的计划', reason: '这一条不碰「实现计划」');
+    expect(reloaded.implementation, '已有的计划', reason: '这一条不碰「如何解决」');
     expect(app.ws.inspirationInbox, isEmpty);
     expect(app.ws.archiveZone.mergedInspirations.length, 1);
     // 回到详情页就能在清单里看到它
     expect(find.text('灵感原文'), findsOneWidget);
   });
 
-  testWidgets('正文空着点「保存」不会把「实现计划」清没', (tester) async {
+  testWidgets('正文空着点「保存」不会把「如何解决」清没', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '项目丁');
     app.run(() => app.ws.updateProject(project.id, implementation: '不能丢的一段'));
@@ -143,7 +147,20 @@ void main() {
     await tester.pumpAndSettle();
 
     // 留在这一页并给提示，不 pop、不写盘、也不把灵感标成已合并
-    expect(find.textContaining('正文不能是空的'), findsOneWidget);
+    final message = find.textContaining('正文不能是空的');
+    expect(message, findsOneWidget);
+    // 报错吐司必须自己给文字色：底色是浅色的 errorContainer，默认文字色
+    // （inverseOnSurface）在浅色主题下近乎纯白，压上去等于看不见。
+    // 这条原来是靠"项目状态被规则拦下"那条用例守的；项目没有完成态之后（Q1），
+    // 这里换成了同一套 showToast 的另一条错误路径。
+    final scheme = Theme.of(tester.element(find.text('保存'))).colorScheme;
+    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
+    expect(snackBar.backgroundColor, scheme.errorContainer);
+    expect(
+      tester.widget<Text>(message).style?.color,
+      scheme.onErrorContainer,
+      reason: '浅色底上的默认文字色近乎纯白，得显式换成深色的 onErrorContainer',
+    );
     expect(app.ws.findProject(project.id)!.implementation, '不能丢的一段');
     expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
   });
@@ -178,8 +195,60 @@ void main() {
     await tester.pumpAndSettle();
 
     // 三个选择都在，且没有溢出（溢出会以 FlutterError 的形式让这条用例失败）
-    expect(find.text('实现计划（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决（可编辑）'), findsOneWidget);
     expect(find.text('追加原文'), findsOneWidget);
     expect(find.text('作为清单条目'), findsOneWidget);
+  });
+
+  testWidgets('分类不装灵感：给分类打开这一页时不给任何合并动作，只说明原因', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    app.ws.createProject(title: '发布 v1', parentId: category.id);
+    final inspiration = app.ws.captureInspiration('一条灵感', projectId: category.id);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MergeEditorPage(
+          project: app.ws.findProject(category.id)!,
+          inspiration: inspiration,
+          isCategory: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('分类不装灵感，请选一个目标或先建一个目标'), findsOneWidget);
+    expect(find.text('保存'), findsNothing, reason: '分类没有「如何解决」可写');
+    expect(find.text('追加原文'), findsNothing);
+    expect(find.text('作为清单条目'), findsNothing, reason: '分类也没有实现清单');
+    // 原文还是要看得到：用户得知道自己手上这条是什么
+    expect(find.text('灵感原文（参考）'), findsOneWidget);
+  });
+
+  testWidgets('落盘那一步也挡分类：applyMergeResult 不会把灵感并进分类', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    app.ws.createProject(title: '发布 v1', parentId: category.id);
+    final inspiration = app.ws.captureInspiration('一条灵感', projectId: category.id);
+    final snapshot = app.ws.findProject(category.id)!;
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
+      builder: (context) => TextButton(
+        onPressed: () => applyMergeResult(
+          context,
+          app,
+          snapshot,
+          inspiration,
+          const MergeResult.intoImplementation('不该写进去的一段'),
+        ),
+        child: const Text('落盘'),
+      ),
+    ))));
+    await tester.tap(find.text('落盘'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('分类不装灵感，请选一个目标或先建一个目标'), findsOneWidget);
+    expect(app.ws.findProject(category.id)!.implementation, isEmpty);
+    expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue, reason: '灵感不该被标成已合并');
   });
 }

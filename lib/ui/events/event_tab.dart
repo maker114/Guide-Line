@@ -8,6 +8,7 @@ import '../../core/models/task.dart';
 import '../../core/rules/cascade.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
+import '../common/due_label.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
@@ -236,12 +237,36 @@ class _EventCardHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final mainLine = app.ws.mainLineOf(event.id);
-    final done = mainLine.where((t) => t.status == NodeStatus.done).length;
+    // 进度**只认一个算法**（与事件详情页共用 `checkEventCompletion`）：
+    // 分子含"已搁置"、分母排除"已归档"。以前这里自己数 done、详情页另算一套，
+    // 同一条线会出现两个进度，而且会随"归档一个节点"虚涨（实机反馈）。
+    final completion = app.ws.checkEventCompletion(event.id);
+    final done = completion.judgedChildCount - completion.unfinishedCount;
+    // "先做哪个"要在列表上直接答得出来：取**还没终结的主线任务里最近的那个到期日**。
+    // 事件自己不带日期（历史裁定），所以这一行是卡片上唯一能表达紧迫度的地方。
+    final nextDue = mainLine
+        .where((t) =>
+            t.status == NodeStatus.pending && t.dueAt != null && t.dueAt!.isNotEmpty)
+        .map((t) => t.dueAt!)
+        .fold<String?>(
+          null,
+          (earliest, date) =>
+              earliest == null || date.compareTo(earliest) < 0 ? date : earliest,
+        );
+    final nextDueLabel = nextDue == null
+        ? null
+        : dueLabelOf(context, nextDue, reservedWidth: 300);
     final expanded = app.isExpanded(event.id);
     // "当前节点" = 第一个还没终结的主线任务：列表上最该回答的就是这个问题
     final current = mainLine
         .where((t) => t.status == NodeStatus.pending)
         .firstOrNull;
+    // 卡头下行一句话说清"急不急 + 做哪一步"。**必须是单个 Text** 才会自动省略：
+    // 拆成一排小 Text 在窄屏 + 1.6 倍字体下会把整行顶出边界（实测溢出 5px）。
+    final nextLine = <String>[
+      if (nextDueLabel != null) '最近 $nextDueLabel',
+      if (current != null) '接下来 · ${current.title}',
+    ].join(' · ');
 
     return ListTile(
       // 有主线任务才给展开箭头（与项目页的"有子项目才有箭头"一致）
@@ -286,25 +311,46 @@ class _EventCardHeader extends StatelessWidget {
           ),
         ],
       ),
-      subtitle: Row(
+      // 卡头分两行：上行是进度与状态记号，下行是"最近到期 + 接下来做什么"。
+      // 挤成一行在 1.6 倍字体下会溢出（实测 5px），而这两件事都不能省 ——
+      // 一个回答"急不急"，一个回答"下一步做哪件"。
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(Icons.timeline, size: 13, color: theme.colorScheme.outline),
-          const SizedBox(width: 3),
-          Text(
-            mainLine.isEmpty ? '还没有主线任务' : '主线 $done/${mainLine.length}',
-            style: theme.textTheme.labelSmall,
-          ),
-          if (current != null) ...<Widget>[
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                '当前 · ${current.title}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall,
+          Row(
+            children: <Widget>[
+              Icon(Icons.timeline, size: 13, color: theme.colorScheme.outline),
+              const SizedBox(width: 3),
+              Flexible(
+                child: Text(
+                  completion.judgedChildCount == 0
+                      ? '主线还没有可判定的任务'
+                      : '主线 $done/${completion.judgedChildCount} 已完成',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall,
+                ),
               ),
+              // 已搁置的事件在列表里原本和正常事件长得一样，用户没法解释
+              // "为什么这条不催我" —— 给它一个明确的记号
+              if (event.status == NodeStatus.ignored) ...<Widget>[
+                const SizedBox(width: 6),
+                Text(
+                  '· 已搁置',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (nextLine.isNotEmpty)
+            Text(
+              nextLine,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelSmall,
             ),
-          ],
         ],
       ),
       trailing: PopupMenuButton<String>(
@@ -383,9 +429,13 @@ class _EventTaskRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final due = describeDate(task.dueAt);
+    // 到期日走全应用统一口径（`dueLabelOf`）：默认"绝对日期 + 剩余天数"，
+    // 这一行有缩进与状态图标，余量按 240 估。
+    final due = dueLabelOf(context, task.dueAt, reservedWidth: 240);
+    // **已搁置的任务不标红**：与事件详情页、任务行一致 ——
+    // 一边说"不再催"，一边画个红日期是自相矛盾的
     final overdue =
-        !muted && isOverdue(task.dueAt) && task.status != NodeStatus.done;
+        !muted && isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status != NodeStatus.pending;
 
     return ListTile(

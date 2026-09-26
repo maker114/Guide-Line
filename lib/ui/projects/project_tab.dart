@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
-import '../../core/models/enums.dart';
 import '../../core/models/project.dart';
+import '../../features/workspace.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
-import '../common/labels.dart';
 import 'project_actions.dart';
 import 'project_detail_page.dart';
 
@@ -82,8 +81,8 @@ class _ProjectTabState extends State<ProjectTab> {
             padding: const EdgeInsets.only(bottom: 96),
             children: <Widget>[
               InlineComposer(
-                label: '新建项目',
-                hint: '项目名',
+                label: '新建分类',
+                hint: '分类名',
                 leading: Icons.create_new_folder_outlined,
                 onCreate: (title) => _create(title: title),
               ),
@@ -91,7 +90,7 @@ class _ProjectTabState extends State<ProjectTab> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                   child: Text(
-                    '项目是「目的 + 实现」的容器，灵感可以合并进项目正文',
+                    '分类只用来归类；真正要交出的结果叫「目标」，灵感合并进目标的「如何解决」',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )
@@ -134,8 +133,8 @@ class _ProjectTabState extends State<ProjectTab> {
                                       bottom: 6,
                                     ),
                                     child: InlineComposer(
-                                      label: '新建子项目',
-                                      hint: '子项目名',
+                                      label: '新建目标',
+                                      hint: '目标名',
                                       leading: Icons.subdirectory_arrow_right,
                                       dense: true,
                                       onCreate: (title) => _create(
@@ -198,6 +197,9 @@ class _ProjectRow {
   final int depth;
   final int childCount;
   final bool expanded;
+
+  /// 角色判据（《定义与边界》§2.1）：**有下级 = 分类，没有下级 = 目标**。
+  bool get isCategory => childCount > 0;
 }
 
 /// 一个主项目 + 它当前可见的下级（展开时才有）。
@@ -245,11 +247,8 @@ List<_ProjectRow> _flatten(AppController app) {
   void walk(String? parentId, int depth) {
     for (final project in tree.childrenOf(parentId).whereType<Project>()) {
       if (project.archived) continue;
-      final children = tree
-          .childrenOf(project.id)
-          .whereType<Project>()
-          .where((p) => !p.archived)
-          .toList(growable: false);
+      // 角色与下级列表同源：都用 `Workspace.childProjectsOf`（未归档、未删除的直属下级）
+      final children = app.ws.childProjectsOf(project.id);
       final expanded = app.isExpanded(project.id);
       rows.add(
         _ProjectRow(
@@ -285,8 +284,8 @@ class _ProjectTile extends StatelessWidget {
     final theme = Theme.of(context);
     final project = row.project;
     final due = describeDate(project.date);
-    final overdue =
-        isOverdue(project.date) && project.status != NodeStatus.done;
+    // 项目没有完成态（Q1）：日期只按日期本身判逾期，不再看 `status`。
+    final overdue = isOverdue(project.date);
     // 子项目（depth > 0）用**更紧凑**的一档样式：
     // 原来只缩进了 16dp、字号仍是 `bodyLarge`，看起来和顶层项目一样重，
     // 既没体现层级、又白占一块纵向空间（实机反馈）。
@@ -300,25 +299,18 @@ class _ProjectTile extends StatelessWidget {
       contentPadding: EdgeInsets.only(left: isChild ? 36 : 4, right: 4),
       minLeadingWidth: isChild ? 18 : null,
       // 左侧图标**槽位宽度固定**（实机反馈"第一条的左侧没有对齐"）：
-      // 展开箭头是 `IconButton`、状态图标是 `Icon`，两者宽度本来就不同，
-      // 各画各的会把标题挤到不同的竖线上 —— 有子项目的、没子项目的、
+      // 展开箭头是 `IconButton`、色点是 `Icon` 那样的小控件，两者宽度本来就不同，
+      // 各画各的会把标题挤到不同的竖线上 —— 有下级的、没下级的、
       // 有没有标识色的，标题必须都在同一条线上。
+      //
+      // 现在这一槽只有两种东西：**有箭头 = 分类（有下级）**，**没箭头 = 目标**。
+      // 项目状态图标与"完成删除线"随项目完成态一起从界面拿掉了（Q1）；
+      // 子项目仍用一个标识色小圆点表达归属。
       leading: SizedBox(
         width: isChild ? 18 : 40,
         child: Center(
-          child: row.childCount == 0
-              ? (isChild
-                    // 子项目用标识色小圆点：比状态图标轻，色点本身也表达归属
-                    ? ProjectMarker(color: project.color, size: 12)
-                    : Icon(
-                        nodeStatusIcon(project.status),
-                        size: 20,
-                        color: nodeStatusColor(
-                          project.status,
-                          theme.colorScheme,
-                        ),
-                      ))
-              : IconButton(
+          child: row.isCategory
+              ? IconButton(
                   tooltip: row.expanded ? '收起' : '展开',
                   iconSize: isChild ? 18 : 22,
                   padding: EdgeInsets.zero,
@@ -336,7 +328,10 @@ class _ProjectTile extends StatelessWidget {
                   ),
                   onPressed: () =>
                       app.setExpanded(project.id, expanded: !row.expanded),
-                ),
+                )
+              : (isChild
+                    ? ProjectMarker(color: project.color, size: 12)
+                    : const SizedBox.shrink()),
         ),
       ),
       title: Row(
@@ -358,42 +353,31 @@ class _ProjectTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               // 子项目降一档字号，层级靠字号与缩进一起表达
-              style: isChild
-                  ? theme.textTheme.bodyMedium?.copyWith(
-                      decoration: project.status == NodeStatus.done
-                          ? TextDecoration.lineThrough
-                          : null,
-                      color: project.status == NodeStatus.done
-                          ? theme.colorScheme.outline
-                          : null,
-                    )
-                  : (project.status == NodeStatus.done
-                        ? theme.textTheme.bodyLarge?.copyWith(
-                            decoration: TextDecoration.lineThrough,
-                            color: theme.colorScheme.outline,
-                          )
-                        : null),
+              style: isChild ? theme.textTheme.bodyMedium : null,
             ),
           ),
         ],
       ),
-      // 子项目的副标题只留必要信息（日期 / 子项目数），目的那一长串不再重复显示。
+      // 分类行只给**汇总**（Q2）：目的 / 实现计划 / 实现清单 / 日期 / 状态一律不显示 ——
+      // 分类只回答"归哪一类"。
       //
       // **一眼看出没有副标题时给 `null`**（实机反馈"第四条项目没有目标，标题
       // 略微下移保证居中"）：留一个空副标题占位会让这一行和两行的行一样高、
       // 内容却都挤在上半截，看着头重脚轻。给它真的没有副标题，ListTile 就按
       // 单行排版，标题自然竖直居中、行也短一截。
-      subtitle: isChild
-          ? _childSubtitle(theme, project, row, due, overdue)
-          : _rootSubtitle(theme, project, row, due, overdue),
+      subtitle: row.isCategory
+          ? _categorySubtitle(theme, app.ws.summarizeCategory(project.id))
+          : (isChild
+                ? _childSubtitle(theme, project, row, due, overdue)
+                : _rootSubtitle(theme, project, row, due, overdue)),
       trailing: PopupMenuButton<String>(
         tooltip: '更多',
         onSelected: (value) async {
           await _handleMenu(context, value);
         },
-        // 「新建子项目」与「打开详情」都已去掉（按实机反馈）：
+        // 「新建下级」与「打开详情」都已去掉（按实机反馈）：
         //   · 打开详情：点这一行本身就是打开详情，菜单里再放一个是重复入口；
-        //   · 新建子项目：进详情页用那个加号建（那里还能顺手填目的/日期）。
+        //   · 新建下级：进详情页用那个「新建目标」建（那里还能顺手填"有什么问题 / 思路"与日期）。
         itemBuilder: (_) => const <PopupMenuEntry<String>>[
           PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
           PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
@@ -430,6 +414,29 @@ class _ProjectTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 分类行的副标题：**只有汇总**（Q2）。
+///
+/// 口径与 `Workspace.summarizeCategory` 同源，只用契约里已有的字段：
+///   · `含 N 个目标` —— 这棵子树下"没有下级"的项目有几个；
+///   · `清单 d/t 已完成` —— 这些目标的「实现清单」条目里勾了多少（没有条目就不写）。
+///
+/// **不显示目的 / 实现计划 / 实现清单 / 日期 / 状态**：分类只回答"归哪一类"。
+Widget _categorySubtitle(ThemeData theme, CategorySummary summary) {
+  final style = theme.textTheme.labelSmall;
+  return Row(
+    children: <Widget>[
+      Text('含 ${summary.targetCount} 个目标', style: style),
+      if (summary.itemTotal > 0) ...<Widget>[
+        const SizedBox(width: 8),
+        Text(
+          '清单 ${summary.itemDone}/${summary.itemTotal} 已完成',
+          style: style,
+        ),
+      ],
+    ],
+  );
 }
 
 /// 子项目的副标题：**只留必要信息**，没有就不显示。

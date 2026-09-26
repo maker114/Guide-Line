@@ -7,11 +7,13 @@ import '../common/dialogs.dart';
 import '../common/inline_editor.dart';
 import 'ai_preview_page.dart';
 
-/// 项目「实现」的**待办清单**（设计文档 §1.3）。
+/// 项目「实现」的**实现清单**（设计文档 §1.3）。
+///
+/// 口径用词（Q4）：项目里的叫「清单」/「实现清单」，**"待办"只指事件里的任务**。
 ///
 /// 三条必须守住的性质：
-///   · **不参与任何业务判定** —— 勾选只是打勾，全勾完也不会把项目变成已完成。
-///     进度 `n/m` 只是展示，项目的三态由它自己决定；
+///   · **不参与任何业务判定** —— 勾选只是打勾，全勾完也不会把项目变成已完成
+///     （项目**根本没有完成态**，见 Q1）。进度 `n/m` 只是展示；
 ///   · **与事件里的任务没有联动** —— 这里勾了不代表任务线那边动了；
 ///   · 条目是轻量内容：删除**不弹二次确认**（误删重打一句就好，
 ///     弹确认反而烦），编辑是点一下原地改。
@@ -47,7 +49,7 @@ class ProjectChecklist extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('还没有条目。把「实现」拆成一条条待办，做起来更清楚。',
+                Text('还没有条目。把「如何解决」拆成一条条清单，做起来更清楚。',
                     style: theme.textTheme.bodySmall),
                 if (project.implementation.trim().isNotEmpty)
                   Align(
@@ -80,7 +82,7 @@ class ProjectChecklist extends StatelessWidget {
             onCreate: (text) => _run(context, () => app.ws.addProjectItem(project.id, text)),
           ),
         ),
-        // AI 整理：把清单**反向压成**一段通顺的实现说明（设计文档 §2.1）。
+        // AI 整理：把清单**反向压成**一段通顺的说明（设计文档 §2.1）。
         // 只在有清单**且 AI 总开关开着**时才给入口 —— 关掉 AI 之后，
         // 项目里不该再出现任何"AI 整理"的字样（实机反馈）。
         if (items.isNotEmpty && app.aiEnabled)
@@ -89,8 +91,8 @@ class ProjectChecklist extends StatelessWidget {
             child: ListTile(
               dense: true,
               leading: const Icon(Icons.auto_awesome_outlined, size: 18),
-              title: const Text('AI 整理成计划'),
-              subtitle: const Text('把清单合成一段通顺说明，写进「实现计划」'),
+              title: const Text('AI 整理成「如何解决」'),
+              subtitle: const Text('把清单合成一段通顺说明，写进「如何解决」'),
               onTap: () => startAiSummarize(context, app, project.id, project.title),
             ),
           ),
@@ -123,7 +125,7 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
-      // 点文本**就地改**（与「目的」等字段一样用 `InlineTextField`），
+      // 点文本**就地改**（与「有什么问题 / 思路」等字段一样用 `InlineTextField`），
       // **长按**才弹出条目操作。行尾那个"重命名"小铅笔也去掉了（实机反馈）：
       // 点这一行本身就是改名，再挂一个图标只是多一个看不出区别的记号。
       // 编辑态自带**确认 / 取消**两个键 —— 改到一半想放弃时不用自己改回去。

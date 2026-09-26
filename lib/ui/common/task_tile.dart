@@ -5,7 +5,7 @@ import '../../core/models/enums.dart';
 import '../../core/models/task.dart';
 import '../events/event_detail_page.dart';
 import 'color_picker.dart';
-import 'format.dart';
+import 'due_label.dart';
 import 'task_status_button.dart';
 import 'urgency.dart';
 
@@ -108,36 +108,14 @@ class TaskTile extends StatelessWidget {
     );
   }
 
-  /// 到期日怎么写：**默认「绝对日期 + 剩余天数」**（设计文档的统一口径），
-  /// 但这一行还要放事件名与完成钮，大字体下那串绝对日期根本塞不下（实测
-  /// 1.6 倍字体、360dp 宽时它一个人就要 240dp，会把事件名挤没）。
+  /// 到期日怎么写：走全应用**唯一出处** `dueLabelOf`（《界面规范》§7）。
   ///
-  /// 所以按**屏幕宽度**选：放得下用全称，放不下退成「3 天后」——
-  /// 两个写法都带着"还剩几天"，不会把最有用的信息丢掉。
-  ///
-  /// 用屏幕宽度而不是 `LayoutBuilder`：`ListTile` 在**量高度**时给副标题的
-  /// `maxWidth` 是 `Infinity`（同页其它地方踩过这个坑），那里量不出真实宽度。
+  /// 本行除日期以外还要放事件名与完成钮，所以留给日期的余量按这一行的实际
+  /// 占用估（左右外边距约 32、完成圆钮与槽位约 48、色点与间距约 12、
+  /// 事件名至少看得见两三个字约 40，再加一点余量）。
   String _dueLabel(BuildContext context) {
     final dueAt = task.dueAt;
     if (dueAt == null || dueAt.isEmpty) return '没排期';
-
-    final style = Theme.of(context).textTheme.labelSmall ?? const TextStyle();
-    final scaler = MediaQuery.textScalerOf(context);
-    double widthOf(String text) => (TextPainter(
-          text: TextSpan(text: text, style: style),
-          textDirection: TextDirection.ltr,
-          textScaler: scaler,
-        )..layout())
-            .width;
-
-    final full = describeDateWithDays(dueAt);
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    if (widthOf(full) + _reservedWidth <= screenWidth) return full;
-    return describeDate(dueAt);
+    return dueLabelOf(context, dueAt);
   }
-
-  /// 一行里除日期以外**必须占掉**的宽度（估宽一点）：
-  /// 左右外边距约 32、完成圆钮与它的槽位约 48、色点与间距约 12、
-  /// 事件名至少看得见两三个字约 40，再加一点余量。
-  static const double _reservedWidth = 200;
 }

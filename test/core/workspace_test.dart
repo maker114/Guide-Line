@@ -46,7 +46,7 @@ void main() {
   /// 把磁盘上的主数据文件按正式解析路径读回来（验证"写下去的确实能读回"）。
   StoreFile storeFileOnDisk() => StoreFile.parse(storeTextOnDisk(), DecodeIssues());
 
-  group('项目：创建 / 层级 / 完成规则', () {
+  group('项目：创建 / 层级 / 无完成态（Q1）', () {
     test('可以建三层，第四层被拒绝', () {
       final root = ws.createProject(title: '根');
       final child = ws.createProject(title: '子', parentId: root.id);
@@ -59,48 +59,58 @@ void main() {
       );
     });
 
-    test('子项目未终态时父项目不可完成，并给出可读原因', () {
+    test('新建项目写 pending / completedAt 为 null —— 状态字段只读保留，不再产生新值', () {
+      final project = ws.createProject(title: '新项目');
+
+      expect(project.status, NodeStatus.pending);
+      expect(project.completedAt, isNull);
+    });
+
+    test('其它动作都不改项目状态：归档 / 改名 / 设日期 / 加清单条目之后仍是 pending / null', () {
+      final root = ws.createProject(title: '根');
+      final child = ws.createProject(title: '子', parentId: root.id);
+
+      ws.setProjectArchived(child.id, true);
+      ws.updateProject(child.id, title: '子（改名）', purpose: '一句话', date: '2026-12-31');
+      ws.setProjectArchived(child.id, false);
+      ws.addProjectItem(child.id, '一条清单');
+      ws.setProjectColor(child.id, '#336699');
+
+      final reloaded = ws.findProject(child.id)!;
+      expect(reloaded.status, NodeStatus.pending, reason: '项目没有完成态，谁都不该写 status');
+      expect(reloaded.completedAt, isNull);
+    });
+
+    test('老数据里的 done / ignored 与 completedAt 原样保留（读入→写出逐字节不变）', () {
+      // 用一份**手写的老文件**模拟"以前标过完成 / 搁置"的数据
+      final raw = _storeWithLegacyProjectStatus(
+        doneStatus: 'done',
+        doneCompletedAt: 1700000000123,
+      );
+      storage.paths.storeFile.writeAsStringSync(raw, encoding: utf8);
+      ws = Workspace.fromLoad(storage, storage.load());
+
+      final done = ws.liveProjects.firstWhere((p) => p.title == '老项目');
+      expect(done.status, NodeStatus.done, reason: '历史枚举值只读保留');
+      expect(done.completedAt, 1700000000123);
+
+      // 随便动一下别的项目 → 整份重写；老项目的三个字节都不该变
+      ws.createProject(title: '新项目');
+      final after = storeTextOnDisk();
+      expect(after, contains('"status": "done"'));
+      expect(after, contains('"completed_at": 1700000000123'));
+      expect(after, isNot(contains('"status": "ignored"')));
+    });
+
+    test('子项目是否终态不再影响任何东西：没有"父项目不可完成"这条规则', () {
       final root = ws.createProject(title: '根');
       ws.createProject(title: '子', parentId: root.id);
 
-      expect(() => ws.setProjectStatus(root.id, NodeStatus.done), throwsA(isA<RuleViolation>()));
-      try {
-        ws.setProjectStatus(root.id, NodeStatus.done);
-      } on RuleViolation catch (violation) {
-        expect(violation.message, contains('未处理'));
-      }
-    });
-
-    test('归档与墓碑子项目不阻塞父项目完成（ADR-054 死锁修复）', () {
-      final root = ws.createProject(title: '根');
-      final archived = ws.createProject(title: '归档子', parentId: root.id);
-      ws.setProjectArchived(archived.id, true);
-
-      ws.setProjectStatus(root.id, NodeStatus.done);
-      expect(ws.findProject(root.id)!.status, NodeStatus.done);
-      expect(ws.findProject(root.id)!.completedAt, isNotNull);
-    });
-
-    test('反向传播：把子项目退回 pending，已完成的父项目自动退回（ADR-055）', () {
-      final root = ws.createProject(title: '根');
-      final child = ws.createProject(title: '子', parentId: root.id);
-      ws.setProjectStatus(child.id, NodeStatus.done);
-      ws.setProjectStatus(root.id, NodeStatus.done);
-      expect(ws.findProject(root.id)!.status, NodeStatus.done);
-
-      ws.setProjectStatus(child.id, NodeStatus.pending);
-
-      expect(ws.findProject(child.id)!.status, NodeStatus.pending);
-      expect(ws.findProject(root.id)!.status, NodeStatus.pending, reason: '硬约束必须恒真');
-      expect(ws.findProject(root.id)!.completedAt, isNull);
-    });
-
-    test('ignore 是终态，可撤销', () {
-      final root = ws.createProject(title: '根');
-      final child = ws.createProject(title: '子', parentId: root.id);
-      ws.setProjectStatus(child.id, NodeStatus.ignored);
-      ws.setProjectStatus(root.id, NodeStatus.done);
-      expect(ws.findProject(root.id)!.status, NodeStatus.done);
+      // 以前会抛 RuleViolation（"还有 1 个子节点未处理"）；现在项目根本没有完成判定，
+      // 能做的只有归档 —— 子项目未终态也照常归档
+      ws.setProjectArchived(root.id, true);
+      expect(ws.findProject(root.id)!.archived, isTrue);
+      expect(ws.findProject(root.id)!.status, NodeStatus.pending);
     });
 
     test('归档与取消归档双向级联（ADR-051）', () {
@@ -110,7 +120,6 @@ void main() {
       ws.setProjectArchived(root.id, true);
       expect(ws.findProject(child.id)!.archived, isTrue);
       expect(ws.findProject(child.id)!.deleted, isFalse, reason: '归档不是删除');
-      expect(ws.findProject(child.id)!.status, NodeStatus.pending, reason: '归档不改 status');
 
       ws.setProjectArchived(root.id, false);
       expect(ws.findProject(child.id)!.archived, isFalse);
@@ -123,6 +132,114 @@ void main() {
         () => ws.updateProject(root.id, parentId: child.id),
         throwsA(isA<RuleViolation>()),
       );
+    });
+  });
+
+  group('项目角色：分类 / 目标（Q2）', () {
+    test('判据只有一条：有下级 = 分类，没有下级 = 目标，与深度无关', () {
+      final root = ws.createProject(title: '根');
+      final mid = ws.createProject(title: '中', parentId: root.id);
+      final leaf = ws.createProject(title: '叶', parentId: mid.id);
+      final solo = ws.createProject(title: '独苗');
+
+      expect(ws.isProjectCategory(root.id), isTrue);
+      expect(ws.isProjectCategory(mid.id), isTrue, reason: '它有下级 → 分类，哪怕自己在第 2 层');
+      expect(ws.isProjectCategory(leaf.id), isFalse, reason: '第 3 层且没有下级 → 目标');
+      expect(ws.isProjectCategory(solo.id), isFalse);
+    });
+
+    test('归档下级之后，父项目掉回"目标"（已归档的下级不算数）', () {
+      final root = ws.createProject(title: '根');
+      final child = ws.createProject(title: '子', parentId: root.id);
+      expect(ws.isProjectCategory(root.id), isTrue);
+
+      ws.setProjectArchived(child.id, true);
+      expect(ws.childProjectsOf(root.id), isEmpty);
+      expect(ws.isProjectCategory(root.id), isFalse, reason: '已归档的下级不再把父项目撑成分类');
+    });
+
+    test('汇总口径：含 N 个目标 + 这些目标的清单条目勾选进度（只用现有字段）', () {
+      final root = ws.createProject(title: '根');
+      // 两个目标（其中一个在第 2 层带一个第 3 层的目标）
+      final a = ws.createProject(title: '目标 A', parentId: root.id);
+      final mid = ws.createProject(title: '目标 B', parentId: root.id);
+      final deep = ws.createProject(title: '目标 C', parentId: mid.id);
+
+      // 给这几个目标各挂一点清单：A 两条（勾一条）、C 一条（没勾）
+      final a1 = ws.addProjectItem(a.id, 'A 的第一条');
+      ws.addProjectItem(a.id, 'A 的第二条');
+      ws.setProjectItemDone(a.id, a1.id, true);
+      ws.addProjectItem(deep.id, 'C 的第一条');
+
+      final summary = ws.summarizeCategory(root.id);
+      // "有下级"的 mid 自己是分类，不算目标；A（叶子）与 C（叶子）才是目标
+      expect(summary.targetCount, 2);
+      expect(summary.itemTotal, 3, reason: '只累加目标的清单条目');
+      expect(summary.itemDone, 1);
+      // 分类自己的清单不计入（分类不该有清单，这里只是把边界钉死）
+      final empty = ws.summarizeCategory(mid.id);
+      expect(empty.targetCount, 1);
+      expect(empty.itemTotal, 1);
+    });
+  });
+
+  group('事件「已完成」的自动一致性（Q29）', () {
+    test('往已完成的事件里加主线任务 → 事件退回 pending 并清 completedAt', () {
+      final event = ws.createEvent(name: '一件事');
+      final first = ws.createTask(eventId: event.id, title: '第一条');
+      ws.setTaskStatus(first.id, NodeStatus.done);
+      ws.setEventStatus(event.id, NodeStatus.done);
+      expect(ws.findEvent(event.id)!.status, NodeStatus.done);
+
+      ws.createTask(eventId: event.id, title: '后加的一条');
+
+      final reloaded = ws.findEvent(event.id)!;
+      expect(reloaded.status, NodeStatus.pending, reason: '已完成但 0/1 是自相矛盾的状态');
+      expect(reloaded.completedAt, isNull);
+    });
+
+    test('把未完成任务移进已完成的事件 → 同样退回 pending', () {
+      final source = ws.createEvent(name: '来源事件');
+      final target = ws.createEvent(name: '目标事件');
+      final done = ws.createTask(eventId: target.id, title: '已完成的一条');
+      ws.setTaskStatus(done.id, NodeStatus.done);
+      ws.setEventStatus(target.id, NodeStatus.done);
+      final pending = ws.createTask(eventId: source.id, title: '还没做的一条');
+
+      ws.moveTask(pending.id, newEventId: target.id);
+
+      expect(ws.findEvent(target.id)!.status, NodeStatus.pending);
+      expect(ws.findEvent(target.id)!.completedAt, isNull);
+      expect(ws.findEvent(source.id)!.status, NodeStatus.pending, reason: '来源事件本来就没完成');
+    });
+
+    test('事件下的任务全部终态时**不会**自动完成（只允许自动退回）', () {
+      final event = ws.createEvent(name: '两件事');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      final b = ws.createTask(eventId: event.id, title: '乙');
+
+      ws.setTaskStatus(a.id, NodeStatus.done);
+      ws.setTaskStatus(b.id, NodeStatus.ignored);
+
+      expect(
+        ws.findEvent(event.id)!.status,
+        NodeStatus.pending,
+        reason: '自动"完成"是禁止的：要用户自己点',
+      );
+      expect(ws.findEvent(event.id)!.completedAt, isNull);
+    });
+
+    test('已搁置的事件不动：往里面加任务也不会被自动改回 pending', () {
+      final event = ws.createEvent(name: '先不做了');
+      final first = ws.createTask(eventId: event.id, title: '第一条');
+      ws.setTaskStatus(first.id, NodeStatus.done);
+      ws.setEventStatus(event.id, NodeStatus.ignored);
+
+      ws.createTask(eventId: event.id, title: '后加的一条');
+
+      final reloaded = ws.findEvent(event.id)!;
+      expect(reloaded.status, NodeStatus.ignored, reason: '搁置是用户显式选择');
+      expect(reloaded.completedAt, isNull);
     });
   });
 
@@ -1184,7 +1301,7 @@ void main() {
       expect(reloaded.findProject(project.id)!.title, '立刻落盘');
     });
 
-    test('第二次保存前，上一份数据已轮转进滚动备份', () {
+    test('同一段操作里的连续保存不再各轮转一次（Q3：备份代表"一段操作"）', () {
       final first = ws.createProject(title: '第一版');
       expect(
         storage.paths.rollingBackup(1).existsSync(),
@@ -1194,14 +1311,30 @@ void main() {
 
       final second = ws.createProject(title: '第二版');
 
+      // 主文件照旧"改一下就存住"
+      expect(storeTextOnDisk(), contains(second.id));
+      expect(
+        storage.paths.rollingBackup(1).existsSync(),
+        isFalse,
+        reason: '节流窗口（${AppStorage.rotateMinIntervalMillis ~/ 60000} 分钟）内不再按次数轮转 '
+            '—— 原来"每次保存都轮转"会把十份备份在连续编辑一分钟里挤光',
+      );
+      expect(first.id, isNotEmpty);
+    });
+
+    test('显式留档（snapshotNow）不受节流限制：强制轮转出"操作之前"的那一份', () {
+      final first = ws.createProject(title: '第一版');
+      expect(storage.paths.rollingBackup(1).existsSync(), isFalse);
+
+      // 批量操作前的手动快照：用户明确要求现在留一份，不该被节流拦住
+      ws.snapshotNow();
+
       final backup1 = storage.paths.rollingBackup(1);
       expect(backup1.existsSync(), isTrue);
       final backedUp = StoreFile.parse(backup1.readAsStringSync(encoding: utf8), DecodeIssues());
       final backedUpIds =
           backedUp.documentOf(DocName.projects).projectItems.map((p) => p.id).toSet();
-      expect(backedUpIds, contains(first.id));
-      expect(backedUpIds, isNot(contains(second.id)), reason: 'backup.1 是最近一次保存之前的状态');
-      expect(storeTextOnDisk(), contains(second.id));
+      expect(backedUpIds, contains(first.id), reason: 'backup.1 是"留档之前"的状态');
     });
 
     test('snapshotNow 能强制落盘并轮转出备份（批量操作前的手动快照）', () {
@@ -1245,4 +1378,42 @@ void main() {
       expect(isTerminal(NodeStatus.pending), isFalse);
     });
   });
+}
+
+/// 一份**手写的老数据**：项目带着 `done` / `completed_at`（Q1 之前才会产生的值）。
+///
+/// 用来验证"历史枚举值只读保留"：读进来再写出去，`status` 与 `completed_at`
+/// 一个字节都不变，而且不会有任何动作把它们变成新值。
+String _storeWithLegacyProjectStatus({
+  required String doneStatus,
+  required int doneCompletedAt,
+}) {
+  final project = <String, dynamic>{
+    'id': 'legacy-project',
+    'title': '老项目',
+    'purpose': '',
+    'implementation': '',
+    'date': null,
+    'status': doneStatus,
+    'archived': false,
+    'parent_project_id': null,
+    'order': 1000,
+    'completed_at': doneCompletedAt,
+    'created_at': 1700000000000,
+    'updated_at': 1700000000000,
+    'deleted': false,
+  };
+  final text = const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+    'schemaVersion': 3,
+    'savedAt': 1700000000000,
+    'collections': <String, dynamic>{
+      'projects': <String, dynamic>{
+        'items': <dynamic>[project],
+      },
+      'inspirations': <String, dynamic>{'items': <dynamic>[]},
+      'events': <String, dynamic>{'items': <dynamic>[]},
+      'tasks': <String, dynamic>{'items': <dynamic>[]},
+    },
+  });
+  return '$text\n';
 }

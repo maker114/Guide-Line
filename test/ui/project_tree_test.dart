@@ -6,10 +6,12 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/projects/project_tab.dart';
 
-/// 项目页列表的两件事（实机反馈）：
-///   · **左侧图标槽位对齐**：展开箭头是 `IconButton`、状态图标是 `Icon`、
+/// 项目页列表的几件事（实机反馈 + Q1/Q2）：
+///   · **左侧图标槽位对齐**：展开箭头是 `IconButton`、目标行的色点是 `Icon`、
 ///     标识色条有的有有的没有 —— 各画各的会把标题挤到不同竖线上；
-///   · 展开 / 收起箭头**转过去**，不是换一个图标。
+///   · 展开 / 收起箭头**转过去**，不是换一个图标；
+///   · **项目状态图标与完成删除线都不再出现**（项目没有完成态，Q1）；
+///   · **分类行只显示 名字 + 色条 + 汇总**（Q2）：目的 / 日期一律不上树。
 void main() {
   late Directory tempDir;
 
@@ -42,7 +44,6 @@ void main() {
     await tester.pumpAndSettle();
     return app;
   }
-
   Finder inTab(Finder matching) =>
       find.descendant(of: find.byType(ProjectTab), matching: matching);
 

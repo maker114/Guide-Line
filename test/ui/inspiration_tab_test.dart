@@ -172,9 +172,9 @@ void main() {
     await tester.tap(find.text('这条灵感要合并'));
     await tester.pumpAndSettle();
 
-    // 进了合并编辑器：标题带项目名，编辑框里**就是当前的「实现计划」**
+    // 进了合并编辑器：标题带项目名，编辑框里**就是当前的「如何解决」**
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
-    expect(find.text('实现计划（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决（可编辑）'), findsOneWidget);
     final field = tester.widget<TextField>(
       find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
     );
@@ -272,21 +272,51 @@ void main() {
     expect(after.width, closeTo(before.width, 0.01));
   });
 
-  testWidgets('标签功能已移除：条目上不显示标签，动作面板里也没有加标签入口', (tester) async {
+  testWidgets('标签是灵感的分类：条目上显示、点它筛出这一类、动作面板能改', (tester) async {
     final app = await boot();
-    // 老数据里可能还留着标签（契约字段仍在，见《数据契约》§3.1），界面不再呈现
-    final inspiration = app.ws.captureInspiration('老数据一条');
+    final inspiration = app.ws.captureInspiration('带标签的一条');
     app.run(() => app.ws.updateInspirationTags(inspiration.id, <String>['产品', '体验']));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    expect(find.text('产品'), findsNothing, reason: '条目上不该再出现标签');
-    expect(find.text('体验'), findsNothing);
+    expect(find.text('#产品'), findsOneWidget, reason: '条目上要看得见标签');
+    expect(find.text('#体验'), findsOneWidget);
 
-    await tester.tap(find.text('老数据一条'));
+    // 点标签 → 只看这一类；数字必须说清"筛出几条 / 一共几条"
+    await tester.tap(find.text('#产品'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('加标签'), findsNothing, reason: '动作面板里不该再有加标签入口');
-    expect(find.textContaining('标签（'), findsNothing);
+    expect(find.textContaining('标签「产品」'), findsOneWidget);
+    expect(find.textContaining('筛出 1 条 / 未处理共 1 条'), findsOneWidget);
+
+    // 动作面板里有改标签的入口
+    await tester.tap(find.text('带标签的一条'));
+    await tester.pumpAndSettle();
+    expect(find.text('标签…'), findsOneWidget);
+  });
+
+  testWidgets('筛空了要说清"还有多少条"，不能假装灵感箱是空的', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '甲');
+    app.run(() => app.ws.captureInspiration('归到甲的想法', projectId: project.id));
+    app.run(() => app.ws.captureInspiration('没归属的想法'));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 点条目上的项目名 → 只看「甲」
+    await tester.tap(find.text('甲'));
+    await tester.pumpAndSettle();
+
+    // 把甲下唯一一条丢弃：列表空了，但箱子里还剩 1 条
+    await tester.tap(find.text('归到甲的想法'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('丢弃'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('没有符合筛选的灵感'), findsOneWidget);
+    expect(find.textContaining('未处理共 1 条'), findsWidgets,
+        reason: '筛选条与空态各说一次"一共还有多少条"');
+    expect(find.text('清除筛选'), findsWidgets, reason: '筛选条与空态各给一次出口');
   });
 }

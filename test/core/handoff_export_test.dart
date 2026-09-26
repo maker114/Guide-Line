@@ -119,7 +119,7 @@ void main() {
     );
   }
 
-  test('标题与元信息：只写有内容的项，状态译成中文', () {
+  test('标题与元信息：只写有内容的项，且**不写项目状态**（Q1）', () {
     final text = build(
       p: project(
         title: '重构知识库',
@@ -131,19 +131,22 @@ void main() {
     );
 
     expect(text, startsWith('# 项目：重构知识库\n'));
-    expect(text, contains('- 目的：让灵感不再散落'));
+    expect(text, contains('- 有什么问题 / 思路：让灵感不再散落'));
     expect(text, contains('- 日期：2026-12-31'));
-    expect(text, contains('- 状态：已完成'));
     expect(text, contains('- 标识色：#2f6feb'));
     expect(text, contains('- 导出时间：2026-09-25 14:30'));
+    // 项目没有完成 / 搁置（Q1）：老数据里的 done 也不再写进交接说明
+    expect(text, isNot(contains('- 状态：')));
+    expect(text, isNot(contains('已完成')));
+    expect(text, isNot(contains('进行中')));
   });
 
-  test('空的目的 / 日期 / 标识色不写出对应行', () {
+  test('空的「有什么问题 / 思路」/ 日期 / 标识色不写出对应行', () {
     final text = build(p: project(title: '极简', purpose: '   '));
-    expect(text, isNot(contains('- 目的：')));
+    expect(text, isNot(contains('- 有什么问题 / 思路：')));
     expect(text, isNot(contains('- 日期：')));
     expect(text, isNot(contains('- 标识色：')));
-    expect(text, contains('- 状态：进行中'));
+    expect(text, isNot(contains('- 状态：')));
   });
 
   test('清单用 GitHub 任务列表语法，已完成的打 x', () {
@@ -164,15 +167,15 @@ void main() {
   test('空节整节省略，不留「（无）」', () {
     final text = build(p: project(title: '什么都没有'));
     expect(text, isNot(contains('## 实现清单')));
-    expect(text, isNot(contains('## 实现说明')));
+    expect(text, isNot(contains('## 如何解决')));
     expect(text, isNot(contains('## 待处理灵感')));
     expect(text, isNot(contains('## 相关事件与任务线')));
     expect(text.endsWith('\n'), isTrue);
   });
 
-  test('实现说明原样带出（保留换行）', () {
+  test('「如何解决」正文原样带出（保留换行）', () {
     final text = build(p: project(implementation: '第一段\n\n第二段'));
-    expect(text, contains('## 实现说明'));
+    expect(text, contains('## 如何解决'));
     expect(text, contains('第一段\n\n第二段'));
   });
 

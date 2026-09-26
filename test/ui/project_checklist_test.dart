@@ -228,23 +228,37 @@ void main() {
     expect(find.text('要删的条目'), findsNothing);
   });
 
-  testWidgets('清单与正文并存：正文默认收起，展开后能改', (tester) async {
+  testWidgets('清单与「如何解决」并存：正文默认收起，展开后能改', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目庚');
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
     app.run(() => app.ws.replaceImplementation(project.id, '整理后的整体说明'));
 
     await openProject(tester, app, '清单项目庚');
-    await scrollTo(tester, find.text('实现计划'));
+    await scrollTo(tester, find.text('如何解决'));
 
     expect(find.text('一条条目'), findsOneWidget);
-    expect(find.text('实现计划'), findsOneWidget);
+    expect(find.text('如何解决'), findsOneWidget);
+    expect(find.text('实现计划'), findsNothing, reason: 'Q4：字段改称「如何解决」');
     // 有清单时正文默认收起：内容不在树里
     expect(find.text('整理后的整体说明'), findsNothing);
 
     await tester.tap(find.text('展开'));
     await tester.pumpAndSettle();
     expect(find.text('整理后的整体说明'), findsOneWidget);
+  });
+
+  testWidgets('清单区的 AI 入口与提示都改称「如何解决」（Q4）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目子');
+    app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
+
+    await openProject(tester, app, '清单项目子');
+    await scrollTo(tester, find.text('AI 整理成「如何解决」'));
+
+    expect(find.text('AI 整理成「如何解决」'), findsOneWidget);
+    expect(find.text('AI 整理成计划'), findsNothing);
+    expect(find.text('把清单合成一段通顺说明，写进「如何解决」'), findsOneWidget);
   });
 
   testWidgets('导出交接说明：菜单入口 → 预览页能看到生成的内容与隐私提醒', (tester) async {
@@ -272,14 +286,14 @@ void main() {
     expect(find.textContaining('文件会离开这台手机'), findsOneWidget, reason: '必须提醒隐私');
     expect(find.text('导出为 .md'), findsOneWidget);
 
-    // 生成的内容真的在编辑框里（含目的与勾选语法）
+    // 生成的内容真的在编辑框里（含「有什么问题 / 思路」与勾选语法）
     final controller = tester
         .widget<TextField>(
           find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
         )
         .controller!;
     expect(controller.text, contains('# 项目：交接项目'));
-    expect(controller.text, contains('- 目的：把状态讲清楚'));
+    expect(controller.text, contains('- 有什么问题 / 思路：把状态讲清楚'));
     expect(controller.text, contains('- [x] 已做的一条'));
   });
 

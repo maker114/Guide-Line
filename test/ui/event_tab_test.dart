@@ -105,8 +105,8 @@ void main() {
     await bootWithLine(tester);
 
     // 卡头一眼看到进度
-    expect(find.text('主线 3/4'), findsOneWidget);
-    expect(find.textContaining('当前 · 第四步'), findsOneWidget);
+    expect(find.text('主线 3/4 已完成'), findsOneWidget);
+    expect(find.textContaining('接下来 · 第四步'), findsOneWidget);
 
     // 卡里嵌着任务：当前节点与它的上一个看得见
     expect(find.text('第四步'), findsOneWidget);
@@ -277,12 +277,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final scheme = Theme.of(tester.element(find.text('搁置线的任务'))).colorScheme;
-    // 日期文案是「逾期 N 天」（`describeDate`），两条各一份
-    final overdueTexts = tester
-        .widgetList<Text>(find.byType(Text))
-        .where((t) => t.data?.startsWith('逾期') ?? false)
-        .toList(growable: false);
-    expect(overdueTexts.length, 2, reason: '两条任务都有日期');
+    // 不再按全屏 Text 数"逾期"文案：卡头现在还会给一行「最近 …（逾期 N 天）」，
+    // 全屏计数会把它算进去。两条任务各自的日期由下面的 colorOf 逐条取。
 
     Color? colorOf(String taskTitle) {
       final row = find.ancestor(
@@ -301,5 +297,37 @@ void main() {
     // 数据层：搁置事件下的任务不进「到期」聚合
     final due = app.ws.tasksDueOnOrBefore('2030-01-01');
     expect(due.map((t) => t.title), <String>['进行中线的任务']);
+  });
+
+  testWidgets('事件卡回答"先做哪个"：给最近到期日，搁置的事件有记号', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '搬家');
+    final far = app.ws.createTask(eventId: event.id, title: '慢慢来');
+    app.run(() => app.ws.updateTask(far.id, dueAt: '2099-12-31'));
+    final near = app.ws.createTask(eventId: event.id, title: '先做这个');
+    app.run(() => app.ws.updateTask(near.id, dueAt: '2026-09-28'));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('事件'));
+    await tester.pumpAndSettle();
+
+    // 卡头（事件那一条 ListTile）里只出现**最近**的那个到期日
+    final header = find.ancestor(of: find.text('搬家'), matching: find.byType(ListTile));
+    expect(
+      find.descendant(of: header, matching: find.textContaining('最近 2026-09-28')),
+      findsOneWidget,
+      reason: '卡头要给出还没终结的主线任务里最近的那个到期日',
+    );
+    expect(
+      find.descendant(of: header, matching: find.textContaining('2099-12-31')),
+      findsNothing,
+      reason: '不是最近的那个，不该出现在卡头',
+    );
+
+    // 搁置的事件在列表里原本和正常事件长得一样，用户没法解释"为什么它不催我"
+    app.run(() => app.ws.setEventStatus(event.id, NodeStatus.ignored));
+    await tester.pumpAndSettle();
+    expect(find.text('· 已搁置'), findsOneWidget);
   });
 }

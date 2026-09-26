@@ -7,6 +7,7 @@ import '../../core/models/task.dart';
 import '../../core/rules/completion.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
+import '../common/due_label.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/labels.dart';
@@ -541,11 +542,14 @@ class _TaskLine extends StatelessWidget {
     final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status == NodeStatus.done;
     final summary = childSummary;
-    // 有下级汇总时，副标题一行要同时放"绝对日期 + 剩余天数"和「下级 x/y」，
-    // 1.6 倍字体下会顶到行尾；这时只留相对日（"7 天后"），信息不丢、宽度减半。
-    final due = summary == null
-        ? describeDateWithDays(task.dueAt)
-        : describeDate(task.dueAt);
+    // 到期日走全应用统一口径（`dueLabelOf`）：默认"绝对日期 + 剩余天数"，
+    // 只有宽度真的放不下时才退成相对日。有下级汇总时那一行还要放
+    // 「下级 x/y」，1.6 倍字体下会顶到行尾，所以余量多留一点。
+    final due = dueLabelOf(
+      context,
+      task.dueAt,
+      reservedWidth: summary == null ? 200 : 300,
+    );
 
     // 层级区分：主任务是 titleSmall（更大更重），子任务降到 bodySmall 并缩进
     final baseStyle = indent > 0
@@ -667,11 +671,10 @@ class _TaskLine extends StatelessWidget {
                   ),
               ],
             ),
-      // 行内只留**两个图标**（按实机反馈，去掉行尾的三个点）：
-      //   · 日期图标 —— 点一下设/改到期日，**长按清除**；
-      //   · 折线图标 —— 弹出这个节点的族内动作（新建子任务 / 接后续 / 断开后续）。
-      // 其余动作（重命名 / 移动 / 归档 / 删除）由**点这一行**弹出的动作面板承接，
-      // 所以不需要再有一个"更多"菜单。
+      // 行内只留**一个图标**（按实机反馈，去掉行尾的三个点）：
+      //   · 日期图标 —— 点一下设 / 改到期日，**长按清除**。
+      // 其余动作（新建子任务 / 重命名 / 上下挪一格 / 移到其它事件 / 归档 / 删除）
+      // 由**点这一行**弹出的动作面板承接，所以不需要再有一个"更多"菜单。
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[

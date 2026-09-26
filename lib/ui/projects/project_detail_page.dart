@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
-import '../../core/models/enums.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
 import '../../core/rules/handoff_export.dart';
@@ -10,18 +9,19 @@ import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
-import '../common/labels.dart';
-import '../common/status_selector.dart';
 import '../inspiration/merge_editor_page.dart';
-import '../theme/shape_tokens.dart';
 import 'handoff_preview_page.dart';
 import 'project_actions.dart';
 import 'project_checklist.dart';
 
-/// 项目详情：**目的 / 实现 / 日期 / 三态**，加子项目与已分配灵感。
+/// 项目详情：**目标**看全套字段，**分类**只看下级与汇总。
 ///
-/// 「实现」分成两块：上面的**待办清单**（结构化、可勾选）与下面的
-/// **实现计划**（整段说明 / AI 整理的输出）。
+/// 角色判据（《定义与边界》§2.1）：**有下级（未归档、未删除的直属下级项目）
+/// 就是分类，没有下级就是目标**，与深度无关。
+///
+///   · **目标**：有什么问题 / 思路 + 实现清单 + 如何解决 + 下级 + 待处理灵感；
+///   · **分类**：名字、标识色、下级列表、汇总、以及「移到其它分类」等动作 ——
+///     **不显示目的 / 如何解决 / 实现清单 / 日期**，也只从**目标**发起灵感合并。
 ///
 /// 名称不在这里改（标题栏已经写着项目名了，正文再放一遍是重复）：改名入口
 /// 收在标题右侧的三个点里，点「重命名」之后标题栏原地变成输入框。
@@ -86,15 +86,16 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
         }
 
         final parent = project.parentId == null ? null : ws.findProject(project.parentId!);
-        final children = ws.projectTree
-            .childrenOf(widget.projectId)
-            .whereType<Project>()
-            .where((p) => !p.archived)
-            .toList(growable: false);
-        final inspirations = ws.liveInspirations
-            .where((i) => i.isPending && i.projectId == widget.projectId)
-            .toList(growable: false)
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        final children = ws.childProjectsOf(widget.projectId);
+        // 有下级 = 分类（Q2）；分类不装灵感，所以这一页不为它取灵感
+        final isCategory = children.isNotEmpty;
+        final summary = isCategory ? ws.summarizeCategory(widget.projectId) : null;
+        final inspirations = isCategory
+            ? const <Inspiration>[]
+            : (ws.liveInspirations
+                  .where((i) => i.isPending && i.projectId == widget.projectId)
+                  .toList(growable: false)
+                ..sort((a, b) => b.createdAt.compareTo(a.createdAt)));
 
         return Scaffold(
           appBar: AppBar(
@@ -138,7 +139,12 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             await _exportHandoff(context, project);
                             break;
                           case 'move':
-                            await moveProjectAction(context, app, project.id);
+                            await moveProjectAction(
+                              context,
+                              app,
+                              project.id,
+                              title: isCategory ? '移到其它分类' : '移动到…',
+                            );
                             break;
                           case 'archive':
                             await archiveProjectAction(context, app, project.id, archived: true);
@@ -150,15 +156,21 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             break;
                         }
                       },
-                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                        PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
+                      itemBuilder: (_) => <PopupMenuEntry<String>>[
+                        const PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
+                        // 分类不写「有什么问题 / 思路」，也没有清单与如何解决，
+                        // 交接说明对它没有意义 —— 这个入口只给目标。
+                        if (!isCategory)
+                          const PopupMenuItem<String>(
+                            value: 'handoff',
+                            child: Text('导出交接说明…'),
+                          ),
                         PopupMenuItem<String>(
-                          value: 'handoff',
-                          child: Text('导出交接说明…'),
+                          value: 'move',
+                          child: Text(isCategory ? '移到其它分类' : '移动到…'),
                         ),
-                        PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
-                        PopupMenuItem<String>(value: 'archive', child: Text('归档')),
-                        PopupMenuItem<String>(value: 'delete', child: Text('删除')),
+                        const PopupMenuItem<String>(value: 'archive', child: Text('归档')),
+                        const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                       ],
                     ),
                   ],
@@ -172,50 +184,62 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                   leading: const Icon(Icons.subdirectory_arrow_right, size: 18),
                   title: Text('属于「${parent.title}」', style: Theme.of(context).textTheme.labelMedium),
                 ),
-              _StatusField(app: app, project: project),
-              _TextField(
-                title: '目的',
-                hint: '为什么做这个项目',
-                value: project.purpose,
-                onSubmitted: (value) =>
-                    app.run(() => ws.updateProject(project.id, purpose: value)),
-              ),
-              // 「实现」由两部分组成：上面的**待办清单**（结构化、可勾选），
-              // 下面的**实现计划**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
-              // 两者都套在与「目的」同一个 `_FieldCard` 里，一页只留一种观感。
-              _FieldCard(
-                title: '实现清单',
-                trailing: project.items.isEmpty
-                    ? null
-                    : Text(
-                        '${project.itemsDoneCount}/${project.items.length}',
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                child: ProjectChecklist(
+              // 分类与目标看到的是**两套正文**（Q2）：
+              //   分类只回答"归哪一类" —— 名字（标题栏）、标识色、下级列表、汇总；
+              //   目标才有一整套字段（有什么问题 / 思路、清单、如何解决、灵感）。
+              if (isCategory) ...<Widget>[
+                _CategorySummaryCard(
                   app: app,
                   project: project,
-                  onSplitFromImplementation: () => _splitIntoItems(context, project),
+                  summary: summary!,
                 ),
-              ),
-              _FieldCard(
-                title: '实现计划',
-                child: _ImplementationBody(
-                  value: project.implementation,
-                  hasItems: project.items.isNotEmpty,
-                  onSubmit: (value) {
-                    // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
-                    if (value.trim().isEmpty) return;
-                    final error = app.run(() => ws.replaceImplementation(project.id, value));
-                    if (error != null) showToast(context, error, error: true);
-                  },
+                _ChildrenField(app: app, project: project, children: children),
+              ] else ...<Widget>[
+                _ProjectIconsRow(app: app, project: project),
+                _TextField(
+                  title: '有什么问题 / 思路',
+                  hint: '想解决什么问题、有什么思路',
+                  value: project.purpose,
+                  onSubmitted: (value) =>
+                      app.run(() => ws.updateProject(project.id, purpose: value)),
                 ),
-              ),
-              _ChildrenField(app: app, project: project, children: children),
-              _InspirationsField(
-                app: app,
-                project: project,
-                inspirations: inspirations,
-              ),
+                // 「实现」由两部分组成：上面的**实现清单**（结构化、可勾选），
+                // 下面的**如何解决**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
+                // 两者都套在与「有什么问题 / 思路」同一个 `_FieldCard` 里，一页只留一种观感。
+                _FieldCard(
+                  title: '实现清单',
+                  trailing: project.items.isEmpty
+                      ? null
+                      : Text(
+                          '${project.itemsDoneCount}/${project.items.length}',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                  child: ProjectChecklist(
+                    app: app,
+                    project: project,
+                    onSplitFromImplementation: () => _splitIntoItems(context, project),
+                  ),
+                ),
+                _FieldCard(
+                  title: '如何解决',
+                  child: _ImplementationBody(
+                    value: project.implementation,
+                    hasItems: project.items.isNotEmpty,
+                    onSubmit: (value) {
+                      // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
+                      if (value.trim().isEmpty) return;
+                      final error = app.run(() => ws.replaceImplementation(project.id, value));
+                      if (error != null) showToast(context, error, error: true);
+                    },
+                  ),
+                ),
+                _ChildrenField(app: app, project: project, children: children),
+                _InspirationsField(
+                  app: app,
+                  project: project,
+                  inspirations: inspirations,
+                ),
+              ],
             ],
           ),
         );
@@ -307,7 +331,7 @@ class _DetailTitle extends StatelessWidget {
   }
 }
 
-/// 「实现计划」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
+/// 「如何解决」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
 ///
 /// 这一块是三样东西的共同落点 —— AI 整理写进来、交接导出从这里取、
 /// 手写也写在这里（灵感合并不再写它，见 `Workspace.mergeInspiration`）。
@@ -365,7 +389,7 @@ class _ImplementationBodyState extends State<_ImplementationBody> {
   Widget _editor(ThemeData theme, String value) {
     return InlineTextField(
       value: value,
-      hint: '怎么做 —— 灵感合并、AI 整理都会写到这里',
+      hint: '如何解决 —— 灵感合并、AI 整理都会写到这里',
       minLines: 1,
       maxLines: 12,
       allowEmpty: true,
@@ -375,9 +399,12 @@ class _ImplementationBodyState extends State<_ImplementationBody> {
   }
 }
 
-/// 状态 + 标识色 / 日期图标。三样都是"这个项目本身"的属性，所以放在同一行。
-class _StatusField extends StatelessWidget {
-  const _StatusField({required this.app, required this.project});
+/// 「标识色 / 日期」的图标入口。
+///
+/// 这一行原来是「状态」那一行 —— 项目取消完成 / 搁置之后（Q1），三态胶囊整个拿掉，
+/// 只留下这两个"设置一次就不再动"的图标。
+class _ProjectIconsRow extends StatelessWidget {
+  const _ProjectIconsRow({required this.app, required this.project});
 
   final AppController app;
   final Project project;
@@ -385,26 +412,50 @@ class _StatusField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: _IconActions(app: app, project: project),
+      ),
+    );
+  }
+}
+
+/// 分类详情页的**汇总卡**（Q2）。
+///
+/// 只显示算得出来的数字（口径见 `Workspace.summarizeCategory` / `CategorySummary`），
+/// 外加标识色入口 —— 分类没有目的 / 如何解决 / 清单 / 日期，所以这一页没有别的字段卡。
+class _CategorySummaryCard extends StatelessWidget {
+  const _CategorySummaryCard({
+    required this.app,
+    required this.project,
+    required this.summary,
+  });
+
+  final AppController app;
+  final Project project;
+  final CategorySummary summary;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _FieldCard(
+      title: '汇总',
+      // 标识色仍可在这一页改（分类靠色条在树里认人）
+      trailing: _IconActions(app: app, project: project, showDate: false),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Text('状态', style: Theme.of(context).textTheme.labelLarge),
-              const Spacer(),
-              _IconActions(app: app, project: project),
-            ],
-          ),
-          const SizedBox(height: 8),
-          StatusPillSelector<NodeStatus>(
-            values: NodeStatus.values,
-            selected: project.status,
-            labelOf: nodeStatusLabel,
-            onSelected: (status) {
-              final error = app.run(() => app.ws.setProjectStatus(project.id, status));
-              if (error != null) showToast(context, error, error: true);
-            },
+          Text('含 ${summary.targetCount} 个目标', style: theme.textTheme.bodyMedium),
+          if (summary.itemTotal > 0)
+            Text(
+              '清单 ${summary.itemDone}/${summary.itemTotal} 已完成',
+              style: theme.textTheme.bodyMedium,
+            ),
+          const SizedBox(height: 4),
+          Text(
+            '分类只负责归类；要写内容、合并灵感，进它下面的目标。',
+            style: theme.textTheme.bodySmall,
           ),
         ],
       ),
@@ -416,19 +467,27 @@ class _StatusField extends StatelessWidget {
 ///
 /// 按实机反馈收成图标：这两项是**设置一次就不再动**的东西，
 /// 各占一整行 ListTile 太浪费纵向空间。长按 = 清除（图标右下角带个小叉提示），
-/// 所以不需要再各配一个"清除"按钮。
+/// 所以不需要再各配一个"清除"按钮。分类只给标识色（分类没有日期，见 Q2）。
 class _IconActions extends StatelessWidget {
-  const _IconActions({required this.app, required this.project});
+  const _IconActions({
+    required this.app,
+    required this.project,
+    this.showDate = true,
+  });
 
   final AppController app;
   final Project project;
+
+  /// 分类**没有日期**（《定义与边界》§2.1）—— 那时不给日期图标。
+  final bool showDate;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = colorOfHex(project.color);
     final hasDate = project.date != null;
-    final overdue = hasDate && isOverdue(project.date) && project.status != NodeStatus.done;
+    // 项目没有完成态（Q1）：逾期只看日期，不再看 `status`
+    final overdue = hasDate && isOverdue(project.date);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -443,16 +502,17 @@ class _IconActions extends StatelessWidget {
           onTap: () => _pickColor(context),
           onLongPress: color == null ? null : () => _setColor(context, null),
         ),
-        _ClearableIcon(
-          tooltip: !hasDate
-              ? '日期：点一下选'
-              : '日期 ${describeDateWithDays(project.date)}（长按清除）',
-          icon: hasDate ? Icons.event_available_outlined : Icons.event_outlined,
-          color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
-          hasValue: hasDate,
-          onTap: () => _pickDate(context),
-          onLongPress: hasDate ? () => _setDate(context, null) : null,
-        ),
+        if (showDate)
+          _ClearableIcon(
+            tooltip: !hasDate
+                ? '日期：点一下选'
+                : '日期 ${describeDateWithDays(project.date)}（长按清除）',
+            icon: hasDate ? Icons.event_available_outlined : Icons.event_outlined,
+            color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
+            hasValue: hasDate,
+            onTap: () => _pickDate(context),
+            onLongPress: hasDate ? () => _setDate(context, null) : null,
+          ),
       ],
     );
   }
@@ -548,9 +608,9 @@ class _ClearableIcon extends StatelessWidget {
   }
 }
 
-/// 一个"带轻阴影的字段卡"（项目详情里「目的 / 实现清单 / 实现计划」共用）。
+/// 一个"带轻阴影的字段卡"（项目详情里「有什么问题 / 思路 / 实现清单 / 如何解决 / 汇总」共用）。
 ///
-/// 抽出来是为了让三块**长得一样**：以前「目的」是 `Card(elevation: 0)`
+/// 抽出来是为了让几块**长得一样**：以前「目的」是 `Card(elevation: 0)`
 /// （其实没有阴影），清单与正文则是裸标题 + 内容 —— 同一页里三种观感。
 ///
 /// `elevation` 取 1：要的是"轻微浮起"的层次，不是卡片式的大阴影。
@@ -638,32 +698,22 @@ class _ChildrenField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // 子项目区整体收在左边距 16 的一条线上，与上面的字段卡左缘对齐；
+        // 下级区整体收在左边距 16 的一条线上，与上面的字段卡左缘对齐；
         // 条目行本身再往里缩 8，用"缩进"而不是"大间距"表达它是下级。
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: Row(
             children: <Widget>[
-              Text('子项目', style: theme.textTheme.labelLarge),
+              Text('下级', style: theme.textTheme.labelLarge),
               const SizedBox(width: 6),
               Text('${children.length}', style: theme.textTheme.labelSmall),
-              const Spacer(),
-              // 新建子项目：一个加号（按实机反馈），不再是占一整行文字的入口
-              _AddChildButton(
-                onCreate: (title) {
-                  final error = app.run(
-                    () => app.ws.createProject(title: title, parentId: project.id),
-                  );
-                  if (error != null) showToast(context, error, error: true);
-                },
-              ),
             ],
           ),
         ),
         if (children.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Text('还没有子项目', style: theme.textTheme.bodySmall),
+            child: Text('还没有下级项目', style: theme.textTheme.bodySmall),
           )
         else
           for (final child in children)
@@ -685,94 +735,42 @@ class _ChildrenField extends StatelessWidget {
                 ),
               ),
             ),
+        // 新建下级：文案随层级走（Q2）—— 在**分类**下新建的是「目标」。
+        // 用现成的 `InlineComposer`，不新增控件；放在下级列表**末尾**
+        // （与「实现清单」的「添加条目」同一个位置习惯）。
+        //
+        // 刻意**不**塞进上面那一行标题 `Row` 里：`InlineComposer` 展开后内部是
+        // `Row + Expanded`，而 `Row` 里的非弹性子节点拿到的是**无界宽度**，
+        // 一展开就会抛 "non-zero flex but incoming width constraints are unbounded"。
+        InlineComposer(
+          label: '新建目标',
+          hint: '目标名',
+          leading: Icons.add,
+          dense: true,
+          onCreate: (title) {
+            final error = app.run(
+              () => app.ws.createProject(title: title, parentId: project.id),
+            );
+            if (error != null) showToast(context, error, error: true);
+          },
+        ),
       ],
     );
   }
 }
 
-/// 子项目行的副标题：**一行搞定**（日期或状态），没有就不显示。
+/// 下级项目行的副标题：**一行搞定**（有日期才给），没有就不显示。
 ///
-/// 原来固定写「未设置日期」，每条都多一行字，既占地方又没信息量。
+/// 原来固定写「未设置日期」，每条都多一行字，既占地方又没信息量；
+/// 现在项目也没有状态可写（Q1），所以这里只剩日期一项。
 Text? childSubtitle(ThemeData theme, Project child) {
-  if (child.date != null) {
-    return Text(
-      describeDate(child.date),
-      style: theme.textTheme.labelSmall,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-    );
-  }
-  final status = nodeStatusLabel(child.status);
-  if (status.isEmpty) return null;
-  return Text(status, style: theme.textTheme.labelSmall);
-}
-
-/// 「新建子项目」的加号按钮：点一下旁边就展开输入框。
-class _AddChildButton extends StatefulWidget {
-  const _AddChildButton({required this.onCreate});
-
-  final ValueChanged<String> onCreate;
-
-  @override
-  State<_AddChildButton> createState() => _AddChildButtonState();
-}
-
-class _AddChildButtonState extends State<_AddChildButton> {
-  bool _editing = false;
-  final TextEditingController _controller = TextEditingController();
-  final FocusNode _focus = FocusNode();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _focus.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final text = _controller.text.trim();
-    if (text.isNotEmpty) widget.onCreate(text);
-    _controller.clear();
-    // 保持展开，方便连着建几个
-    _focus.requestFocus();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_editing) {
-      return IconButton.filledTonal(
-        tooltip: '新建子项目',
-        icon: const Icon(Icons.add, size: 20),
-        visualDensity: VisualDensity.compact,
-        onPressed: () {
-          setState(() => _editing = true);
-          _focus.requestFocus();
-        },
-      );
-    }
-    return SizedBox(
-      width: 200,
-      child: TextField(
-        controller: _controller,
-        focusNode: _focus,
-        autofocus: true,
-        textInputAction: TextInputAction.done,
-        onSubmitted: (_) => _submit(),
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: '子项目名',
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(AppShapes.cardRadius),
-          ),
-          suffixIcon: IconButton(
-            tooltip: '收起',
-            icon: const Icon(Icons.close, size: 18),
-            onPressed: () => setState(() => _editing = false),
-          ),
-        ),
-      ),
-    );
-  }
+  if (child.date == null) return null;
+  return Text(
+    describeDate(child.date),
+    style: theme.textTheme.labelSmall,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+  );
 }
 
 class _InspirationsField extends StatelessWidget {
@@ -816,7 +814,7 @@ class _InspirationsField extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
             child: Text(
-              '点一条即可把它并进「实现计划」，或直接追加成清单的一条',
+              '点一条即可把它并进「如何解决」，或直接追加成清单的一条',
               style: theme.textTheme.bodySmall,
             ),
           ),

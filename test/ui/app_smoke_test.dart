@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
@@ -92,10 +93,10 @@ void main() {
     expect(find.text('把灵感线做成一条链'), findsOneWidget);
     expect(app.ws.inspirationInbox.length, 1);
 
-    // ---- 2. 项目 Tab：页内直接输入建一个根项目
+    // ---- 2. 项目 Tab：页内直接输入建一个根项目（根层的新建入口叫「新建分类」，Q2）
     await switchTab(tester, '项目');
     expect(find.text('还没有项目'), findsOneWidget);
-    await submitInlineComposer(tester, '新建项目', 'Guide Line');
+    await submitInlineComposer(tester, '新建分类', 'Guide Line');
     expect(find.text('Guide Line'), findsOneWidget);
     expect(app.ws.liveProjects.length, 1);
 
@@ -358,5 +359,60 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pageBack();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('损坏恢复的告警条点得开：来源、隔离文件名与「一键导出」都在（Q16）', (tester) async {
+    // ---- 先正常用一次：造出数据、一份备份，并记一次"刚导出过"
+    final first = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    first.run(() => first.ws.createProject(title: '完好版本'));
+    first.storage.beginEditSession(); // 让下一笔写入轮转出一份备份
+    first.run(() => first.ws.createProject(title: '事故前的版本'));
+    first.run(() => first.ws.markExported(Ids.nowMillis()));
+    expect(first.backups, isNotEmpty, reason: '先得有能恢复的备份');
+    expect(first.exportOverdue, isFalse, reason: '刚导出过，提醒本来不该出现');
+
+    // ---- 破坏主文件（真机上就是写到一半被杀 / 存储坏了），再启动
+    File('${tempDir.path}${Platform.pathSeparator}guideline.json')
+        .writeAsStringSync('{"broken": ');
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    expect(app.hasDataIncident, isTrue);
+    expect(app.recoveredFromBackupFileName, 'guideline.backup.1.json',
+        reason: '要能说清是从哪一份恢复的');
+    expect(app.quarantinedFileNames, hasLength(1));
+    expect(
+      app.exportOverdue,
+      isTrue,
+      reason: '刚出过数据事故，「该导出了」必须重新出现',
+    );
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // ---- 告警条可点开
+    await tester.tap(find.textContaining('主数据文件损坏'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('数据恢复记录'), findsOneWidget);
+    expect(
+      find.textContaining('已从备份恢复：guideline.backup.1.json'),
+      findsOneWidget,
+      reason: '恢复来源要写在明面上',
+    );
+    expect(
+      find.textContaining('损坏的原文件已隔离保留：'),
+      findsOneWidget,
+      reason: '隔离文件叫什么名字也要写出来',
+    );
+    expect(
+      find.textContaining('导出提醒已重新开始计时'),
+      findsOneWidget,
+      reason: '事故与"该导出了"是同一件事的两面，要说在一起',
+    );
+
+    // ---- 一键导出：真机上会弹系统分享面板，用例里只看它真的写出了一份导出文件
+    await tester.tap(find.text('一键导出'));
+    await tester.pumpAndSettle();
+    expect(app.storage.listExports(), isNotEmpty, reason: '一键导出要真的落一份导出文件');
   });
 }

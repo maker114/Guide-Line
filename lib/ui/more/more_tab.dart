@@ -41,7 +41,7 @@ class MoreTab extends StatelessWidget {
         _MoreItem(
           icon: Icons.upcoming_outlined,
           title: '接下来的任务',
-          subtitle: upcoming == 0 ? '现在没有待办' : '当前 $upcoming 条待办（含没排期的）',
+          subtitle: upcoming == 0 ? '现在没有待办' : '接下来 $upcoming 条待办（含没排期的）',
           page: UpcomingTasksPage(app: app),
         ),
         _MoreItem(

@@ -5,12 +5,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
+import 'package:guideline/ui/common/inline_editor.dart';
 
-/// 项目详情页的标题栏与报错提示（实机反馈）：
+/// 项目详情页的标题栏、目标 / 两套正文与文案（实机反馈 + Q1/Q2/Q4）：
 ///   · 标题旁立一根**标识色竖条**（没设色就是灰条），与项目树行首同一个控件；
 ///   · 正文里不再重复一个「名称」字段，改名收进标题右侧的三个点，
 ///     点「重命名」后标题栏原地变成输入框，带确认 / 取消；
-///   · 子节点没做完就点「已完成」时那句提示，浅色底上必须是深色字。
+///   · **项目没有完成态**（Q1）：这一页没有状态胶囊，也没有
+///     「还有 N 个子项目未处理」这类提示；
+///   · **分类与目标两套正文**（Q2）：分类只有名字 / 标识色 / 下级 / 汇总，
+///     不出现目的、清单、如何解决、日期，也没有灵感合并入口；
+///   · 字段改称「有什么问题 / 思路」与「如何解决」（Q4）。
 void main() {
   late Directory tempDir;
 
@@ -129,27 +134,105 @@ void main() {
     expect(find.text('别弄丢我'), findsOneWidget);
   });
 
-  testWidgets('子节点没做完就点「已完成」：拦下来的那句提示是深色字', (tester) async {
+  testWidgets('项目没有完成态：详情页没有状态胶囊，也没有"还有 N 个子项目未处理"', (tester) async {
     final app = await boot();
     final parent = app.ws.createProject(title: '父项目');
     app.ws.createProject(title: '子项目', parentId: parent.id);
 
     await openProject(tester, app, '父项目');
-    await tester.tap(find.text('已完成'));
+
+    // 状态三态（未完成 / 已完成 / 已搁置）整块拿掉（Q1）
+    expect(find.text('状态'), findsNothing);
+    expect(find.text('已完成'), findsNothing);
+    expect(find.text('已搁置'), findsNothing);
+    expect(find.textContaining('未处理'), findsNothing);
+    expect(find.textContaining('可以标记完成'), findsNothing);
+
+    // 项目能做的只有"要 / 不要"：归档仍在动作菜单里
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('归档'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('目标详情页：字段改称「有什么问题 / 思路」与「如何解决」（Q4）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标甲');
+    app.run(() => app.ws.updateProject(project.id, purpose: '先把口子收窄'));
+
+    await openProject(tester, app, '目标甲');
+
+    expect(find.text('有什么问题 / 思路'), findsOneWidget);
+    expect(find.text('如何解决'), findsOneWidget);
+    expect(find.text('目的'), findsNothing);
+    expect(find.text('实现计划'), findsNothing);
+    expect(find.textContaining('先把口子收窄'), findsOneWidget);
+  });
+
+  testWidgets('分类详情页：只有名字 / 标识色 / 下级 / 汇总，不出现目的 / 清单 / 如何解决 / 日期', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    // 故意给分类塞上"目标才有"的内容：它一个都不该显示
+    app.run(() => app.ws.updateProject(category.id, purpose: '分类不该有目的', date: '2026-12-31'));
+    app.run(() => app.ws.replaceImplementation(category.id, '分类不该有正文'));
+    app.run(() => app.ws.addProjectItem(category.id, '分类不该有清单条'));
+    // 目标自己有清单 → 汇总里能算出来
+    app.run(() => app.ws.addProjectItem(target.id, '目标的一条'));
+
+    await openProject(tester, app, '工作');
+
+    expect(find.text('汇总'), findsOneWidget);
+    expect(find.text('含 1 个目标'), findsOneWidget);
+    expect(find.text('清单 0/1 已完成'), findsOneWidget);
+    expect(find.text('下级'), findsOneWidget);
+    expect(find.text('发布 v1'), findsOneWidget);
+
+    // 分类上没有的东西
+    expect(find.text('有什么问题 / 思路'), findsNothing);
+    expect(find.text('如何解决'), findsNothing);
+    expect(find.text('实现清单'), findsNothing);
+    expect(find.text('分类不该有目的'), findsNothing);
+    expect(find.text('分类不该有正文'), findsNothing);
+    expect(find.text('分类不该有清单条'), findsNothing);
+    expect(find.text('日期'), findsNothing);
+    expect(find.textContaining('2026-12-31'), findsNothing);
+    // 分类不装灵感：这一页没有灵感区，也没有交接导出
+    expect(find.textContaining('待处理灵感'), findsNothing);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('导出交接说明…'), findsNothing);
+    expect(find.text('移到其它分类'), findsOneWidget, reason: '分类的动作仍在菜单里');
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('新建入口文案随层级：分类下是「新建目标」（复用 InlineComposer）', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    app.ws.createProject(title: '发布 v1', parentId: category.id);
+
+    await openProject(tester, app, '工作');
+
+    expect(find.text('新建目标'), findsOneWidget);
+    expect(find.text('新建子项目'), findsNothing, reason: 'Q2：这一层建出来的是目标');
+    expect(find.byType(InlineComposer), findsOneWidget, reason: '用现成控件，不新增');
+
+    await tester.tap(find.text('新建目标'));
+    await tester.pumpAndSettle();
+    final composer = find.ancestor(
+      of: find.byType(TextField),
+      matching: find.byType(InlineComposer),
+    );
+    await tester.enterText(
+      find.descendant(of: composer, matching: find.byType(TextField)),
+      '发布 v2',
+    );
+    await tester.tap(find.descendant(of: composer, matching: find.byTooltip('添加')));
     await tester.pumpAndSettle();
 
-    final message = find.textContaining('还有 1 个子节点未处理');
-    expect(message, findsOneWidget);
-
-    // 底色是浅色的 errorContainer，默认文字色是 near-white 的 inverseOnSurface ——
-    // 那样等于看不见，所以必须自己指定"画在这个底色上"的前景色
-    final scheme = Theme.of(tester.element(find.text('已完成'))).colorScheme;
-    final snackBar = tester.widget<SnackBar>(find.byType(SnackBar));
-    expect(snackBar.backgroundColor, scheme.errorContainer);
-    expect(
-      tester.widget<Text>(message).style?.color,
-      scheme.onErrorContainer,
-      reason: '浅色底上的默认文字色近乎纯白，得显式换成深色的 onErrorContainer',
-    );
+    final created = app.ws.liveProjects.firstWhere((p) => p.title == '发布 v2');
+    expect(created.parentId, category.id, reason: '真的挂在分类下面');
   });
 }

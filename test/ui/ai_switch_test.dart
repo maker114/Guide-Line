@@ -61,9 +61,9 @@ void main() {
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
 
     await openProject(tester, app, '项目甲');
-    await scrollToChecklist(tester, 'AI 整理成计划');
+    await scrollToChecklist(tester, 'AI 整理成「如何解决」');
 
-    expect(find.text('AI 整理成计划'), findsOneWidget);
+    expect(find.text('AI 整理成「如何解决」'), findsOneWidget);
     expect(app.aiEnabled, isTrue);
   });
 
@@ -77,7 +77,7 @@ void main() {
     await openProject(tester, app, '项目乙');
     await scrollToChecklist(tester, '添加条目');
 
-    expect(find.text('AI 整理成计划'), findsNothing, reason: '关掉就不该再出现 AI 整理的字样');
+    expect(find.text('AI 整理成「如何解决」'), findsNothing, reason: '关掉就不该再出现 AI 整理的字样');
     expect(await credentials.readApiKey(), 'sk-keep-me', reason: 'Key 不清');
     expect(app.prefs.aiBaseUrl, 'https://example.com', reason: '地址也不清');
     expect(app.prefs.aiModel, 'm');

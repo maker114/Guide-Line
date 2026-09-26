@@ -37,6 +37,35 @@ const String _parallelGone =
     '「并列任务」已废除 —— 两件并行的事请开两个「事件」，'
     '或者把两条并成同一个节点下的两条子任务';
 
+/// 分类的汇总（Q2）—— **只统计，不判定**。
+///
+/// 口径（与《定义与边界》§2.1 / §2.2 一致，只用契约里已有的字段）：
+///   · [targetCount]：这棵子树下**目标**（没有未归档、未删除下级项目的项目）的个数；
+///   · [itemTotal] / [itemDone]：这些目标的「实现清单」条目总数与已勾选数。
+///
+/// 为什么不是「N 条事件 / N 条未完成任务」：任务属于**事件**，而事件与项目之间
+/// **没有关联字段**（《数据契约》§3.3：事件没有 `parent_*`，也没有"所属项目"）。
+/// 要按项目数事件，得先给事件加一个「所属项目」—— 那是数据契约变更，
+/// 本轮明确不做，也不许为了凑进度发明新字段。
+/// 所以退到**目标自己的可交付口径**：清单条目的勾选进度。它只是把各个目标里
+/// 已经在显示的数字加起来，不参与完成判定，也不与事件里的任务联动。
+class CategorySummary {
+  const CategorySummary({
+    required this.targetCount,
+    required this.itemTotal,
+    required this.itemDone,
+  });
+
+  /// 子树下的目标个数（叶子项目）。
+  final int targetCount;
+
+  /// 这些目标的「实现清单」条目总数。
+  final int itemTotal;
+
+  /// 其中已勾选的条数。
+  final int itemDone;
+}
+
 /// 搜索命中。
 class SearchHit {
   const SearchHit({required this.doc, required this.entity, required this.matchedField});
@@ -159,6 +188,28 @@ class Workspace {
       judgedChildCount: children.length,
       unfinishedCount: unfinished,
     );
+  }
+
+  /// 事件「已完成」的自动一致性（Q29）：**只允许自动退回，不允许自动完成**。
+  ///
+  /// 任何会改变"某事件下参与判定的主线任务集合"的动作（新建任务、把任务移进某个
+  /// 事件、取消归档、从回收站恢复……）之后调用一次：如果这个事件当前是 `done`，
+  /// 而它已经**不满足完成条件**（还有非终态的主线任务），就把它退回 `pending`
+  /// 并清掉 `completedAt` —— 否则会留下"已完成但 0/1"这种自相矛盾的状态。
+  ///
+  /// **已搁置（`ignored`）的事件一律不动**：搁置是用户显式选择，不是算出来的。
+  /// 反向也绝不发生：任务全部终态时**不会**自动把事件标成完成。
+  void _revertIncompleteDoneEvents(Iterable<String> eventIds, int now) {
+    for (final eventId in eventIds.toSet()) {
+      final event = findEvent(eventId);
+      if (event == null || event.deleted) continue;
+      if (event.status != NodeStatus.done) continue;
+      if (checkEventCompletion(eventId).canComplete) continue;
+      _upsert(
+        DocName.events,
+        event.copyWith(status: NodeStatus.pending, completedAt: null, updatedAt: now),
+      );
+    }
   }
 
   /// 任务是否**当前不能勾选**（还有未处理的直接子任务）。
@@ -350,37 +401,57 @@ class Workspace {
     persist();
   }
 
-  void setProjectStatus(String id, NodeStatus status) {
-    final project = findProject(id);
-    if (project == null) throw const RuleViolation('项目不存在');
+  // 项目**没有**「完成 / 搁置」（《定义与边界》§2.1，2026-09-26 决定）：
+  //   · `Project.status` / `completedAt` 只**只读保留** —— 老数据里已经标过的
+  //     `done` / `ignored` 原样留在文件里（读入→写出逐字节不变），界面不再显示，
+  //     业务层也**不再产生新值**（新建项目写 `pending` / `null`）；
+  //   · 于是"父项目什么时候算完成""父项目为什么还不能完成"这类问题整体消失，
+  //     原来的 `setProjectStatus`（含 `checkCompletion(projectTree, …)` 与
+  //     为它服务的祖先退回）**整段删除**；
+  //   · 项目只回答"要 / 不要"：不需要了就**归档**。想表达"做完了"，说到事件的
+  //     三态上去 —— 完成规则（§4）只对**事件与任务**生效。
 
-    if (status == NodeStatus.done) {
-      final check = checkCompletion(projectTree, id);
-      if (!check.canComplete) throw RuleViolation(check.reason ?? '还有子节点未处理');
+  /// 一个项目的**未归档、未删除的直属下级项目**。
+  ///
+  /// 角色判据只看这一条（《定义与边界》§2.1）：**有下级 = 分类，没有下级 = 目标**，
+  /// 与深度无关；已归档的下级不算数（它已经"不看了"，不该继续把父项目撑成分类）。
+  List<Project> childProjectsOf(String projectId) => projectTree
+      .childrenOf(projectId)
+      .whereType<Project>()
+      .where((p) => !p.archived)
+      .toList(growable: false);
+
+  /// 这个项目是不是**分类**（有下级）。口径与 [childProjectsOf] 同源。
+  bool isProjectCategory(String projectId) => childProjectsOf(projectId).isNotEmpty;
+
+  /// 分类的汇总，口径见 [CategorySummary]（只统计，不判定）。
+  ///
+  /// 目标 = 子树下**没有未归档下级**的项目；一个目标的"可交付"就是它自己的
+  /// 实现清单，所以汇总把各目标的清单条目与勾选数加起来。
+  CategorySummary summarizeCategory(String projectId) {
+    final tree = projectTree;
+    var targets = 0;
+    var itemTotal = 0;
+    var itemDone = 0;
+
+    for (final node in tree.subtreeOf(projectId)) {
+      if (node.id == projectId) continue; // 自己不是自己的目标
+      if (node is! Project || node.archived) continue;
+      final hasLiveChild = tree
+          .childrenOf(node.id)
+          .whereType<Project>()
+          .any((child) => !child.archived);
+      if (hasLiveChild) continue; // 还有下级 → 它自己也是分类
+      targets += 1;
+      itemTotal += node.items.length;
+      itemDone += node.itemsDoneCount;
     }
 
-    final now = Ids.nowMillis();
-    _upsert(
-      DocName.projects,
-      project.copyWith(
-        status: status,
-        completedAt: status == NodeStatus.done ? now : null,
-        updatedAt: now,
-      ),
+    return CategorySummary(
+      targetCount: targets,
+      itemTotal: itemTotal,
+      itemDone: itemDone,
     );
-
-    // 反向传播：变回非终态时，已完成的祖先必须退回（ADR-055）
-    if (status == NodeStatus.pending) {
-      for (final ancestor in projectTree.ancestorsOf(id)) {
-        if (ancestor is Project && ancestor.status == NodeStatus.done) {
-          _upsert(
-            DocName.projects,
-            ancestor.copyWith(status: NodeStatus.pending, completedAt: null, updatedAt: now),
-          );
-        }
-      }
-    }
-    persist();
   }
 
   /// 归档 / 取消归档 —— **双向级联**（ADR-051）。
@@ -656,7 +727,7 @@ class Workspace {
     persist();
   }
 
-  /// 把一条灵感**原封不动**追加到项目「实现计划」的末尾（灵感整理第 7 条）。
+  /// 把一条灵感**原封不动**追加到项目「如何解决」的末尾（灵感整理第 7 条）。
   ///
   /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
   /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
@@ -668,7 +739,7 @@ class Workspace {
     return '$base\n$addition';
   }
 
-  /// 合并灵感 · **落点一：写进「实现计划」正文**（跨文档，ADR-033/037）。
+  /// 合并灵感 · **落点一：写进「如何解决」正文**（跨文档，ADR-033/037）。
   ///
   /// 合并编辑器里"照着灵感手改正文"与"追加原文后保存"走的都是这一条。
   /// 空正文拒绝 —— 合并不该把正文清没（要只留清单条目就走
@@ -1086,6 +1157,10 @@ class Workspace {
         }
       }
     }
+
+    // 事件这层同样要退回（Q29）：往"已完成"的事件里加任务（主线或子任务）之后，
+    // 它已经不满足完成条件了。子任务那条路会先把父任务退回，这里再收口到事件。
+    _revertIncompleteDoneEvents(<String>[eventId], now);
     persist();
     return task;
   }
@@ -1192,6 +1267,10 @@ class Workspace {
       final t = findTask(tid);
       if (t != null) _upsert(DocName.tasks, t.copyWith(archived: archived, updatedAt: now));
     }
+
+    // 取消归档会把一条主线任务**重新拉回判定域**（Q29）：已完成的事件若因此
+    // 不再满足条件，同样退回。
+    _revertIncompleteDoneEvents(<String>[task.eventId], now);
     persist();
   }
 
@@ -1250,6 +1329,10 @@ class Workspace {
         updatedAt: Ids.nowMillis(),
       ),
     );
+
+    // 移进 / 移出 / 改变归属都会动到"某事件下参与判定的主线任务集合"（Q29）：
+    // 移出的事件不再多一条，移进的事件可能从此不再满足完成条件 —— 两头都收口。
+    _revertIncompleteDoneEvents(<String>[task.eventId, targetEvent], Ids.nowMillis());
     persist();
   }
 
@@ -1351,13 +1434,17 @@ class Workspace {
         }
         break;
       case DocName.tasks:
+        final restoredEventIds = <String>{};
         for (final node in TreeIndex(allTasks).subtreeOf(rootId)) {
           final task = findTask(node.id);
           if (task != null && task.deleted) {
             _upsert(doc, task.copyWith(deleted: false, updatedAt: now));
             restored.add(task.id);
+            restoredEventIds.add(task.eventId);
           }
         }
+        // 恢复出来的任务会重新回到判定域（Q29）：已完成的事件若不再满足条件就退回
+        _revertIncompleteDoneEvents(restoredEventIds, now);
         break;
       case DocName.events:
         final event = findEvent(rootId);
@@ -1369,6 +1456,9 @@ class Workspace {
           _upsert(DocName.tasks, task.copyWith(deleted: false, updatedAt: now));
           restored.add(task.id);
         }
+        // 事件连同它那条任务线一起回来（Q29）：若恢复出的主线任务里有非终态的，
+        // 事件不能再自称"已完成"
+        _revertIncompleteDoneEvents(<String>[rootId], now);
         break;
       case DocName.inspirations:
         final inspiration = findInspiration(rootId);
@@ -1445,8 +1535,12 @@ class Workspace {
   }
 
   /// 手动触发一次备份轮转（导入、批量操作前可调用）。
+  ///
+  /// ⚠️ 走的是**强制**路径（`forceRotate: true`），不是普通 `save`：
+  /// 普通保存的轮转按"编辑会话 / 最小间隔"节流（Q3），而这里正是**用户显式
+  /// 要求"现在留一份"**的场景 —— 被节流拦下就等于这句承诺落空。
   void snapshotNow() {
-    _storage.save(buildStoreFile());
+    _storage.save(buildStoreFile(), forceRotate: true);
   }
 
   // ---------------------------------------------------------------- 内部

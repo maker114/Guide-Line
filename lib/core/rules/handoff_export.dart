@@ -1,4 +1,3 @@
-import '../models/enums.dart';
 import '../models/inspiration.dart';
 import '../models/project.dart';
 import '../models/project_item.dart';
@@ -17,6 +16,10 @@ import '../models/project_item.dart';
 /// **不导出"相关事件与任务线"**（实机反馈）：事件与项目之间没有关联字段，
 /// 全量带过去只会把这份说明撑得又长又跑题 —— 交接说明要回答的是"这个项目
 /// 现在是什么状态"，不是"我所有的事都在做什么"。
+///
+/// **不导出项目状态**（Q1）：项目没有完成 / 搁置，只有"要 / 不要"；
+/// `status` / `completed_at` 只是老数据里只读保留的字段，写进交接说明只会误导
+/// 对面的 AI（"已完成"其实不代表这个项目不做了）。不做了就该归档。
 class HandoffExport {
   const HandoffExport._();
 
@@ -31,9 +34,11 @@ class HandoffExport {
     out.add('# 项目：${project.title.trim()}');
     out.add('');
     final meta = <String>[];
-    if (project.purpose.trim().isNotEmpty) meta.add('- 目的：${project.purpose.trim()}');
+    // 字段名与界面同步（Q4）：「目的」→「有什么问题 / 思路」
+    if (project.purpose.trim().isNotEmpty) {
+      meta.add('- 有什么问题 / 思路：${project.purpose.trim()}');
+    }
     if (project.date != null) meta.add('- 日期：${project.date}');
-    meta.add('- 状态：${_nodeStatus(project.status)}');
     if (project.color != null) meta.add('- 标识色：${project.color}');
     meta.add('- 导出时间：${_stamp(now)}');
     out.addAll(meta);
@@ -47,7 +52,8 @@ class HandoffExport {
     final body = project.implementation.trim();
     if (body.isNotEmpty) {
       out.add('');
-      out.add('## 实现说明');
+      // 与界面字段名一致（Q4）：「实现计划」→「如何解决」
+      out.add('## 如何解决');
       out.add('');
       out.add(body);
     }
@@ -74,15 +80,6 @@ class HandoffExport {
       '',
       for (final item in items) '- [${item.done ? 'x' : ' '}] ${_oneLine(item.text)}',
     ];
-  }
-
-  // 完成 = 已完成；已搁置单独标出来（它不是"做完了"，但也不该让 AI 再提）
-  static String _nodeStatus(NodeStatus status) {
-    return switch (status) {
-      NodeStatus.done => '已完成',
-      NodeStatus.ignored => '已搁置',
-      NodeStatus.pending => '进行中',
-    };
   }
 
   /// 单行化：Markdown 是行结构，条目里混进换行会把列表拆散。

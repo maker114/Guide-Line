@@ -98,7 +98,7 @@ class _SearchPageState extends State<SearchPage> {
                         ? const EmptyState(
                             icon: Icons.search_off,
                             title: '没有匹配的结果',
-                            hint: '换个词试试；已归档与已丢弃的内容不参与搜索',
+                            hint: '换个词试试；已归档与已丢弃的去了归档区，不在这儿露面',
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
