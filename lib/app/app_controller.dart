@@ -185,20 +185,29 @@ class AppController extends ChangeNotifier {
 
   int get eventCount => workspace.liveEvents.length;
 
-  int get taskCount => workspace.liveTasks.length;
+  /// 任务总数：**排除已归档** —— 「更多 → 全部任务」页头那个「共 N 条（含子任务）」
+  /// 用的就是它，入口副标题与页内数字必须是同一个数（Q20）。
+  int get taskCount => workspace.liveTasks.where((t) => !t.archived).length;
 
-  int get archiveCount => workspace.archiveZone.totalCount;
+  /// 归档区总数：**含第五个页签「被隐藏」**（Q20）。
+  /// `ArchiveZone.totalCount` 只数前四个分区，页签上却摆了五个，入口写着
+  /// "已归档 / 已丢弃 / 已合并 / 回收站 共 N 条"就对不上「被隐藏」那一档。
+  int get archiveCount =>
+      workspace.archiveZone.totalCount + workspace.inspirationsHiddenByArchivedProjects;
 
-  /// 已逾期：`due_at` 严格早于今天、未完成、未归档。
-  int get overdueCount => workspace.tasksDueOnOrBefore(_yesterdayDate()).length;
+  /// **已逾期**：口径与算法**只有一处** —— `Workspace.overdueTasks()`（Q19）。
+  ///
+  /// 外壳的逾期横幅、底部「更多」的角标、以及落点页面「接下来的任务」里
+  /// 「已逾期」那一组，三处调的是同一个函数，报的自然是同一个数。
+  int get overdueCount => workspace.overdueTasks().length;
 
-  /// 今天及之前到期的待处理任务（含逾期）。
-  int get dueCount => workspace.tasksDueOnOrBefore(Ids.todayDate()).length;
-
-  static String _yesterdayDate() {
-    final now = DateTime.now();
-    return Ids.todayDate(DateTime(now.year, now.month, now.day - 1));
-  }
+  /// **能搜到的东西有几条**（Q20）——「更多」入口那个「N 条内容可搜」用的就是它。
+  ///
+  /// 以前这里自己加了一遍 `projectCount + eventCount + taskCount + inspirationCount`：
+  /// 四个 getter 里三个**含已归档**，而搜索实际只搜未归档的（灵感还只搜待处理的），
+  /// 于是那句话写着"（不含已归档）"、数字却是含归档算出来的。
+  /// 现在入口与搜索页调的是 `Workspace.searchableContentCount` 同一个口径。
+  int get searchableCount => workspace.searchableContentCount;
 
   List<BackupEntry> get backups => storage.listBackups();
 

@@ -260,16 +260,16 @@ void main() {
     expect(find.text('第二步'), findsOneWidget);
   });
 
-  testWidgets('已搁置的事件：日期不再标成逾期红，也不计入「到期」', (tester) async {
+  testWidgets('已搁置的事件：日期不再标成逾期红，也不计入「逾期」', (tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final dropped = app.ws.createEvent(name: '放下的事');
     final droppedTask = app.ws.createTask(eventId: dropped.id, title: '搁置线的任务');
-    app.run(() => app.ws.updateTask(droppedTask.id, dueAt: '2020-01-01'));
+    app.run(() => app.ws.updateTask(droppedTask.id, dueAt: '2000-01-01'));
     app.run(() => app.ws.setEventStatus(dropped.id, NodeStatus.ignored));
 
     final active = app.ws.createEvent(name: '还在做的事');
     final activeTask = app.ws.createTask(eventId: active.id, title: '进行中线的任务');
-    app.run(() => app.ws.updateTask(activeTask.id, dueAt: '2020-01-01'));
+    app.run(() => app.ws.updateTask(activeTask.id, dueAt: '2000-01-01'));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
@@ -294,9 +294,8 @@ void main() {
     expect(colorOf('进行中线的任务'), scheme.error, reason: '在进行的事件里，逾期就该标红');
     expect(colorOf('搁置线的任务'), isNot(scheme.error), reason: '搁置了就不该再催');
 
-    // 数据层：搁置事件下的任务不进「到期」聚合
-    final due = app.ws.tasksDueOnOrBefore('2030-01-01');
-    expect(due.map((t) => t.title), <String>['进行中线的任务']);
+    // 数据层：搁置事件下的任务不进「逾期」取数（Q19 的唯一出处）
+    expect(app.ws.overdueTasks().map((t) => t.title), <String>['进行中线的任务']);
   });
 
   testWidgets('事件卡回答"先做哪个"：给最近到期日，搁置的事件有记号', (tester) async {

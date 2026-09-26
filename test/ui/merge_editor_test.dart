@@ -165,6 +165,80 @@ void main() {
     expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
   });
 
+  testWidgets('正文一个字没改就点「保存」：不算合并（Q8）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '项目戊');
+    app.run(() => app.ws.updateProject(project.id, implementation: '原封不动的计划'));
+    final inspiration = app.ws.captureInspiration('这条灵感还没写进去', projectId: project.id);
+
+    await openMergeEditor(tester, app, '项目戊', '这条灵感还没写进去');
+
+    // 一进来编辑框就是当前正文，直接点保存 —— 什么都没发生
+    expect(editorText(tester), '原封不动的计划');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('正文没有变化'),
+      findsOneWidget,
+      reason: '提示要说清"还没写进项目"，并点明两个能用的动作',
+    );
+    expect(
+      find.textContaining('「追加原文」或「作为清单条目」'),
+      findsOneWidget,
+    );
+    // 留在这一页、不写盘、灵感仍是待处理 —— 不能"报成功却什么都没多"
+    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(app.ws.findProject(project.id)!.implementation, '原封不动的计划');
+    expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
+    expect(app.ws.archiveZone.mergedInspirations, isEmpty);
+  });
+
+  testWidgets('改过（哪怕只多一个字）就照常保存', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '项目己');
+    app.run(() => app.ws.updateProject(project.id, implementation: '原封不动的计划'));
+    app.run(() => app.ws.captureInspiration('这条灵感要合并', projectId: project.id));
+
+    await openMergeEditor(tester, app, '项目己', '这条灵感要合并');
+    await tester.enterText(
+      find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
+      '原封不动的计划\n灵感写进来了',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findProject(project.id)!.implementation, '原封不动的计划\n灵感写进来了');
+    expect(app.ws.inspirationInbox, isEmpty);
+  });
+
+  testWidgets('落盘那一步也挡"正文没变"：applyMergeResult 不动数据', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '项目庚');
+    app.run(() => app.ws.updateProject(project.id, implementation: '原封不动的计划'));
+    final inspiration = app.ws.captureInspiration('这条灵感没写进去', projectId: project.id);
+    final snapshot = app.ws.findProject(project.id)!;
+
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: Builder(
+      builder: (context) => TextButton(
+        onPressed: () => applyMergeResult(
+          context,
+          app,
+          snapshot,
+          inspiration,
+          const MergeResult.intoImplementation('原封不动的计划'),
+        ),
+        child: const Text('落盘'),
+      ),
+    ))));
+    await tester.tap(find.text('落盘'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('正文没有变化'), findsOneWidget);
+    expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue, reason: '灵感不该被标成已合并');
+    expect(app.ws.findProject(project.id)!.updatedAt, snapshot.updatedAt, reason: '项目一个字都没动');
+  });
+
   testWidgets('深色 + 1.6 倍字体、窄屏下这一页不溢出', (tester) async {
     // 360×780 逻辑像素（常见手机），字体放大到 1.6 倍 —— 布局溢出会直接让测试失败
     tester.view.physicalSize = const Size(1080, 2340);

@@ -90,16 +90,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   /// 这个任务是否还有未处理的直接子任务（决定状态按钮显不显示锁形）。
-  bool _blocked(Task task) {
-    final ws = app.ws;
-    return ws.liveTasks.any(
-      (t) =>
-          t.eventId == task.eventId &&
-          t.parentId == task.id &&
-          !t.archived &&
-          !isTerminal(t.status),
-    );
-  }
+  ///
+  /// 与任务线里那个「下级 d/t」**同一套取数**（Q18）：两处都排除已归档的子任务 ——
+  /// 以前这里自己筛一遍、`_summarize` 数的是另一次取数，同一个框里"能不能勾"
+  /// 与"下级 1/3"能对不上。
+  bool _blocked(Task task) => app.ws.isTaskBlocked(task.id);
 
   // 下面几个是给同文件里的私有子控件用的：`setState` 是 protected，
   // 子控件不能直接调，所以在这里开几个语义明确的入口。
@@ -473,6 +468,10 @@ class _TaskBox extends StatelessWidget {
 
   static String? _summarize(List<Task> children) {
     if (children.isEmpty) return null;
+    // 分子只数 `done`，分母是这里拿到的**未归档**子任务（Q18）——
+    // 与 [Workspace.isTaskBlocked] / 状态按钮上的"锁"用的是同一批子任务。
+    // `ignored`（已搁置）刻意不算"完成"：它只是"不做了"，行内有图标区分，
+    // 而"能不能勾"要等它显式变成 done。
     final done = children.where((c) => c.status == NodeStatus.done).length;
     return '下级 $done/${children.length}';
   }

@@ -31,8 +31,9 @@ class MoreTab extends StatelessWidget {
     // 含没排期的 —— 与那个页面的列表同一口径
     final upcoming = ws.openTasks().length;
     final backups = app.backups;
-    final searchable =
-        app.projectCount + app.eventCount + app.taskCount + app.inspirationCount;
+    // 入口的副标题与页内数字**共用同一个计数**（Q20）：以前这里按"含已归档"加，
+    // 点进去的页面按"排除已归档"算，两个数对不上。
+    final searchable = app.searchableCount;
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
@@ -59,7 +60,7 @@ class MoreTab extends StatelessWidget {
         _MoreItem(
           icon: Icons.inventory_2_outlined,
           title: '归档区',
-          subtitle: '已归档 / 已丢弃 / 已合并 / 回收站 共 ${app.archiveCount} 条',
+          subtitle: '已归档 / 已丢弃 / 已合并 / 回收站 / 被隐藏 共 ${app.archiveCount} 条',
           page: ArchivePage(app: app),
         ),
         const SectionHeader('外观'),
@@ -144,7 +145,8 @@ class MoreTab extends StatelessWidget {
         final config = snapshot.data;
         final String text;
         if (config == null) {
-          text = '用于把实现清单整理成「实现计划」';
+          // 字段已改称「如何解决」（Q4），提示词与详情页都用这个词
+          text = '用于把实现清单整理成「如何解决」';
         } else if (config.isConfigured) {
           text = '已配置 · ${config.model}';
         } else {

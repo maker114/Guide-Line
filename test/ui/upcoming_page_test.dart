@@ -83,8 +83,14 @@ void main() {
 
     expect(find.text('搁置线里的任务'), findsOneWidget);
     expect(find.textContaining('接下来没有待办'), findsNothing);
-    // 但"催办"那一侧仍然排除它：逾期角标不该被放下的线拉响
+    // 但"催办"那一侧仍然排除它（Q19 的唯一出处 `overdueTasks()`）
+    expect(app.ws.overdueTasks(), isEmpty);
     expect(app.overdueCount, 0);
+    // 它不落在「已逾期」那一组里（否则组的行数会比横幅说的多），单独一档
+    expect(find.text('已逾期'), findsNothing);
+    expect(find.text('未计入逾期'), findsOneWidget);
+    expect(find.text('1 条'), findsOneWidget, reason: '那一档就它一条');
+    expect(find.text('0 条'), findsNothing, reason: '「已逾期」那一组不存在，就不该有 0 条的分组头');
   });
 
   testWidgets('空的时候把"为什么空"说清楚（逐条对上筛选口径）', (tester) async {
@@ -100,7 +106,7 @@ void main() {
     expect(find.textContaining('共 2 条任务'), findsOneWidget);
     expect(find.textContaining('已完成 1 条'), findsOneWidget);
     expect(find.textContaining('已搁置 1 条'), findsOneWidget);
-    expect(find.textContaining('这一页只列未完成的任务'), findsOneWidget);
+    expect(find.textContaining('这一页只列未完成'), findsOneWidget);
   });
 
   testWidgets('「日历」按钮打开任务日历，点一天能看到那天的任务', (tester) async {

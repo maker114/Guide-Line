@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/json/store_file.dart';
 import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
@@ -1057,6 +1058,44 @@ void main() {
       );
     });
 
+    test('已归档的任务不在任务线里（Q18：显示与判定同一套取数）', () {
+      final event = ws.createEvent(name: '事件 1');
+      final kept = ws.createTask(eventId: event.id, title: '留着的');
+      final archived = ws.createTask(eventId: event.id, title: '归档掉的');
+      final parent = ws.createTask(eventId: event.id, title: '父任务');
+      final archivedSub = ws.createTask(
+        eventId: event.id,
+        title: '归档掉的子任务',
+        parentTaskId: parent.id,
+        type: TaskType.subtask,
+      );
+      final keptSub = ws.createTask(
+        eventId: event.id,
+        title: '留着的子任务',
+        parentTaskId: parent.id,
+        type: TaskType.subtask,
+      );
+
+      ws.setTaskArchived(archived.id, true);
+      ws.setTaskArchived(archivedSub.id, true);
+
+      expect(
+        ws.mainLineOf(event.id).map((t) => t.title).toList(),
+        <String>['留着的', '父任务'],
+        reason: '已归档的主线节点不出现在任务线里',
+      );
+      expect(
+        ws.subtasksOf(parent.id, eventId: event.id).map((t) => t.title).toList(),
+        <String>['留着的子任务'],
+        reason: '「下级 d/t」的分母与"能不能勾"的判据从此是同一批子任务',
+      );
+      // 判定侧（锁）用的是同一批：归档的子任务既不阻塞、也不满足完成条件
+      expect(ws.isTaskBlocked(parent.id), isTrue, reason: '留着的那个还没处理');
+      ws.setTaskStatus(keptSub.id, NodeStatus.done);
+      expect(ws.isTaskBlocked(parent.id), isFalse, reason: '归档的子任务不阻塞父任务');
+      expect(kept.id, isNotEmpty);
+    });
+
     test('子任务未终态时父任务不可完成；完成后子任务退回会连带父任务退回', () {
       final event = ws.createEvent(name: '事件 1');
       final parent = ws.createTask(eventId: event.id, title: '父任务');
@@ -1179,39 +1218,46 @@ void main() {
       expect(ids, isNot(contains(inspiration.id)), reason: 'discarded 不参与搜索');
     });
 
-    test('到期聚合按日期升序，只含未完成未归档', () {
+    test('逾期取数：未完成、未归档、有到期日、早于今天，按日期升序（Q19 唯一出处）', () {
       final event = ws.createEvent(name: '事件');
-      final overdue = ws.createTask(eventId: event.id, title: '逾期', dueAt: '2026-01-01');
-      final soon = ws.createTask(eventId: event.id, title: '本周', dueAt: '2026-09-25');
-      final far = ws.createTask(eventId: event.id, title: '很久以后', dueAt: '2027-01-01');
+      final overdue = ws.createTask(eventId: event.id, title: '逾期', dueAt: '2000-01-01');
+      final alsoOverdue =
+          ws.createTask(eventId: event.id, title: '也逾期', dueAt: '2000-02-01');
+      // 今天到期的是「今天」那一档，不是逾期；很久以后的自然不算
+      ws.createTask(eventId: event.id, title: '今天到期', dueAt: Ids.todayDate());
+      final far = ws.createTask(eventId: event.id, title: '很久以后', dueAt: '2999-01-01');
       ws.setTaskStatus(far.id, NodeStatus.done);
 
-      final due = ws.tasksDueOnOrBefore('2026-09-30');
+      final overdueList = ws.overdueTasks();
 
-      expect(due.map((t) => t.id).toList(), <String>[overdue.id, soon.id]);
+      expect(
+        overdueList.map((t) => t.id).toList(),
+        <String>[overdue.id, alsoOverdue.id],
+        reason: '只算早于今天的：今天到期的不算，已完成的也不算',
+      );
     });
 
-    test('已搁置的事件不再计入「到期」（实机反馈：放下的东西不该继续催）', () {
+    test('已搁置的事件不再计入「逾期」（实机反馈：放下的东西不该继续催）', () {
       final dropped = ws.createEvent(name: '先不做了');
       final droppedTask =
-          ws.createTask(eventId: dropped.id, title: '搁置线的任务', dueAt: '2026-01-01');
+          ws.createTask(eventId: dropped.id, title: '搁置线的任务', dueAt: '2000-01-01');
       final active = ws.createEvent(name: '在做的事');
       final activeTask =
-          ws.createTask(eventId: active.id, title: '进行中线的任务', dueAt: '2026-01-01');
+          ws.createTask(eventId: active.id, title: '进行中线的任务', dueAt: '2000-01-01');
 
-      // 搁置之前：两条都算到期
-      expect(ws.tasksDueOnOrBefore('2026-09-30').length, 2);
+      // 搁置之前：两条都算逾期
+      expect(ws.overdueTasks().length, 2);
       expect(ws.isEventMutedForDue(dropped.id), isFalse);
 
       ws.setEventStatus(dropped.id, NodeStatus.ignored);
 
       expect(ws.isEventMutedForDue(dropped.id), isTrue);
       expect(
-        ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(),
+        ws.overdueTasks().map((t) => t.id).toList(),
         <String>[activeTask.id],
-        reason: '事件搁置后，它下面的任务不再参与到期统计',
+        reason: '事件搁置后，它下面的任务不再计入逾期（横幅与角标都调这一个函数）',
       );
-      // 任务本身仍是"待处理"，只是不算到期 —— 不改变数据，只改统计口径
+      // 任务本身仍是"待处理"，只是不算逾期 —— 不改变数据，只改统计口径
       expect(ws.findTask(droppedTask.id)!.status, NodeStatus.pending);
       expect(ws.liveTasks.length, 2, reason: '任务不该因为事件搁置而消失');
     });
@@ -1245,8 +1291,8 @@ void main() {
         <String>{overdue.id, far.id, undated.id, inDropped.id},
         reason: '已搁置的线也照样列出来 —— 这一页不是催办（实机反馈踩过这个坑）',
       );
-      // 而"催办"那一侧仍然跳过它
-      expect(ws.tasksDueOnOrBefore('2026-09-30').map((t) => t.id).toList(), <String>[overdue.id]);
+      // 而"催办"那一侧仍然跳过它：不在「已逾期」取数里
+      expect(ws.overdueTasks().map((t) => t.id).toList(), <String>[overdue.id]);
     });
 
     test('启动清理：满 30 天才清，活着的与没到期的一条都不动', () {

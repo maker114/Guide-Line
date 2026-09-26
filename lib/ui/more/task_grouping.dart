@@ -98,7 +98,13 @@ List<TaskGroup> groupByCompletion(List<Task> tasks) {
 /// **纯粹的排序 + 分桶**，不依赖界面，所以可以直接单测 ——
 /// 这里出过一个错：把已完成的任务也塞进 `none` 档，而那一档的标签是
 /// 「没有到期日」，于是一个写着 `10月15日` 的已完成任务被归到了"没有到期日"下面。
-List<TaskGroup> groupByUrgency(List<Task> tasks) {
+///
+/// [overdueTaskIds] = **算作「已逾期」的那些任务**（口径见
+/// `Workspace.overdueTasks()`，Q19）。传了它，「已逾期」那一组就**只装这些 id**：
+/// 外壳的逾期横幅、底部角标、以及这一组的行数三处于是同源 ——
+/// 已搁置事件下那些"晚了但不再催"的任务会落到「未计入逾期」一档，日期也不标红。
+/// 不传（纯函数用例、别的调用方）时按日期照常分档。
+List<TaskGroup> groupByUrgency(List<Task> tasks, {Set<String>? overdueTaskIds}) {
   final groups = <TaskGroup>[];
 
   final finished = tasks
@@ -106,15 +112,33 @@ List<TaskGroup> groupByUrgency(List<Task> tasks) {
       .toList(growable: false)
     ..sort(byDueThenOrder);
 
+  final pending = tasks.where((Task t) => t.status == NodeStatus.pending);
   final byUrgency = <Urgency, List<Task>>{};
-  for (final task in tasks.where((Task t) => t.status == NodeStatus.pending)) {
-    byUrgency.putIfAbsent(urgencyOf(task.dueAt), () => <Task>[]).add(task);
+  final excluded = <Task>[];
+  for (final task in pending) {
+    final urgency = urgencyOf(task.dueAt);
+    // 算作逾期的才进「已逾期」；剩下的逾期任务（搁置线里的）单独一档，
+    // 免得那一组的行数比横幅说的多
+    if (urgency == Urgency.overdue &&
+        overdueTaskIds != null &&
+        !overdueTaskIds.contains(task.id)) {
+      excluded.add(task);
+      continue;
+    }
+    byUrgency.putIfAbsent(urgency, () => <Task>[]).add(task);
   }
   for (final urgency in Urgency.values) {
     final group = byUrgency[urgency];
     if (group == null || group.isEmpty) continue;
     group.sort(byDueThenOrder);
     groups.add(TaskGroup(label: urgencyLabel(urgency), tone: urgency, tasks: group));
+  }
+
+  if (excluded.isNotEmpty) {
+    excluded.sort(byDueThenOrder);
+    // `tone: null` = 走灰（与"已结束"同一档配色）：这些任务确实晚了，
+    // 但它们所属的线是"先不做了"，界面上不该再标红催一遍
+    groups.add(TaskGroup(label: '未计入逾期', tone: null, tasks: excluded));
   }
 
   if (finished.isNotEmpty) {

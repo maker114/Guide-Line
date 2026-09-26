@@ -76,14 +76,23 @@ Future<void> deleteProjectAction(
   if (project == null) return;
 
   final plan = planProjectDeletion(ws.projectTree, ws.allInspirations, projectId);
+  // 两句话必须**分开说**：项目 / 事件 / 任务进回收站、30 天内能找回，
+  // 而灵感不进回收站（《定义与边界》§9 的对照表）—— 合成一句"全部可恢复"，
+  // 用户会以为灵感也躺在回收站里等它。
   final lines = <String>['「${project.title}」及其下 ${plan.projectIds.length - 1} 个子项目会被删除；'];
-  if (plan.inspirationIdsToDelete.isNotEmpty) {
-    lines.add('${plan.inspirationIdsToDelete.length} 条未处理灵感会一并删除；');
-  }
   if (plan.inspirationIdsToUnassign.isNotEmpty) {
     lines.add('${plan.inspirationIdsToUnassign.length} 条已合并灵感会退回「未分配」；');
   }
-  lines.add('全部可在「更多 → 归档区 → 回收站」恢复。');
+  lines.add('项目 / 事件 / 任务可在「更多 → 归档区 → 回收站」恢复，30 天后自动清除。');
+  if (plan.inspirationIdsToDelete.isNotEmpty) {
+    // 这里的 N 是"未处理灵感"，按契约口径**包含已丢弃但没恢复的那些**
+    // （`planProjectDeletion` 只看"是否已合并"，不看 discarded），
+    // 所以文案必须把这一层说出来，否则用户会以为丢弃过的那些不受影响。
+    lines.add(
+      '这 ${plan.inspirationIdsToDelete.length} 条未处理灵感（含已经丢弃、还没恢复的）'
+      '会被永久删除，不进回收站 —— 只能靠备份与历次导出找回。',
+    );
+  }
 
   final ok = await confirmAction(
     context,

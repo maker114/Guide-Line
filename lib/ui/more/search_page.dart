@@ -37,7 +37,11 @@ class _SearchPageState extends State<SearchPage> {
     return ListenableBuilder(
       listenable: widget.app,
       builder: (context, _) {
-        final hits = widget.app.ws.search(_query);
+        // 多要一条：只按 `hits.length` 判断截断会永远看到"正好 100 条"，
+        // 分不出"刚好 100 条"与"还有更多"（Q20）。
+        final hits = widget.app.ws.search(_query, limit: searchHitLimit + 1);
+        final truncated = hits.length > searchHitLimit;
+        final shown = truncated ? hits.sublist(0, searchHitLimit) : hits;
         final hasQuery = _query.trim().isNotEmpty;
         return Scaffold(
           appBar: AppBar(title: const Text('搜索')),
@@ -83,7 +87,13 @@ class _SearchPageState extends State<SearchPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
                   child: Text(
-                    hits.isEmpty ? '没有匹配的结果' : '命中 ${hits.length} 条',
+                    // 触到上限时必须如实说（Q20 / 《界面规范》§7）：只写「命中 100 条」，
+                    // 用户会以为一共就这么多 —— 而"前 100 条"只是截断之后剩下的那一段。
+                    shown.isEmpty
+                        ? '没有匹配的结果'
+                        : truncated
+                            ? '命中 $searchHitLimit 条 · 只显示前 $searchHitLimit 条（还有更多）'
+                            : '命中 ${shown.length} 条',
                     style: theme.textTheme.labelSmall,
                   ),
                 ),
@@ -94,7 +104,7 @@ class _SearchPageState extends State<SearchPage> {
                         title: '输入关键词开始搜索',
                         hint: '搜索范围：未归档的项目 / 事件 / 任务，以及待处理的灵感',
                       )
-                    : hits.isEmpty
+                    : shown.isEmpty
                         ? const EmptyState(
                             icon: Icons.search_off,
                             title: '没有匹配的结果',
@@ -102,7 +112,7 @@ class _SearchPageState extends State<SearchPage> {
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
-                            itemCount: hits.length,
+                            itemCount: shown.length,
                             separatorBuilder: (_, _) => const Divider(
                               height: 1,
                               indent: 16,
@@ -110,7 +120,7 @@ class _SearchPageState extends State<SearchPage> {
                             ),
                             itemBuilder: (context, index) => _HitTile(
                               app: widget.app,
-                              hit: hits[index],
+                              hit: shown[index],
                             ),
                           ),
               ),
@@ -199,9 +209,11 @@ class _HitTile extends StatelessWidget {
   }
 
   static String _fieldLabel(String field) {
+    // 字段名与界面同步（Q4）：「目的」→「有什么问题 / 思路」，
+    // 与项目详情页那个字段卡、AI 提示词里用的词一模一样。
     const labels = <String, String>{
       'title': '标题',
-      'purpose': '目的',
+      'purpose': '有什么问题 / 思路',
       'implementation': '实现',
       'name': '名称',
       'text': '内容',

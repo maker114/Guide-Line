@@ -412,9 +412,10 @@ class _EventCardHeader extends StatelessWidget {
 
 /// 卡里的一条主线任务：比卡头**紧凑**一档，靠缩进表达"它属于上面那个事件"。
 ///
-/// [muted] 用于**已搁置的事件**：那类事件不参与到期统计（见
-/// `Workspace.tasksDueOnOrBefore`），所以这里也不把日期标成逾期红 ——
-/// 一边说"不再催"，一边画个红日期自相矛盾。
+/// [muted] 用于**已搁置的事件**：那类事件里的任务不进「催办」口径
+/// （`Workspace.overdueTasks()`，Q19 的唯一算法），所以这里也不把日期标成逾期红 ——
+/// 一边说"不再催"，一边画个红日期自相矛盾。它们在「接下来的任务」页上照样列出来，
+/// 只是落在「未计入逾期」那一档、走灰。
 class _EventTaskRow extends StatelessWidget {
   const _EventTaskRow({
     required this.app,

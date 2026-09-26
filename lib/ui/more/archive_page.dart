@@ -113,12 +113,17 @@ class _ArchivedPane extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return _Pane(
-        note: '归档是「暂时不做但不想删」，随时可以取消归档。',
+        note: '归档是「暂时不做但不想删」，随时可以取消归档。'
+            '任务线里不显示已归档的节点，单独归档的子任务会在这一区列出来。',
         child: _empty('没有已归档的内容', '归档项目 / 事件 / 任务后会出现在这里'),
       );
     }
     return _Pane(
-      note: '只列「归档根」——父节点也归档的不重复列出；取消归档会沿树级联恢复。',
+      // 「单独归档的子任务也能在这里找回」必须写出来（Q18）：任务线里现在
+      // **不显示**已归档节点（显示与判定同一套取数），用户点进去会以为它没了；
+      // 它还在，只是搬到了这里。归档的子任务若父节点还活着，它就是归档根，列在这儿。
+      note: '只列「归档根」——父节点也归档的不重复列出；取消归档会沿树级联恢复。'
+          '单独归档的子任务也能在这里找回（任务线里不再显示已归档的节点）。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -176,8 +181,12 @@ class _InspirationPane extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 分区说明与动作名必须**说同一件事**（Q9）：合并是"吸收"，恢复只把灵感
+    // 放回待处理，项目里的那一行 / 那条清单**不退回** —— 名字里不写清，
+    // 用户会以为按一下就能把项目改回去，再合并一次就得到重复内容。
     final note = merged
-        ? '合并是「吸收」：原文留在这里，正文归项目。撤销合并只把灵感恢复为待处理，不回滚项目正文。'
+        ? '合并是「吸收」：原文留在这里，正文归项目。恢复为待处理只把灵感放回灵感箱，'
+            '项目里的内容不会退回。'
         : '丢弃是「想过但不要了」。可以恢复为待处理，也可以彻底删除。';
     // 归档区把灵感与树形实体放在同一个列表里返回，这里按分区语义收回具体类型
     final list = items.whereType<Inspiration>().toList(growable: false);
@@ -213,7 +222,7 @@ class _InspirationPane extends StatelessWidget {
                       showToast(context, error, error: true);
                       return;
                     }
-                    showToast(context, '已撤销合并，灵感回到待处理');
+                    showToast(context, '已恢复为待处理（项目里的内容不会退回）');
                   } else {
                     final error = app.run(() => app.ws.restoreInspiration(inspiration.id));
                     if (error != null) {
@@ -229,7 +238,9 @@ class _InspirationPane extends StatelessWidget {
               itemBuilder: (_) => <PopupMenuEntry<String>>[
                 PopupMenuItem<String>(
                   value: 'restore',
-                  child: Text(merged ? '撤销合并' : '恢复为待处理'),
+                  // 名字里就把代价写出来（Q9）：这个动作**不回滚项目内容**，
+                  // 只把灵感放回待处理。叫"撤销合并"会让人以为项目也一起退回去了。
+                  child: Text(merged ? '恢复为待处理（项目里的内容不会退回）' : '恢复为待处理'),
                 ),
                 const PopupMenuItem<String>(value: 'purge', child: Text('彻底删除')),
               ],

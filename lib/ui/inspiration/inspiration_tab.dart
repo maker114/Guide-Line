@@ -119,7 +119,10 @@ class InspirationTabState extends State<InspirationTab> {
   @override
   Widget build(BuildContext context) {
     final ws = widget.app.ws;
+    // 已归档项目（含子项目）下的待处理灵感**不在这一页**（Q10）——数由
+    // `Workspace` 给同一个，归档区「被隐藏」分区用的是同一个口径。
     final all = ws.inspirationInbox;
+    final hiddenCount = ws.inspirationsHiddenByArchivedProjects;
     final byProject = (_onlySelectedProject && _selectedProjectId != null)
         ? all.where((i) => i.projectId == _selectedProjectId)
         : all;
@@ -205,13 +208,46 @@ class InspirationTabState extends State<InspirationTab> {
           ),
         ),
         const SizedBox(height: 4),
+        // 被归档项目遮住的那些灵感**必须有个交代**（Q10）：它们从列表里消失，
+        // 不吭声就等于"灵感被静默吞了"；而归档区那个数字由同一个函数给。
+        if (hiddenCount > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              shape: AppShapes.card,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.inventory_2_outlined,
+                      size: 16,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '另有 $hiddenCount 条在已归档项目下（去归档区看）',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: list.isEmpty
               ? (all.isEmpty
-                  ? const EmptyState(
+                  ? EmptyState(
                       icon: Icons.lightbulb_outline,
                       title: '灵感箱是空的',
-                      hint: '上面那个框随手写一句就行 —— 归到哪个项目，是以后才要操心的事',
+                      // 全被归档项目遮住时，"空"是**算出来的空**：不说清楚，
+                      // 用户会以为灵感没了（Q10）
+                      hint: hiddenCount > 0
+                          ? '另有 $hiddenCount 条在已归档项目下（去归档区看）'
+                          : '上面那个框随手写一句就行 —— 归到哪个项目，是以后才要操心的事',
                     )
                   // 箱子不空、只是被筛掉了：必须说清"一共还有多少条"，
                   // 否则用户会以为灵感丢了

@@ -78,11 +78,19 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   }
 
   /// 选择一：把改好的正文写回「如何解决」。
+  ///
+  /// 「一进来就是这个值、用户一个字没改」时**不保存**（Q8）：那样"合并"实际
+  /// 什么都没发生，灵感却会被标成已合并并离开灵感箱。业务层（`mergeInspiration`）
+  /// 同样会拒 —— 这里挡一道只是为了把话说在离用户最近的这一层。
   void _save() {
     final text = _implementation.text.trim();
     if (text.isEmpty) {
       // 空正文会把「如何解决」清没，业务层同样会拒；提示留在这一页更近
       showToast(context, '正文不能是空的（想只留清单条目就用「作为清单条目」）', error: true);
+      return;
+    }
+    if (text == widget.project.implementation.trim()) {
+      showToast(context, implementationUnchanged, error: true);
       return;
     }
     Navigator.of(context).pop(MergeResult.intoImplementation(text));
@@ -204,7 +212,8 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
             child: Text(
               '「追加原文」和手改都走「保存」：保存后项目正文更新，这条灵感从灵感箱消失。'
               '「作为清单条目」不碰正文，直接把原文追加成清单的新一条（上面没保存的改动不会写回）。'
-              '两种情况都能在「更多 → 归档区 → 已合并」撤销。',
+              '两种情况都能在「更多 → 归档区 → 已合并」里「恢复为待处理」—— '
+              '但项目里的内容不会退回（已经写进去的那一行 / 那条不会消失）。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -270,6 +279,13 @@ Future<void> applyMergeResult(
 ) async {
   if (app.ws.isProjectCategory(project.id)) {
     showToast(context, categoryNotForInspiration, error: true);
+    return;
+  }
+  // 「正文没变」也要在**落盘这一步**挡（Q8）：传进来的 `project` 是快照，
+  // 拿它比对会漏掉"用户在别处刚改过正文"的情况 —— 以库里的当前值为准。
+  if (!result.asChecklistItem &&
+      result.text.trim() == (app.ws.findProject(project.id)?.implementation ?? '').trim()) {
+    showToast(context, implementationUnchanged, error: true);
     return;
   }
   final error = app.run(() {

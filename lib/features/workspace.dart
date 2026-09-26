@@ -37,6 +37,13 @@ const String _parallelGone =
     '「并列任务」已废除 —— 两件并行的事请开两个「事件」，'
     '或者把两条并成同一个节点下的两条子任务';
 
+/// 「正文与进来时一模一样」时拒绝合并的文案（Q8）。
+///
+/// 界面上最该看到的那一句就是这个 —— 它同时是两个可点动作的名字，
+/// 所以抽成常量、界面与业务层共用一份，免得两处说法慢慢走偏。
+const String implementationUnchanged =
+    '正文没有变化，这条灵感还没写进项目 —— 用「追加原文」或「作为清单条目」';
+
 /// 分类的汇总（Q2）—— **只统计，不判定**。
 ///
 /// 口径（与《定义与边界》§2.1 / §2.2 一致，只用契约里已有的字段）：
@@ -83,6 +90,9 @@ class SearchHit {
     return e.id;
   }
 }
+
+/// 全局搜索一次最多返回多少条（`Workspace.search` 的默认 [limit]，搜索页文案也用它）。
+const int searchHitLimit = 100;
 
 /// 业务逻辑层：**内存单一数据源 + 全部业务规则**。
 ///
@@ -133,11 +143,63 @@ class Workspace {
   List<Inspiration> get liveInspirations =>
       allInspirations.where((i) => !i.deleted).toList(growable: false);
 
-  /// 灵感列表：按 `created_at` 倒序（设计文档 4.12）。
+  /// 灵感列表：**未处理、且所属项目没有归档**，按 `created_at` 倒序（设计文档 4.12）。
+  ///
+  /// 「项目归档了，挂在它下面的灵感照旧列在这儿」曾经是个前后不一致的缺陷
+  /// （Q10）：项目归档的确认框承诺"这些灵感会从列表里隐藏"，归档区也写着
+  /// "不占用灵感列表"，只有灵感页照旧把它们一条条摆出来。
+  /// 口径统一到**隐藏**这一侧，隐藏了多少条由
+  /// [inspirationsHiddenByArchivedProjects] 给同一个数。
   List<Inspiration> get inspirationInbox {
-    final list = liveInspirations.where((i) => i.isPending).toList(growable: false);
+    final hidden = _inspirationIdsHiddenByArchivedProjects();
+    final list = liveInspirations
+        .where((i) => i.isPending && !hidden.contains(i.id))
+        .toList(growable: false);
     list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return list;
+  }
+
+  /// 因**所属项目已归档**（含其子项目）而从灵感列表里隐藏的待处理灵感条数。
+  ///
+  /// 灵感页（"另有 N 条在已归档项目下"）与归档区「被隐藏」分区**用同一个数** ——
+  /// 两处各数一遍，迟早出现"页头说 3 条、归档区列 2 条"。归档区那份
+  /// （`deriveArchiveZone`）也调这一个口径。
+  int get inspirationsHiddenByArchivedProjects =>
+      _inspirationIdsHiddenByArchivedProjects().length;
+
+  /// 被归档项目遮住的灵感 id 集合（含**子项目**：归档是双向级联，
+  /// 子项目也跟着归档，它们名下的灵感自然一起隐藏）。
+  ///
+  /// **判据是"它所在的这条祖先链上有人归档了"**，不是"`projectTree` 的子树里有它" ——
+  /// 归档是双向级联，一个原本单独归档、后来又跟着父项目归档的子项目，会在
+  /// `projectTree` 里因为父节点也在而**掉出子树根**；只看子树就会漏掉它名下的灵感。
+  /// 从每个已归档项目往上走一遍祖先链，才能把所有遮住灵感的项目都收齐。
+  ///
+  /// 只按 `project_id` 判：`merged_into` 指向的项目归档与否不影响 ——
+  /// 已合并的灵感本来就在归档区「已合并」里，不进灵感列表。
+  Set<String> _inspirationIdsHiddenByArchivedProjects() {
+    final archived = <String>{
+      for (final project in liveProjects)
+        if (project.archived) project.id,
+    };
+    if (archived.isEmpty) return const <String>{};
+
+    final tree = projectTree;
+    bool underArchived(String projectId) {
+      if (archived.contains(projectId)) return true;
+      for (final ancestor in tree.ancestorsOf(projectId)) {
+        if (archived.contains(ancestor.id)) return true;
+      }
+      return false;
+    }
+
+    return <String>{
+      for (final inspiration in liveInspirations)
+        if (inspiration.isPending &&
+            inspiration.projectId != null &&
+            underArchived(inspiration.projectId!))
+          inspiration.id,
+    };
   }
 
   TreeIndex get projectTree => TreeIndex.live(liveProjects);
@@ -160,18 +222,25 @@ class Workspace {
   Inspiration? findInspiration(String id) => _firstWhere(allInspirations, id);
 
   /// 某事件下的主线任务（`parent_task_id == null`），按 `order` 升序。
+  ///
+  /// **已归档的节点不在里面**（Q18）。以前这里把归档的也列出来，于是同一个框里
+  /// 出现两套数：「下级 1/3」把归档的算进分母，而"能不能勾"用的判据（
+  /// [isTaskBlocked] / `checkEventCompletion`）却把它排除 —— 分母永远等不上。
+  /// 现在**显示与判定同一套取数**，`下级 d/t`、「另有 N 个已完成节点」、
+  /// 折叠提示与"锁"全跟着它走。
   List<Task> mainLineOf(String eventId) {
     final list = liveTasks
-        .where((t) => t.eventId == eventId && t.parentId == null)
+        .where((t) => t.eventId == eventId && t.parentId == null && !t.archived)
         .toList(growable: false);
     list.sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
     return list;
   }
 
-  /// 某任务（或某事件）的直接子任务。
+  /// 某任务（或某事件）的直接子任务；**已归档的同样排除**（与 [mainLineOf] 同源）。
   List<Task> subtasksOf(String? parentTaskId, {required String eventId}) {
     final list = liveTasks
-        .where((t) => t.eventId == eventId && t.parentId == parentTaskId)
+        .where((t) =>
+            t.eventId == eventId && t.parentId == parentTaskId && !t.archived)
         .toList(growable: false);
     list.sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
     return list;
@@ -228,24 +297,51 @@ class Workspace {
         !isTerminal(t.status));
   }
 
-  /// 到期聚合视图（Q29 / Q41 / Q48）：`due_at` 早于等于 [date] 且未完成、未归档。
+  /// **已逾期**的权威取数（Q19）：这是"我还欠着什么"里**已经晚了**的那一部分。
   ///
-  /// **已搁置事件下的任务不算**（实机反馈）：事件被搁置就是"这条线先不做了"，
-  /// 再让它里面的任务拉响**逾期角标与启动横幅**，等于把已经放下的东西又拽回来
-  /// 催一遍。语义上它仍是一条待处理任务（`status = pending`），只是不参与"催办"。
+  /// 口径：**未完成（`pending`）+ 未归档 + 有到期日 + 到期日早于今天**。
   ///
-  /// 注意：这条"跳过已搁置的线"**只在这里生效**（催办）。用户主动打开的列表
-  /// （「接下来的任务」）用 [openTasks]，那里不跳过 —— 否则整页可能是空的。
-  List<Task> tasksDueOnOrBefore(String date) => _scheduledTasks(cutoff: date);
+  /// 三处必须同源 —— 外壳的逾期横幅、底部「更多」的角标、以及点进去的
+  /// 「接下来的任务」页里「已逾期」那一组的行数：它们**只有这一个函数**。
+  /// 这个项目上出过恰恰相反的事：横幅与角标把"已搁置事件下的任务"排除掉，
+  /// 而落点页面照 `openTasks()` 分组，用户数不出横幅说的那几条。
+  ///
+  /// **已搁置的事件下的任务仍然不计入**，这是唯一一处与 [openTasks] 不同的地方：
+  ///   · 搁置 = "这条线先不做了"，再拉响逾期角标与启动横幅，等于把放下的东西
+  ///     又拽回来催一遍（2026-09-25 实机反馈）；
+  ///   · 于是这一页上它们**不落在「已逾期」组里**（分组时按同一份 id 集合切分），
+  ///     而是单独一档、日期也不标红 —— 页头的数与组的行数因此永远对得上。
+  ///
+  /// 反过来说：**"这一页要不要显示搁置线的任务"始终是"要"**（[openTasks] 不排除），
+  /// 这份函数只回答"哪几条算逾期"。
+  List<Task> overdueTasks() {
+    final today = Ids.todayDate();
+    final mutedEventIds = _mutedEventIds();
+    final list = liveTasks
+        .where((t) =>
+            !t.archived &&
+            t.status == NodeStatus.pending &&
+            t.dueAt != null &&
+            t.dueAt!.isNotEmpty &&
+            // 严格早于今天：今天到期的不算"逾期"（它是"今天"，urgency.dart 的另一档）
+            t.dueAt!.compareTo(today) < 0 &&
+            !mutedEventIds.contains(t.eventId))
+        .toList(growable: false);
+    list.sort((a, b) {
+      final byDate = a.dueAt!.compareTo(b.dueAt!);
+      if (byDate != 0) return byDate;
+      return compareByOrder(a.order, a.id, b.order, b.id);
+    });
+    return list;
+  }
 
   /// 「接下来的任务」用的一览：**还开着的任务** —— 未完成、未归档，
   /// **不管有没有排到期日，也不管所属事件是不是已搁置**。
   ///
-  /// ⚠️ 这里**故意不像 [tasksDueOnOrBefore] 那样跳过已搁置的事件**
+  /// ⚠️ 这里**故意不像 [overdueTasks] 那样跳过已搁置的事件**
   /// （2026-09-25 实机反馈确认）：那一页是用户主动打开的任务一览，
   /// 他要看到全部还欠着的；被隐藏的 9 条任务让整页空空如也，查了半天才发现
-  /// 是这条规则。**"放下的线不该继续催"只在"催"的地方生效** ——
-  /// 逾期角标与启动横幅（[tasksDueOnOrBefore]）。
+  /// 是这条规则。**"放下的线不该继续催"只在"催"的地方生效**。
   List<Task> openTasks() => liveTasks
       .where((t) => !t.archived && t.status == NodeStatus.pending)
       .toList(growable: false);
@@ -256,32 +352,41 @@ class Workspace {
       .map((e) => e.id)
       .toSet();
 
-  List<Task> _scheduledTasks({String? cutoff}) {
-    final mutedEventIds = _mutedEventIds();
-    final list = liveTasks
-        .where((t) =>
-            !t.archived &&
-            t.status == NodeStatus.pending &&
-            t.dueAt != null &&
-            !mutedEventIds.contains(t.eventId) &&
-            (cutoff == null || t.dueAt!.compareTo(cutoff) <= 0))
-        .toList(growable: false);
-    list.sort((a, b) {
-      final byDate = a.dueAt!.compareTo(b.dueAt!);
-      if (byDate != 0) return byDate;
-      return compareByOrder(a.order, a.id, b.order, b.id);
-    });
-    return list;
-  }
-
   /// 某事件是否**不再参与到期统计**（已搁置）。
   ///
   /// 界面用它把日期颜色降下来：既然不计入「到期」，就不该在这里显示成逾期红。
   bool isEventMutedForDue(String eventId) =>
       findEvent(eventId)?.status == NodeStatus.ignored;
 
+  /// **能搜到的东西有几条**（Q20）：与 [search] 的扫描范围**同一套判据** ——
+  /// 未删除、未归档的项目 / 事件 / 任务，加上未删除、**待处理**的灵感。
+  ///
+  /// 为什么要有这个函数：「更多」入口原来写着「N 条内容可搜（不含已归档）」，
+  /// 而那个 N 是"含已归档"的四个 getter 加出来的；点进去的搜索页又只搜未归档。
+  /// 入口与页面共用一个数，限定词才不会跟算法打架。
+  int get searchableContentCount {
+    var count = 0;
+    for (final p in liveProjects) {
+      if (!p.archived) count += 1;
+    }
+    for (final e in liveEvents) {
+      if (!e.archived) count += 1;
+    }
+    for (final t in liveTasks) {
+      if (!t.archived) count += 1;
+    }
+    for (final i in liveInspirations) {
+      if (i.isPending) count += 1;
+    }
+    return count;
+  }
+
   /// 全局搜索（Q42）：只搜未归档、未删除；灵感只搜 `pending`。
-  List<SearchHit> search(String query, {int limit = 100}) {
+  ///
+  /// 返回**按 `updatedAt` 倒序**的命中，最多 [limit] 条（默认 [searchHitLimit]）。
+  /// 调用方若还要知道"是不是被截断了"，**传一个更大的 limit 自己比** ——
+  /// 不要改成"返回条数大于 limit 就说明还有"，那与这里的截断语义相反。
+  List<SearchHit> search(String query, {int limit = searchHitLimit}) {
     final needle = query.trim().toLowerCase();
     if (needle.isEmpty) return const <SearchHit>[];
 
@@ -616,7 +721,7 @@ class Workspace {
   void assignInspiration(String id, String? projectId) {
     final inspiration = findInspiration(id);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
-    if (inspiration.isMerged) throw const RuleViolation('已合并的灵感不能改归属，请先撤销合并');
+    if (inspiration.isMerged) throw const RuleViolation('已合并的灵感不能改归属，请先恢复为待处理');
     if (projectId != null) {
       final project = findProject(projectId);
       if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
@@ -658,7 +763,7 @@ class Workspace {
     for (final id in list) {
       final inspiration = findInspiration(id);
       if (inspiration == null) throw const RuleViolation('灵感不存在');
-      if (inspiration.isMerged) throw const RuleViolation('已合并的灵感不能改归属，请先撤销合并');
+      if (inspiration.isMerged) throw const RuleViolation('已合并的灵感不能改归属，请先恢复为待处理');
       targets.add(inspiration);
     }
     if (projectId != null) {
@@ -744,6 +849,11 @@ class Workspace {
   /// 合并编辑器里"照着灵感手改正文"与"追加原文后保存"走的都是这一条。
   /// 空正文拒绝 —— 合并不该把正文清没（要只留清单条目就走
   /// [mergeInspirationAsItem]）。
+  ///
+  /// **正文没变也拒绝**（Q8）：这条灵感在项目里一个字都没多，
+  /// 却会被标成 `merged`、从灵感箱里消失 —— 用户拿到的是"合并没有发生"，
+  /// 界面却报成功。要"追加一段"就走 [appendToImplementation]，
+  /// 要"变成一条待办"就走 [mergeInspirationAsItem]。
   void mergeInspiration({
     required String inspirationId,
     required String projectId,
@@ -753,6 +863,9 @@ class Workspace {
     final trimmed = newImplementation.trim();
     if (trimmed.isEmpty) throw const RuleViolation('正文不能是空的');
     final project = findProject(projectId)!;
+    if (trimmed == project.implementation) {
+      throw const RuleViolation(implementationUnchanged);
+    }
 
     final now = Ids.nowMillis();
     _upsert(
@@ -818,7 +931,13 @@ class Workspace {
     );
   }
 
-  /// 撤销合并（ADR-057）：**只恢复灵感，不回滚项目正文**。
+  /// 把已合并的灵感**恢复为待处理**（ADR-057，Q9 定的叫法）：
+  /// **只恢复灵感，项目里的内容不退回**。
+  ///
+  /// 合并是"吸收"：写进「如何解决」的那一行、追加进「实现清单」的那一条
+  /// 都已经属于项目了，这个动作不去把它们拿走（拿走了才是真的数据丢失）。
+  /// 所以界面上的名字必须带上这半句 —— 叫"撤销合并"会让人以为项目也退回去了，
+  /// 用户再合并一次就得到重复内容。
   void undoMerge(String inspirationId) {
     final inspiration = findInspiration(inspirationId);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
