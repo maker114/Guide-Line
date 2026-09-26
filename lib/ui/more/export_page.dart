@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/ids.dart';
 import '../../core/models/entity.dart';
 import '../../core/models/enums.dart';
 import '../../core/store/export_codec.dart';
+import '../../core/store/merge.dart';
 import '../../platform/data_transfer_platform.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
@@ -100,6 +102,13 @@ class _ExportPageState extends State<ExportPage> {
                 enabled: !_busy,
                 onTap: _busy ? null : () => _import(context),
               ),
+              ListTile(
+                leading: const Icon(Icons.merge_type),
+                title: const Text('合并导入'),
+                subtitle: const Text('把两份数据并成一份：各自独有的都留下，同一条以较新的为准'),
+                enabled: !_busy,
+                onTap: _busy ? null : () => _mergeImport(context),
+              ),
               if (_busy)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8),
@@ -113,8 +122,11 @@ class _ExportPageState extends State<ExportPage> {
               const _Bullet('导出内容是全部四类记录（含已归档与回收站），不含界面偏好。'),
               const _Bullet('文件名形如 guideline-20260923-134500.json.gz，gzip 压缩的 JSON，'
                   '每条记录的字段与《数据契约》完全一致。'),
-              const _Bullet('导入是整体替换，不是合并；替换前当前数据会先轮转进滚动备份，'
-                  '导错了可以在「备份与恢复」里退回来。'),
+              const _Bullet('「从文件导入」是整体替换：文件里有什么，这台手机就变成什么；'
+                  '替换前当前数据会先轮转进滚动备份，导错了可以在「备份与恢复」里退回来。'),
+              const _Bullet('「合并导入」把两份数据并成一份：两边各自独有的记录都留下，'
+                  '同一条记录以较新的一方为准；时间戳相同的以本机为准。'
+                  '合并前同样会先留一份备份。'),
               const _Bullet('导出文件只写在应用私有目录，分享时由系统按次授权给目标 App 读取，'
                   '不需要存储权限，也不会被别的 App 扫到。'),
               const _Bullet('电脑端导出的旧格式（v1 四文档信封）也能直接导入。'),
@@ -134,30 +146,44 @@ class _ExportPageState extends State<ExportPage> {
     showToast(context, result.message, error: !result.ok);
   }
 
-  Future<void> _import(BuildContext context) async {
+  /// 选文件 → 解码（「从文件导入」与「合并导入」共用这一条路）。
+  ///
+  /// 返回 `null` 表示没走到"有一份能用的数据"这一步（没选文件、选择器失败、
+  /// 或者文件读不出 Guide Line 数据）；失败原因已经用吐司说过了，调用方直接收工。
+  Future<({PickedTransferFile file, ExportPayload payload})?> _pickAndDecode(
+    BuildContext context, {
+    required String dialogTitle,
+  }) async {
     setState(() => _busy = true);
     PickedTransferFile? picked;
     try {
       final pick = widget.pickImportFile ??
-          () => DataTransferPlatform.pickFile(dialogTitle: '选择要导入的导出文件');
+          () => DataTransferPlatform.pickFile(dialogTitle: dialogTitle);
       picked = await pick();
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() => _busy = false);
       if (context.mounted) showToast(context, '打开文件选择器失败：$error', error: true);
-      return;
+      return null;
     }
-    if (!mounted) return;
+    if (!mounted) return null;
     setState(() => _busy = false);
-    if (picked == null || !context.mounted) return;
+    if (picked == null || !context.mounted) return null;
 
     final issues = DecodeIssues();
     final payload = ExportCodec.decode(picked.bytes, issues);
     if (!payload.readable) {
       final reason = issues.errors.isEmpty ? '结构不完整' : issues.errors.first;
       showToast(context, '这个文件里读不出 Guide Line 数据：$reason', error: true);
-      return;
+      return null;
     }
+    return (file: picked, payload: payload);
+  }
+
+  Future<void> _import(BuildContext context) async {
+    final picked = await _pickAndDecode(context, dialogTitle: '选择要导入的导出文件');
+    if (picked == null || !context.mounted) return;
+    final payload = picked.payload;
 
     // 两侧都数**活记录**（墓碑不算）：用户要判断的是"看得见的数据会少掉多少"，
     // 而 `payload.counts` 是**含墓碑**的（导入本来就是整体替换、墓碑也要一起搬）。
@@ -169,14 +195,14 @@ class _ExportPageState extends State<ExportPage> {
     final ok = await confirmAction(
       context,
       title: '导入并替换全部数据',
-      message: '文件名：${picked.name}\n'
+      message: '文件名：${picked.file.name}\n'
           '导出时间：${payload.exportedAt == null ? '未知' : formatTimestamp(payload.exportedAt!)}\n'
           '\n'
           '当前：${_countsText(current)}\n'
           '文件：${_countsText(incoming)}\n'
           '${_netChangeText(_totalOf(current), _totalOf(incoming))}\n'
           '\n'
-          '导入是整体替换，不会把两份数据合起来（把两份合起来的「合并导入」还没做）。\n'
+          '导入是整体替换，不会把两份数据合起来；想让两边各有的记录都留下，用「合并导入」。\n'
           '想留住现在这份数据，先「导出并分享」留个档，再导入。\n'
           '替换前当前数据会先整体轮转进备份，可在「备份与恢复」里退回。',
       confirmLabel: '整体替换',
@@ -191,6 +217,53 @@ class _ExportPageState extends State<ExportPage> {
       return;
     }
     showToast(context, '已导入：${_countsText(incoming)}');
+  }
+
+  /// 「合并导入」：**先算、先给预览，确认之后才落盘**（与 AI 整理"先预览后写入"同一个习惯）。
+  ///
+  /// 合并判定一行都不在这里写：全部走 `mergeStoresWithReport`（纯函数，见
+  /// `core/store/merge.dart`），这一层只负责把报告摆给用户看、并在确认后交给
+  /// [AppController.applyMergedStore] 落盘。
+  Future<void> _mergeImport(BuildContext context) async {
+    final picked = await _pickAndDecode(context, dialogTitle: '选择要合并的导出文件');
+    if (picked == null || !context.mounted) return;
+
+    final outcome = mergeStoresWithReport(
+      widget.app.ws.buildStoreFile(),
+      picked.payload.store,
+      nowMillis: Ids.nowMillis(),
+    );
+    final report = outcome.report;
+
+    // 一份什么都没变的结果不该让用户白点一次确认（多进来 0 条、覆盖 0 条、
+    // 也没有墓碑），更不该为此写一次盘。这里只说明情况就收工。
+    //
+    // 措辞带上"这份文件里没有本机缺少的记录"：`hasChanges` 为假也可能是
+    // "本机比文件多"（文件里是旧的一份），只写"两份一致"会让人以为一模一样。
+    if (!report.hasChanges) {
+      showToast(context, '这份文件里没有本机缺少的记录：两份数据已经一致，没有要合并的');
+      return;
+    }
+
+    final ok = await confirmAction(
+      context,
+      title: '合并导入（两份并成一份）',
+      message: _mergePreviewText(picked.file.name, picked.payload.exportedAt, report),
+      confirmLabel: '合并',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+
+    final error = widget.app.applyMergedStore(outcome.store);
+    if (!context.mounted) return;
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
+    showToast(
+      context,
+      '已合并：${report.changeSummary}。合并前的数据已留成备份，可在「备份与恢复」里退回。',
+    );
   }
 
   /// 当前库的活记录数：直接问 `Workspace.live*`（"活记录"口径的唯一出处）。
@@ -235,6 +308,64 @@ String _netChangeText(int currentTotal, int incomingTotal) {
     return '总条数将减少 ${-delta} 条（$currentTotal → $incomingTotal）';
   }
   return '总条数将增加 $delta 条（$currentTotal → $incomingTotal）';
+}
+
+/// 「合并导入」预览正文 —— 用户点确认之前能看到的**全部**信息就是它。
+///
+/// 风格与 Q13「整体替换」的确认框一致（并排数字 + 红色确认），差别在数字的含义：
+/// 那边是"当前 / 文件各有多少条"，这边是"每一类各新增 / 更新 / 保留 / 墓碑多少条"，
+/// 因为合并要回答的是"多进来什么、覆盖了什么、删掉了什么"。
+///
+/// 三条**必须说清**的口径，缺一条用户就没法判断这次合并安不安全：
+///   · 两边各自独有的记录都会留下（这是"合并不是替换"）；
+///   · 同一条记录以较新的一方为准，**同一秒以本机为准**（对方同秒的修改不会
+///     覆盖你手上正在看的记录 —— 这条写死在 `mergeStores` 里）；
+///   · 引用不会当场改写（悬挂交给加载层），而且合并前会先留一份备份。
+String _mergePreviewText(String fileName, int? exportedAt, MergeReport report) {
+  final lines = <String>[
+    '文件名：$fileName',
+    '导出时间：${exportedAt == null ? '未知' : formatTimestamp(exportedAt)}',
+    '',
+    for (final name in DocName.values)
+      '${_docLabel(name)}：${_mergeCountsText(report.of(name))}',
+    '合计：${report.changeSummary}',
+    '',
+    '合并是两份并成一份：两边各自独有的记录都会留下，同一条记录以较新的一方为准。',
+    '同一秒里的改动以本机为准 —— 对方在同一秒改的那条不会覆盖你手上的这份。',
+  ];
+  if (report.tombstones > 0) {
+    // 墓碑是"对方删过"的唯一证据，混在"新增"里会被当成多出来的数据，
+    // 所以单独解释一句：它并进来是为了不让删掉的记录在下次导入时复活。
+    lines.add('${report.tombstones} 条墓碑是对方删掉的记录：并进来是为了不让它下次导入时复活。');
+  }
+  if (report.danglingReferences > 0) {
+    lines.add('合并后有 ${report.danglingReferences} 处引用指向不存在的记录：'
+        '引用不会当场改写，交给加载时的悬挂规则处理。');
+  }
+  if (report.duplicatesCollapsed > 0) {
+    lines.add('文件里有 ${report.duplicatesCollapsed} 条同 id 的重复记录，已折叠，只认第一条。');
+  }
+  lines.add('合并前当前数据会先整体轮转进备份（滚动只留 10 份），想退回要尽快。');
+  return lines.join('\n');
+}
+
+/// 单个集合的四个数，写法与 `MergeReport.changeSummary` 一致（顺序也一致）。
+String _mergeCountsText(CollectionMergeReport report) =>
+    '新增 ${report.added.length} · 更新 ${report.updated.length} · '
+    '保留 ${report.kept.length} · 墓碑 ${report.tombstones.length}';
+
+/// 集合的中文名（这一页的四个数都按它排列，四行顺序 = `DocName.values`）。
+String _docLabel(DocName name) {
+  switch (name) {
+    case DocName.projects:
+      return '项目';
+    case DocName.inspirations:
+      return '灵感';
+    case DocName.events:
+      return '事件';
+    case DocName.tasks:
+      return '任务';
+  }
 }
 
 class _Bullet extends StatelessWidget {

@@ -455,6 +455,38 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 把「**合并导入**」的结果落盘（Q25）。
+  ///
+  /// 与 [applyImport]（整体替换）的差别只在"结果是怎么来的"：合并结果由界面层
+  /// 先调 `mergeStoresWithReport` 算出来、拿报告给用户看过（"多进来什么、覆盖了什么"），
+  /// 确认之后才走到这里 —— 这一层只负责**落盘 + 重载**，不做任何合并判定。
+  ///
+  /// 走的是和 [restoreBackup] 同一条路：**强制轮转备份 → 原子写 → 重载工作区**。
+  /// 强制轮转（而不是 [AppStorage.save] 的节流）是刻意的：用户刚确认过一次
+  /// 覆盖性的合并，这一份"合并之前"的存档是他唯一的退路，不能因为
+  /// "五分钟内刚存过"就被节流拦下 —— 那等于承诺了能退回却什么都没留。
+  ///
+  /// `savedAt` 由 [AppStorage.save] 记成此刻（契约 §2.1：仅供人看、不参与任何判定）。
+  /// 返回 `null` 表示成功，否则是可以直接显示的失败文案。
+  String? applyMergedStore(StoreFile merged) {
+    try {
+      storage.save(merged, forceRotate: true);
+      workspace = Workspace.fromLoad(
+        storage,
+        LoadReport(
+          store: merged,
+          prefs: prefs,
+          issues: DecodeIssues(),
+          quarantinedPaths: const <String>[],
+        ),
+      );
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '合并失败：$error';
+    }
+  }
+
   /// 用导入的数据**整体替换**当前数据。
   ///
   /// 替换前 [AppStorage.save] 会先把当前数据轮转进滚动备份，

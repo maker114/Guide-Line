@@ -7,6 +7,7 @@ import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/json/store_file.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
+import 'package:guideline/core/store/merge.dart';
 import 'package:guideline/core/store/ui_prefs.dart';
 import 'package:guideline/features/workspace.dart';
 
@@ -159,6 +160,72 @@ void main() {
 
       expect(app.hasDataIncident, isFalse);
       expect(app.exportOverdue, isFalse, reason: '没出事故就不该把用户刚销的账又翻出来');
+    });
+  });
+
+  group('合并导入落盘（Q25）', () {
+    test('先轮转备份再原子写：合并结果进主文件，工作区重载、监听者被通知', () async {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.ws.createProject(title: '本机项目');
+      final backupsBefore = storage.listBackups().length;
+
+      // 另一台设备上的那一份（真实 id 与时间戳），合并后应当与本机并成一份
+      final otherDir = Directory.systemTemp.createTempSync('guideline_merge_source');
+      addTearDown(() {
+        if (otherDir.existsSync()) otherDir.deleteSync(recursive: true);
+      });
+      final source = await AppController.bootstrap(dataDirectoryOverride: otherDir);
+      source.ws.createProject(title: '对方项目');
+
+      final outcome = mergeStoresWithReport(
+        app.ws.buildStoreFile(),
+        source.ws.buildStoreFile(),
+        nowMillis: Ids.nowMillis(),
+      );
+      expect(outcome.report.added, 1, reason: '先确认这份结果真的"合并"了东西');
+
+      var notified = 0;
+      app.addListener(() => notified += 1);
+
+      final error = app.applyMergedStore(outcome.store);
+
+      expect(error, isNull);
+      expect(notified, 1, reason: '界面每次重建都读 ws，换过工作区必须通知一次');
+      expect(
+        <String>[for (final p in app.ws.liveProjects) p.title],
+        containsAll(<String>['本机项目', '对方项目']),
+        reason: '合并是把对方的记录并进来，不是替换',
+      );
+      expect(
+        storage.listBackups().length,
+        greaterThan(backupsBefore),
+        reason: '合并前必须先轮转一份备份 —— 合错了要能退回',
+      );
+      expect(storage.paths.storeFile.readAsStringSync(), contains('对方项目'));
+    });
+
+    test('写盘失败：返回可读文案、不抛异常，内存也不换成没写进去的那份', () {
+      final storage = _FailingStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      storage.failing = false;
+      app.ws.createProject(title: '本机项目');
+      storage.failing = true;
+
+      String? error;
+      expect(
+        () => error = app.applyMergedStore(StoreFile.empty()),
+        returnsNormally,
+        reason: '磁盘问题不该以异常形式炸到界面上',
+      );
+
+      expect(error, isNotNull);
+      expect(error, contains('合并失败'));
+      expect(
+        app.ws.liveProjects.single.title,
+        '本机项目',
+        reason: '没写进磁盘就不能显示成合并后的样子',
+      );
     });
   });
 
