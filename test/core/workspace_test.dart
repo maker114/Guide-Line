@@ -328,6 +328,42 @@ void main() {
       expect(ws.findProject(project.id)!.items, isEmpty);
     });
 
+    test('正文与当前一模一样就拒绝合并：灵感不会被偷偷标成已合并（Q8）', () {
+      final project = ws.createProject(title: '项目 D');
+      ws.updateProject(project.id, implementation: '原封不动的正文');
+      final inspiration = ws.captureInspiration('这条还没写进去');
+
+      expect(
+        () => ws.mergeInspiration(
+          inspirationId: inspiration.id,
+          projectId: project.id,
+          newImplementation: '原封不动的正文',
+        ),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('正文没有变化')),
+        ),
+        reason: '没变就不算合并 —— 否则项目里一个字没多，灵感却从灵感箱消失了',
+      );
+
+      expect(ws.findInspiration(inspiration.id)!.isPending, isTrue);
+      expect(ws.inspirationInbox.length, 1);
+    });
+
+    test('「作为清单条目」不受"正文没变"影响（它本来就不碰正文，Q8）', () {
+      final project = ws.createProject(title: '项目 E');
+      ws.updateProject(project.id, implementation: '原封不动的正文');
+      final inspiration = ws.captureInspiration('变成一条待办');
+
+      ws.mergeInspirationAsItem(
+        inspirationId: inspiration.id,
+        projectId: project.id,
+        itemText: '变成一条待办',
+      );
+
+      expect(ws.findProject(project.id)!.items.map((i) => i.text), <String>['变成一条待办']);
+      expect(ws.findInspiration(inspiration.id)!.isMerged, isTrue);
+    });
+
     test('撤销合并只恢复灵感，正文与清单条目不回滚（ADR-057）', () {
       final project = ws.createProject(title: '项目 A');
       final intoBody = ws.captureInspiration('原文一');
@@ -812,6 +848,64 @@ void main() {
       );
     });
 
+    test('建成任务：在事件主线末尾建出同名任务，条目与正文一个字都不动（Q24）', () {
+      final item = ws.addProjectItem(project.id, '写解析层');
+      ws.updateProject(project.id, implementation: '先把契约冻结');
+      final event = ws.createEvent(name: '发布线');
+      final before = ws.findProject(project.id)!;
+
+      final task = ws.createTaskFromProjectItem(
+        projectId: project.id,
+        itemId: item.id,
+        eventId: event.id,
+      );
+
+      expect(task.title, '写解析层', reason: '标题取条目文本');
+      expect(task.parentId, isNull, reason: '落点是主线（事件末尾的那一条）');
+      expect(task.taskType, TaskType.standard);
+      expect(
+        ws.mainLineOf(event.id).map((t) => t.title).toList(),
+        <String>['写解析层'],
+      );
+
+      // 条目留着：不删除、也不自动打勾（清单只是笔记，删不删由用户决定）
+      final after = ws.findProject(project.id)!;
+      expect(after.items.map((i) => i.text), <String>['写解析层']);
+      expect(after.items.single.done, isFalse);
+      expect(after.implementation, before.implementation);
+
+      // 建完不建立任何联动：勾清单不影响那条任务，反之亦然
+      ws.setProjectItemDone(project.id, item.id, true);
+      expect(ws.findTask(task.id)!.status, NodeStatus.pending);
+      ws.setTaskStatus(task.id, NodeStatus.done);
+      expect(ws.findProject(project.id)!.items.single.done, isTrue);
+      expect(
+        ws.findProject(project.id)!.status,
+        NodeStatus.pending,
+        reason: '清单不参与判定，项目更没有完成态',
+      );
+
+      // 落盘
+      expect(
+        Workspace.fromLoad(storage, storage.load()).findTask(task.id)!.title,
+        '写解析层',
+      );
+    });
+
+    test('建成任务：事件不存在时拒绝，清单保持原样', () {
+      final item = ws.addProjectItem(project.id, '一条待办');
+      expect(
+        () => ws.createTaskFromProjectItem(
+          projectId: project.id,
+          itemId: item.id,
+          eventId: '不存在的事件',
+        ),
+        throwsA(isA<RuleViolation>()),
+      );
+      expect(textsOf(), <String>['一条待办']);
+      expect(ws.liveTasks, isEmpty);
+    });
+
     test('从正文拆条目：按行拆、去掉列表记号、丢空行', () {
       expect(
         Workspace.splitImplementationLines(
@@ -1133,6 +1227,195 @@ void main() {
       expect(moved.parentId, isNull, reason: '禁止跨事件父子');
     });
 
+    test('跨事件移动：**整棵子树一起走**，父子仍同事件、子任务仍挂在原父下（Q7）', () {
+      final eventA = ws.createEvent(name: '事件 A');
+      final eventB = ws.createEvent(name: '事件 B');
+      final parent = ws.createTask(eventId: eventA.id, title: '父');
+      final child = ws.createTask(
+        eventId: eventA.id,
+        title: '子',
+        parentTaskId: parent.id,
+        type: TaskType.subtask,
+      );
+
+      // 移的是主线节点「父」：它下面的子任务必须跟着走
+      ws.moveTask(parent.id, newEventId: eventB.id);
+
+      expect(ws.findTask(parent.id)!.eventId, eventB.id);
+      expect(
+        ws.findTask(child.id)!.eventId,
+        eventB.id,
+        reason: '子任务留在原事件，两个事件里就都看不见它了',
+      );
+      expect(ws.findTask(child.id)!.parentId, parent.id, reason: '父子关系不动');
+      expect(ws.mainLineOf(eventB.id).map((t) => t.id), <String>[parent.id]);
+      expect(ws.mainLineOf(eventA.id), isEmpty);
+      expect(
+        ws.subtasksOf(parent.id, eventId: eventB.id).map((t) => t.id),
+        <String>[child.id],
+        reason: '跟着走之后，它照样挂在原父下',
+      );
+
+      // 契约 §4.3：非空 `parent_task_id` 的父任务必须存在且事件相同
+      for (final task in ws.liveTasks) {
+        final parentId = task.parentId;
+        if (parentId == null) continue;
+        final owner = ws.findTask(parentId);
+        expect(owner, isNotNull);
+        expect(owner!.eventId, task.eventId);
+      }
+
+      // 下级处理完之后父任务照旧勾得动（以前子任务留在原事件，勾父亲只会报错）
+      ws.setTaskStatus(child.id, NodeStatus.done);
+      ws.setTaskStatus(parent.id, NodeStatus.done);
+      expect(ws.findTask(parent.id)!.status, NodeStatus.done);
+    });
+
+    test('跨事件移动子任务：父引用归零并写成 standard（Q7）', () {
+      final eventA = ws.createEvent(name: '事件 A');
+      final eventB = ws.createEvent(name: '事件 B');
+      final parent = ws.createTask(eventId: eventA.id, title: '父');
+      final child = ws.createTask(
+        eventId: eventA.id,
+        title: '子',
+        parentTaskId: parent.id,
+        type: TaskType.subtask,
+      );
+
+      ws.moveTask(child.id, newEventId: eventB.id);
+
+      final moved = ws.findTask(child.id)!;
+      expect(moved.eventId, eventB.id);
+      expect(moved.parentId, isNull, reason: '禁止跨事件父子');
+      expect(moved.taskType, TaskType.standard, reason: '提到主线就要写成 standard');
+      expect(ws.liveTasks.firstWhere((t) => t.id == parent.id).eventId, eventA.id);
+    });
+
+    test('归属决定 task_type：提到主线写 standard、挂到节点下写 subtask（Q7）', () {
+      final event = ws.createEvent(name: '事件 1');
+      final first = ws.createTask(eventId: event.id, title: '第一');
+      final second = ws.createTask(eventId: event.id, title: '第二');
+      final child = ws.createTask(
+        eventId: event.id,
+        title: '子',
+        parentTaskId: second.id,
+        type: TaskType.subtask,
+      );
+
+      // 挂到节点下：parent 与 type 一起写成合法组合
+      ws.moveTask(child.id, newParentTaskId: first.id);
+      expect(ws.findTask(child.id)!.parentId, first.id);
+      expect(ws.findTask(child.id)!.taskType, TaskType.subtask);
+      expect(ws.subtasksOf(first.id, eventId: event.id).map((t) => t.id), <String>[child.id]);
+
+      // 提到主线：空父节点必须配 standard
+      ws.moveTask(child.id, newParentTaskId: null);
+      final lifted = ws.findTask(child.id)!;
+      expect(lifted.parentId, isNull);
+      expect(lifted.taskType, TaskType.standard);
+      expect(
+        ws.mainLineOf(event.id).map((t) => t.id),
+        <String>[first.id, second.id, child.id],
+        reason: '提到主线后排在末尾',
+      );
+    });
+
+    test('越界组合照样被拒：挂到子任务下、把带下级的节点挂到节点下（Q7）', () {
+      final event = ws.createEvent(name: '事件 1');
+      final parent = ws.createTask(eventId: event.id, title: '父');
+      final leaf = ws.createTask(
+        eventId: event.id,
+        title: '子',
+        parentTaskId: parent.id,
+        type: TaskType.subtask,
+      );
+      final other = ws.createTask(eventId: event.id, title: '别的主线');
+
+      // 子任务不能再有下级
+      expect(
+        () => ws.moveTask(other.id, newParentTaskId: leaf.id),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('不能再挂东西')),
+        ),
+      );
+      expect(ws.findTask(other.id)!.parentId, isNull, reason: '被拒绝就一条都不该动');
+
+      // 自己带着下级，就不能挂到节点下（那样它会变成叶子型子任务）
+      expect(
+        () => ws.moveTask(parent.id, newParentTaskId: other.id),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('子任务不能再有下级')),
+        ),
+      );
+      expect(ws.findTask(parent.id)!.parentId, isNull);
+      expect(ws.findTask(leaf.id)!.parentId, parent.id, reason: '下级留在原处');
+    });
+
+    test('批量设到期日：先整体校验再落盘，含非法条目时整批不动（Q26）', () {
+      final event = ws.createEvent(name: '事件 1');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      final b = ws.createTask(eventId: event.id, title: '乙');
+      final archived = ws.createTask(eventId: event.id, title: '丙');
+      ws.setTaskArchived(archived.id, true);
+
+      expect(
+        () => ws.setTasksDue(<String>[a.id, b.id, archived.id], '2099-05-01'),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('已经归档了')),
+        ),
+      );
+      expect(ws.findTask(a.id)!.dueAt, isNull, reason: '一条不合法就都不动');
+      expect(ws.findTask(b.id)!.dueAt, isNull);
+
+      ws.setTasksDue(<String>[a.id, b.id], '2099-05-01');
+      expect(ws.findTask(a.id)!.dueAt, '2099-05-01');
+      expect(ws.findTask(b.id)!.dueAt, '2099-05-01');
+      expect(ws.findTask(archived.id)!.dueAt, isNull);
+
+      // 落盘
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.findTask(a.id)!.dueAt, '2099-05-01');
+      expect(reloaded.findTask(b.id)!.dueAt, '2099-05-01');
+    });
+
+    test('批量归档：级联子任务、影响条数含子任务，已归档的会让整批停下（Q26）', () {
+      final event = ws.createEvent(name: '事件 1');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      final aChild = ws.createTask(
+        eventId: event.id,
+        title: '甲的子',
+        parentTaskId: a.id,
+        type: TaskType.subtask,
+      );
+      final b = ws.createTask(eventId: event.id, title: '乙');
+
+      expect(ws.taskArchiveImpact(<String>[a.id, b.id], archived: true).length, 3,
+          reason: '影响条数要把子任务算进去');
+
+      // 提前归档一条：整批必须停下并说明原因
+      ws.setTaskArchived(b.id, true);
+      expect(
+        () => ws.setTasksArchived(<String>[a.id, b.id], true),
+        throwsA(
+          predicate<RuleViolation>((e) => e.message.contains('已经归档过了')),
+        ),
+      );
+      expect(ws.findTask(a.id)!.archived, isFalse, reason: '整批不动');
+      expect(ws.findTask(aChild.id)!.archived, isFalse);
+
+      // 取消归档后整批通过：父子一起归档
+      ws.setTaskArchived(b.id, false);
+      ws.setTasksArchived(<String>[a.id, b.id], true);
+      expect(ws.findTask(a.id)!.archived, isTrue);
+      expect(ws.findTask(aChild.id)!.archived, isTrue, reason: '归档级联子任务');
+      expect(ws.findTask(b.id)!.archived, isTrue);
+      expect(ws.mainLineOf(event.id), isEmpty, reason: '已归档的节点不在任务线上');
+
+      // 落盘
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.findTask(aChild.id)!.archived, isTrue);
+    });
+
     test('删除任务级联子任务', () {
       final event = ws.createEvent(name: '事件 1');
       final parent = ws.createTask(eventId: event.id, title: '父');
@@ -1188,6 +1471,59 @@ void main() {
     });
   });
 
+  group('事件排序（Q28）', () {
+    test('往上 / 往下挪一格 = 交换相邻两个事件的 order，并落盘', () {
+      final a = ws.createEvent(name: '甲');
+      final b = ws.createEvent(name: '乙');
+      final c = ws.createEvent(name: '丙');
+
+      List<String> order() {
+        final list = ws.liveEvents.where((e) => !e.archived).toList(growable: false)
+          ..sort((x, y) => x.order.compareTo(y.order));
+        return list.map((e) => e.name).toList(growable: false);
+      }
+
+      expect(order(), <String>['甲', '乙', '丙']);
+
+      ws.moveEventWithinList(c.id, up: true);
+      expect(order(), <String>['甲', '丙', '乙']);
+
+      ws.moveEventWithinList(c.id, up: true);
+      expect(order(), <String>['丙', '甲', '乙']);
+
+      // 到两端就是空操作，由 canMoveEventWithinList 给界面一句提示
+      expect(ws.canMoveEventWithinList(c.id, up: true), isFalse);
+      expect(ws.canMoveEventWithinList(b.id, up: false), isFalse);
+      ws.moveEventWithinList(c.id, up: true);
+      ws.moveEventWithinList(b.id, up: false);
+      expect(order(), <String>['丙', '甲', '乙']);
+
+      expect(ws.canMoveEventWithinList(a.id, up: true), isTrue);
+      expect(ws.canMoveEventWithinList(a.id, up: false), isTrue);
+
+      // 落盘：重新读回来顺序不变
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      final reloadedOrder = reloaded.liveEvents.toList(growable: false)
+        ..sort((x, y) => x.order.compareTo(y.order));
+      expect(reloadedOrder.map((e) => e.name), <String>['丙', '甲', '乙']);
+    });
+
+    test('已归档的事件不参与排序', () {
+      final a = ws.createEvent(name: '甲');
+      final b = ws.createEvent(name: '乙');
+      final orderBefore = ws.findEvent(a.id)!.order;
+      ws.setEventArchived(b.id, true);
+
+      expect(ws.canMoveEventWithinList(b.id, up: true), isFalse);
+      expect(
+        () => ws.moveEventWithinList(b.id, up: true),
+        throwsA(isA<RuleViolation>()),
+        reason: '归档的事件在归档区里，不该被列表上的"挪一格"拖进来',
+      );
+      expect(ws.findEvent(a.id)!.order, orderBefore, reason: '被拒绝就什么都不动');
+    });
+  });
+
   group('归档区 / 搜索 / 到期 / 彻底删除', () {
     test('已归档只列归档根，回收站只列级联根', () {
       final root = ws.createProject(title: '根');
@@ -1216,6 +1552,67 @@ void main() {
       expect(ids, contains(project.id));
       expect(ids, isNot(contains(archived.id)));
       expect(ids, isNot(contains(inspiration.id)), reason: 'discarded 不参与搜索');
+    });
+
+    test('「内容可搜」的条数与搜索范围同源（Q20）', () {
+      final project = ws.createProject(title: '活着的项目');
+      final archivedProject = ws.createProject(title: '归档的项目');
+      ws.setProjectArchived(archivedProject.id, true);
+      ws.createEvent(name: '活着的事件');
+      final archivedEvent = ws.createEvent(name: '归档的事件');
+      ws.setEventArchived(archivedEvent.id, true);
+      final event = ws.liveEvents.firstWhere((e) => e.name == '活着的事件');
+      ws.createTask(eventId: event.id, title: '活着的任务');
+      final archivedTask = ws.createTask(eventId: event.id, title: '归档的任务');
+      ws.setTaskArchived(archivedTask.id, true);
+      ws.captureInspiration('待处理的灵感');
+      final discarded = ws.captureInspiration('丢弃的灵感');
+      ws.discardInspiration(discarded.id);
+
+      // 只有"活着的项目 + 活着的事件 + 活着的任务 + 待处理的灵感"这 4 条
+      expect(ws.searchableContentCount, 4);
+      expect(project.id, isNotEmpty);
+    });
+
+    test('归档项目遮住的灵感：灵感箱与归档区用同一个数（Q10）', () {
+      final root = ws.createProject(title: '归档的根');
+      final child = ws.createProject(title: '子项目', parentId: root.id);
+      final grand = ws.createProject(title: '孙项目（先单独归档）', parentId: child.id);
+      final live = ws.createProject(title: '活着的项目');
+      ws.captureInspiration('根下的', projectId: root.id);
+      ws.captureInspiration('子项目下的', projectId: child.id);
+      ws.captureInspiration('孙项目下的', projectId: grand.id);
+      ws.captureInspiration('活着的项目下的', projectId: live.id);
+      final unassigned = ws.captureInspiration('没归属的');
+
+      // 先单独归档孙项目（此时父链都还活着）→ 它名下的那条先被遮住
+      ws.setProjectArchived(grand.id, true);
+      expect(
+        ws.inspirationInbox.map((i) => i.text).toSet(),
+        <String>{'根下的', '子项目下的', '活着的项目下的', '没归属的'},
+        reason: '单独归档的子项目也算"所属项目已归档"',
+      );
+      expect(ws.inspirationsHiddenByArchivedProjects, 1);
+
+      // 再归档根：孙项目因为父节点也在，会掉出 projectTree 的子树根 ——
+      // 只看子树的老写法会漏掉它名下的那条
+      ws.setProjectArchived(root.id, true);
+      expect(ws.inspirationsHiddenByArchivedProjects, 3, reason: '根 + 子 + 孙，三条都在下面');
+      expect(
+        ws.inspirationInbox.map((i) => i.text).toSet(),
+        <String>{'活着的项目下的', '没归属的'},
+      );
+      expect(
+        ws.archiveZone.hiddenInspirations.length,
+        ws.inspirationsHiddenByArchivedProjects,
+        reason: '归档区「被隐藏」与灵感页那一行提示必须报同一个数',
+      );
+
+      // 取消归档 → 都回来
+      ws.setProjectArchived(root.id, false);
+      expect(ws.inspirationsHiddenByArchivedProjects, 0);
+      expect(ws.inspirationInbox.length, 5);
+      expect(unassigned.isPending, isTrue);
     });
 
     test('逾期取数：未完成、未归档、有到期日、早于今天，按日期升序（Q19 唯一出处）', () {

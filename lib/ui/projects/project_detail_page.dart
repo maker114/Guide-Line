@@ -324,7 +324,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
-                  items.isEmpty ? '清单现在是空的。' : '长按某一条，可以上移、下移、删除。',
+                  items.isEmpty
+                      ? '清单现在是空的。'
+                      : '长按某一条，可以建成任务、上移、下移、删除。',
                   style: theme.textTheme.bodySmall,
                 ),
               ),

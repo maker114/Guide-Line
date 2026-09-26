@@ -186,6 +186,52 @@ void main() {
     expect(find.textContaining('并列'), findsNothing, reason: '界面上不该再出现这个概念');
   });
 
+  testWidgets('已归档的任务不画在任务线上，进度 / 折叠 / 锁同一套取数（Q18）', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '一条线');
+    final first = app.ws.createTask(eventId: event.id, title: '第一步');
+    final second = app.ws.createTask(eventId: event.id, title: '第二步');
+    app.run(() => app.ws.setTaskStatus(first.id, NodeStatus.done));
+    final archivedNode = app.ws.createTask(eventId: event.id, title: '被归档的节点');
+    // 子任务一归档一留着：父任务框里的「下级 d/t」分母只算留着的那个
+    final keptSub = app.ws.createTask(
+      eventId: event.id,
+      title: '留着的子任务',
+      parentTaskId: second.id,
+      type: TaskType.subtask,
+    );
+    final archivedSub = app.ws.createTask(
+      eventId: event.id,
+      title: '归档的子任务',
+      parentTaskId: second.id,
+      type: TaskType.subtask,
+    );
+    app.run(() => app.ws.setTaskArchived(archivedNode.id, true));
+    app.run(() => app.ws.setTaskArchived(archivedSub.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('事件'));
+    await tester.pumpAndSettle();
+
+    // 进度：分母排除归档（第一步 + 第二步 = 2），分子含已完成（1）
+    expect(find.text('主线 1/2 已完成'), findsOneWidget);
+    expect(find.text('被归档的节点'), findsNothing, reason: '已归档的不画在任务线上');
+    expect(find.text('归档的子任务'), findsNothing);
+
+    // 进详情页看「下级 d/t」：少的那一条与归档的也是同源
+    await tester.tap(find.text('第二步'));
+    await tester.pumpAndSettle();
+    expect(find.text('下级 0/1'), findsOneWidget, reason: '分母只算留着的那个子任务');
+    expect(keptSub.id, isNotEmpty);
+    expect(archivedSub.id, isNotEmpty);
+
+    // 留着的子任务做完 → 锁消失、父任务可以勾
+    await tester.tap(find.byIcon(Icons.radio_button_unchecked).last);
+    await tester.pumpAndSettle();
+    expect(app.ws.findTask(keptSub.id)!.status, NodeStatus.done);
+  });
+
   testWidgets('1.6 倍字体 + 很长的标题：事件卡不溢出', (tester) async {    tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
@@ -328,5 +374,52 @@ void main() {
     app.run(() => app.ws.setEventStatus(event.id, NodeStatus.ignored));
     await tester.pumpAndSettle();
     expect(find.text('· 已搁置'), findsOneWidget);
+  });
+
+  testWidgets('事件菜单能挪顺序：交换后列表顺序真的变了、也落了盘（Q28）', (tester) async {
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final first = app.ws.createEvent(name: '甲线');
+    final second = app.ws.createEvent(name: '乙线');
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('事件'));
+    await tester.pumpAndSettle();
+
+    double topOf(String name) => tester.getRect(find.text(name)).top;
+    expect(topOf('甲线'), lessThan(topOf('乙线')), reason: '一开始按创建顺序排');
+
+    // 第一条的菜单：往上挪一格已经到头了，必须给一句话
+    await tester.tap(find.byTooltip('更多').first);
+    await tester.pumpAndSettle();
+    expect(find.text('往上挪一格'), findsOneWidget);
+    expect(find.text('往下挪一格'), findsOneWidget);
+    await tester.tap(find.text('往上挪一格'));
+    await tester.pumpAndSettle();
+    expect(find.text('已经是最前面了'), findsOneWidget);
+
+    // 让上面那条轻提示先退场（`ScaffoldMessenger` 一次只显示一条）
+    await tester.pump(const Duration(seconds: 4));
+    await tester.pumpAndSettle();
+
+    // 往下挪一格：列表顺序真的换了
+    await tester.tap(find.byTooltip('更多').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('往下挪一格'));
+    await tester.pumpAndSettle();
+
+    expect(topOf('乙线'), lessThan(topOf('甲线')), reason: '事件列表要按新顺序画');
+    expect(
+      app.ws.findEvent(first.id)!.order,
+      greaterThan(app.ws.findEvent(second.id)!.order),
+      reason: '交换的是相邻两条的 order',
+    );
+
+    // 落盘：重新从磁盘装配一次，顺序不变
+    final reloaded = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    expect(
+      reloaded.ws.findEvent(first.id)!.order,
+      greaterThan(reloaded.ws.findEvent(second.id)!.order),
+    );
   });
 }

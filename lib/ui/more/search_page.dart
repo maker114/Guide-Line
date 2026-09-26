@@ -5,13 +5,22 @@ import '../../core/models/enums.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/task.dart';
 import '../../features/workspace.dart';
+import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/labels.dart';
 import '../events/event_detail_page.dart';
+import '../events/task_actions.dart';
 import '../projects/project_detail_page.dart';
 import '../theme/shape_tokens.dart';
 
 /// 全局搜索（设计文档 Q42）：**只搜未归档、未删除；灵感只搜待处理的**。
+///
+/// 多选（Q26）：任务条目上多了"长按进多选、批量改期 / 归档"这条捷径 ——
+/// 原来搜到一条任务想改到期日，只能点进去、在任务线上再找一遍。习惯与
+/// 「全部任务」页、灵感页**完全一致**。
+///
+/// 多选**只收任务命中**：批量动作（设到期日 / 归档）本来就只对任务有意义，
+/// 让项目 / 事件 / 灵感也能被选中，只会造出一个按下去没有动作的选中集。
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, required this.app});
 
@@ -25,10 +34,52 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _controller = TextEditingController();
   String _query = '';
 
+  /// 多选模式（只作用于任务命中）。
+  bool _selecting = false;
+  final Set<String> _selectedIds = <String>{};
+
+  /// 当前列表里**可见的任务命中** id（「全选」按它算）。
+  final Set<String> _visibleIds = <String>{};
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  void _enterSelection(String id) {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..add(id);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+    });
+  }
+
+  /// 全选 / 取消全选（只作用于当前可见的那些任务命中）。
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIds.length == _visibleIds.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(_visibleIds);
+      }
+    });
   }
 
   @override
@@ -43,6 +94,21 @@ class _SearchPageState extends State<SearchPage> {
         final truncated = hits.length > searchHitLimit;
         final shown = truncated ? hits.sublist(0, searchHitLimit) : hits;
         final hasQuery = _query.trim().isNotEmpty;
+
+        // 只有**任务**命中能进多选：批量动作都是任务动作
+        final visibleTaskIds = <String>{
+          for (final hit in shown)
+            if (hit.doc == DocName.tasks) hit.entity.id,
+        };
+        _selectedIds.removeWhere((id) => !visibleTaskIds.contains(id));
+        _visibleIds
+          ..clear()
+          ..addAll(visibleTaskIds);
+        if (_selecting && _visibleIds.isEmpty) {
+          _selecting = false;
+          _selectedIds.clear();
+        }
+
         return Scaffold(
           appBar: AppBar(title: const Text('搜索')),
           body: Column(
@@ -83,18 +149,43 @@ class _SearchPageState extends State<SearchPage> {
                   onChanged: (value) => setState(() => _query = value),
                 ),
               ),
+              if (_selecting)
+                TaskSelectionBar(
+                  selectedCount: _selectedIds.length,
+                  allSelected:
+                      _visibleIds.isNotEmpty && _selectedIds.length == _visibleIds.length,
+                  canSelectAll: _visibleIds.isNotEmpty,
+                  onToggleAll: _toggleSelectAll,
+                  onExit: _exitSelection,
+                  onSetDue: () => _batchSetDue(context),
+                  onArchive: () => _batchArchive(context),
+                ),
               if (hasQuery)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-                  child: Text(
-                    // 触到上限时必须如实说（Q20 / 《界面规范》§7）：只写「命中 100 条」，
-                    // 用户会以为一共就这么多 —— 而"前 100 条"只是截断之后剩下的那一段。
-                    shown.isEmpty
-                        ? '没有匹配的结果'
-                        : truncated
-                            ? '命中 $searchHitLimit 条 · 只显示前 $searchHitLimit 条（还有更多）'
-                            : '命中 ${shown.length} 条',
-                    style: theme.textTheme.labelSmall,
+                  child: Row(
+                    children: <Widget>[
+                      Text(
+                        // 触到上限时必须如实说（Q20 / 《界面规范》§7）：只写「命中 100 条」，
+                        // 用户会以为一共就这么多 —— 而"前 100 条"只是截断之后剩下的那一段。
+                        // 多选状态统一写「已选 N 条」。
+                        _selecting
+                            ? '已选 ${_selectedIds.length} 条'
+                            : shown.isEmpty
+                                ? '没有匹配的结果'
+                                : truncated
+                                    ? '命中 $searchHitLimit 条 · 只显示前 $searchHitLimit 条（还有更多）'
+                                    : '命中 ${shown.length} 条',
+                        style: theme.textTheme.labelSmall,
+                      ),
+                      const Spacer(),
+                      if (!_selecting && visibleTaskIds.isNotEmpty)
+                        TextButton(
+                          // 长按也能进多选；这一枚是**看得见**的那条路
+                          onPressed: () => _enterSelection(visibleTaskIds.first),
+                          child: const Text('多选'),
+                        ),
+                    ],
                   ),
                 ),
               Expanded(
@@ -118,10 +209,25 @@ class _SearchPageState extends State<SearchPage> {
                               indent: 16,
                               endIndent: 16,
                             ),
-                            itemBuilder: (context, index) => _HitTile(
-                              app: widget.app,
-                              hit: shown[index],
-                            ),
+                            itemBuilder: (context, index) {
+                              final hit = shown[index];
+                              final isTask = hit.doc == DocName.tasks;
+                              return _HitTile(
+                                app: widget.app,
+                                hit: hit,
+                                selecting: _selecting && isTask,
+                                selected: _selectedIds.contains(hit.entity.id),
+                                onToggleSelect: () => _toggleSelection(hit.entity.id),
+                                onLongPress: isTask
+                                    ? () => _longPress(hit.entity.id)
+                                    // 多选只收任务：别的类型按下去没有批量动作可做，
+                                    // 与其让用户选上一个"选不了"的东西，不如明说
+                                    : () => showToast(
+                                        context,
+                                        '多选只收任务 —— 项目 / 事件 / 灵感请点开改',
+                                      ),
+                              );
+                            },
                           ),
               ),
             ],
@@ -130,19 +236,54 @@ class _SearchPageState extends State<SearchPage> {
       },
     );
   }
+
+  void _longPress(String taskId) {
+    if (_selecting) {
+      _toggleSelection(taskId);
+    } else {
+      _enterSelection(taskId);
+    }
+  }
+
+  Future<void> _batchSetDue(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    if (await batchSetTasksDueAction(context, widget.app, ids)) {
+      _exitSelection();
+    }
+  }
+
+  Future<void> _batchArchive(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    if (await batchArchiveTasksAction(context, widget.app, ids)) {
+      _exitSelection();
+    }
+  }
 }
 
 class _HitTile extends StatelessWidget {
-  const _HitTile({required this.app, required this.hit});
+  const _HitTile({
+    required this.app,
+    required this.hit,
+    this.selecting = false,
+    this.selected = false,
+    this.onToggleSelect,
+    this.onLongPress,
+  });
 
   final AppController app;
   final SearchHit hit;
+
+  /// 多选态（只有任务命中会进这个状态）：整行变成"勾选行"
+  final bool selecting;
+  final bool selected;
+  final VoidCallback? onToggleSelect;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final entity = hit.entity;
-    return ListTile(
+    Widget tile = ListTile(
       leading: Icon(entityTypeIcon(entity)),
       title: Text(hit.displayTitle, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: Text(
@@ -151,6 +292,24 @@ class _HitTile extends StatelessWidget {
       ),
       trailing: const Icon(Icons.chevron_right),
       onTap: () => _open(context),
+    );
+
+    if (selecting) {
+      // 多选态：点这一行只切换选中（用 `AbsorbPointer` 把原来"点开"的那条路
+      // 关掉），底色垫在 `Material` 上而不是包 `DecoratedBox`（《界面规范》§6.2）。
+      tile = Material(
+        type: selected ? MaterialType.canvas : MaterialType.transparency,
+        color: selected
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.45)
+            : null,
+        child: AbsorbPointer(child: tile),
+      );
+    }
+
+    return GestureDetector(
+      onTap: selecting ? onToggleSelect : null,
+      onLongPress: onLongPress,
+      child: tile,
     );
   }
 

@@ -161,11 +161,20 @@ class _EventTabState extends State<EventTab> {
 
     final mainLine = _app.ws.mainLineOf(event.id);
     if (mainLine.isEmpty) {
+      // 「空了」有两种：新事件确实没任务，和**节点全被归档了**。
+      // 后者必须说清去处（Q18）：已归档节点不再显示在任务线里，
+      // 不吭声就像"任务丢了"（归档区「已归档」那一区能取消归档找回）。
+      final archivedCount = _app.ws.liveTasks
+          .where((t) => t.eventId == event.id && t.parentId == null && t.archived)
+          .length;
       return <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(40, 0, 12, 10),
           child: Text(
-            '还没有主线任务 —— 点开这条事件去加第一个节点',
+            archivedCount > 0
+                ? '主线节点都归档了（$archivedCount 个）—— 显示与判定同一套取数，'
+                    '已归档的不画在任务线上；去「更多 → 归档区 → 已归档」取消归档'
+                : '还没有主线任务 —— 点开这条事件去加第一个节点',
             style: Theme.of(context).textTheme.labelSmall,
           ),
         ),
@@ -360,6 +369,12 @@ class _EventCardHeader extends StatelessWidget {
             case 'rename':
               onStartRename();
               break;
+            case 'moveUp':
+              _move(context, up: true);
+              break;
+            case 'moveDown':
+              _move(context, up: false);
+              break;
             case 'archive':
               final error = app.run(
                 () => app.ws.setEventArchived(event.id, true),
@@ -378,6 +393,10 @@ class _EventCardHeader extends StatelessWidget {
         },
         itemBuilder: (_) => const <PopupMenuEntry<String>>[
           PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
+          // 事件原来只能按创建顺序排（Q28）：想调整先做哪条线，得有入口。
+          // 与任务侧的"往上 / 往下挪一格"是同一件事、同一套叫法（交换相邻 order）。
+          PopupMenuItem<String>(value: 'moveUp', child: Text('往上挪一格')),
+          PopupMenuItem<String>(value: 'moveDown', child: Text('往下挪一格')),
           PopupMenuItem<String>(value: 'archive', child: Text('归档（含任务线）')),
           PopupMenuItem<String>(value: 'delete', child: Text('删除（含任务线）')),
         ],
@@ -388,6 +407,19 @@ class _EventCardHeader extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 事件在列表里挪一格（Q28）= 与相邻的那个交换 `order`。
+  ///
+  /// 到两端时**要给一句反馈**：静默的空操作在用户那边等于"这个菜单项坏了"
+  /// （与任务侧的"往上 / 往下挪一格"同一套口径）。
+  void _move(BuildContext context, {required bool up}) {
+    if (!app.ws.canMoveEventWithinList(event.id, up: up)) {
+      showToast(context, up ? '已经是最前面了' : '已经到最后了');
+      return;
+    }
+    final error = app.run(() => app.ws.moveEventWithinList(event.id, up: up));
+    if (error != null && context.mounted) showToast(context, error, error: true);
   }
 
   Future<void> _delete(BuildContext context) async {

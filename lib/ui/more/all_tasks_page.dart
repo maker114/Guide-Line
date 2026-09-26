@@ -6,12 +6,17 @@ import '../common/empty_state.dart';
 import '../common/status_selector.dart';
 import '../common/task_tile.dart';
 import '../common/urgency.dart';
+import '../events/task_actions.dart';
 import 'task_grouping.dart';
 
 /// 全部任务：**跨事件的任务总表**。
 ///
 /// 事件层级在手机上层层点进去太慢，这里给一个"平铺"的入口：
 /// 可以按完成度 / 事件 / 紧迫度分组（分组与排序在 `task_grouping.dart`）。
+///
+/// 多选（Q26）：这一页原来只能一条条点进事件去改期。现在与灵感页**同一套习惯** ——
+/// 长按任一条进入多选、点条目标切换选中、「全选」只作用于当前可见的那些；
+/// 批量动作给「设到期日」与「归档」。
 class AllTasksPage extends StatefulWidget {
   const AllTasksPage({super.key, required this.app});
 
@@ -23,6 +28,48 @@ class AllTasksPage extends StatefulWidget {
 
 class _AllTasksPageState extends State<AllTasksPage> {
   TaskGrouping _grouping = TaskGrouping.completion;
+
+  /// 多选模式：长按任一条进入，之后点条目即切换选中。
+  bool _selecting = false;
+  final Set<String> _selectedIds = <String>{};
+
+  /// 当前列表里**可见**的那些 id（「全选」按它算）。
+  final Set<String> _visibleIds = <String>{};
+
+  void _enterSelection(String id) {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..add(id);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+    });
+  }
+
+  /// 全选 / 取消全选（只作用于当前可见的那些）。
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIds.length == _visibleIds.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(_visibleIds);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,25 +84,66 @@ class _AllTasksPageState extends State<AllTasksPage> {
         final tasks = app.ws.liveTasks.where((t) => !t.archived).toList(growable: false);
         final rows = _buildRows(context, tasks);
 
+        // 选中项可能已经被别人改动（例如在别处归档掉了），每次构建都清一遍幽灵选中
+        final visibleIds = <String>{
+          for (final row in rows)
+            if (row.task != null) row.task!.id,
+        };
+        _selectedIds.removeWhere((id) => !visibleIds.contains(id));
+        _visibleIds
+          ..clear()
+          ..addAll(visibleIds);
+        // 一条都没了（全被归档 / 删掉）时自动退出多选，别留一条空的动作条
+        if (_selecting && _visibleIds.isEmpty) {
+          _selecting = false;
+          _selectedIds.clear();
+        }
+
         return Scaffold(
           appBar: AppBar(title: const Text('全部任务')),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-                // 分组调节栏走全应用统一的胶囊选择器（与项目详情的「状态」
-                // 同一套观感），不再是 Material 的分段控件
-                child: StatusPillSelector<TaskGrouping>(
-                  values: TaskGrouping.values,
-                  selected: _grouping,
-                  labelOf: (value) => value.label,
-                  onSelected: (value) => setState(() => _grouping = value),
+              if (_selecting)
+                TaskSelectionBar(
+                  selectedCount: _selectedIds.length,
+                  allSelected:
+                      _visibleIds.isNotEmpty && _selectedIds.length == _visibleIds.length,
+                  canSelectAll: _visibleIds.isNotEmpty,
+                  onToggleAll: _toggleSelectAll,
+                  onExit: _exitSelection,
+                  onSetDue: () => _batchSetDue(context),
+                  onArchive: () => _batchArchive(context),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                  // 分组调节栏走全应用统一的胶囊选择器（与项目详情的「状态」
+                  // 同一套观感），不再是 Material 的分段控件
+                  child: StatusPillSelector<TaskGrouping>(
+                    values: TaskGrouping.values,
+                    selected: _grouping,
+                    labelOf: (value) => value.label,
+                    onSelected: (value) => setState(() => _grouping = value),
+                  ),
                 ),
-              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                child: Text('共 ${tasks.length} 条（含子任务）', style: theme.textTheme.labelSmall),
+                child: Row(
+                  children: <Widget>[
+                    Text(
+                      // 多选状态**统一写「已选 N 条」**（《界面规范》§7）
+                      _selecting ? '已选 ${_selectedIds.length} 条' : '共 ${tasks.length} 条（含子任务）',
+                      style: theme.textTheme.labelSmall,
+                    ),
+                    const Spacer(),
+                    if (!_selecting && tasks.isNotEmpty)
+                      TextButton(
+                        onPressed: () => _enterSelection(tasks.first.id),
+                        child: const Text('多选'),
+                      ),
+                  ],
+                ),
               ),
               const Divider(height: 1),
               Expanded(
@@ -68,23 +156,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                     : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 24),
                         itemCount: rows.length,
-                        itemBuilder: (context, index) {
-                          final row = rows[index];
-                          final header = row.header;
-                          if (header != null) {
-                            return TaskGroupHeader(
-                              title: header,
-                              count: row.count,
-                              color: row.color,
-                            );
-                          }
-                          return Column(
-                            children: <Widget>[
-                              TaskTile(app: app, task: row.task!),
-                              const Divider(height: 1, indent: 16, endIndent: 16),
-                            ],
-                          );
-                        },
+                        itemBuilder: (context, index) => _buildRow(context, rows[index]),
                       ),
               ),
             ],
@@ -92,6 +164,57 @@ class _AllTasksPageState extends State<AllTasksPage> {
         );
       },
     );
+  }
+
+  Widget _buildRow(BuildContext context, TaskRow row) {
+    final header = row.header;
+    if (header != null) {
+      return TaskGroupHeader(title: header, count: row.count, color: row.color);
+    }
+
+    final task = row.task!;
+    Widget tile = TaskTile(app: widget.app, task: task);
+    if (_selecting) {
+      // 多选态：整行变成"勾选行" —— 点它只切换选中，不再进事件详情。
+      // 底色垫在 `Material` 上，而不是包一层 `DecoratedBox`：ListTile 的水波纹画在
+      // 最近的 `Material` 上，中间夹一层有底色的 `DecoratedBox` 会让它报错
+      // （《界面规范》§6.2，事件页踩过同一个坑）。
+      final selected = _selectedIds.contains(task.id);
+      tile = Material(
+        type: selected ? MaterialType.canvas : MaterialType.transparency,
+        color: selected
+            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.45)
+            : null,
+        child: AbsorbPointer(child: tile),
+      );
+    }
+
+    return GestureDetector(
+      // 长按进入多选（与灵感页同一套习惯）；已经在多选里就直接切换选中
+      onLongPress:
+          _selecting ? () => _toggleSelection(task.id) : () => _enterSelection(task.id),
+      onTap: _selecting ? () => _toggleSelection(task.id) : null,
+      child: Column(
+        children: <Widget>[
+          tile,
+          const Divider(height: 1, indent: 16, endIndent: 16),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _batchSetDue(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    if (await batchSetTasksDueAction(context, widget.app, ids)) {
+      _exitSelection();
+    }
+  }
+
+  Future<void> _batchArchive(BuildContext context) async {
+    final ids = _selectedIds.toList(growable: false);
+    if (await batchArchiveTasksAction(context, widget.app, ids)) {
+      _exitSelection();
+    }
   }
 
   List<TaskRow> _buildRows(BuildContext context, List<Task> tasks) {

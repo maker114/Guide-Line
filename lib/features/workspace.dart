@@ -1072,6 +1072,25 @@ class Workspace {
     _writeItems(project, const <ProjectItem>[]);
   }
 
+  /// 把「实现清单」的一条**建成某个事件末尾的一条主线任务**（Q24：规划 → 执行的桥）。
+  ///
+  /// 这是清单与事件之间**唯一**的连接动作，而且是一次性的：
+  ///   · 只读条目的文本，**条目本身一个字都不动**（不删除、也不自动打勾）——
+  ///     清单只是一份笔记，删不删由用户决定（《定义与边界》§2.1 / §2.3）；
+  ///   · 建完**不建立任何联动**：之后勾清单不影响那条任务，反之亦然。
+  ///     这是刻意定的口径，不是还没做完。
+  ///
+  /// 落点就是 [createTask]：标题取条目文本、没有父节点，于是排在事件主线的末尾。
+  Task createTaskFromProjectItem({
+    required String projectId,
+    required String itemId,
+    required String eventId,
+  }) {
+    final project = _requireProject(projectId);
+    final item = project.items[_itemIndex(project, itemId)];
+    return createTask(eventId: eventId, title: item.text);
+  }
+
   /// 用整理后的正文替换「实现」文本（AI 整理写回走这里）。
   void replaceImplementation(String projectId, String text) {
     final project = _requireProject(projectId);
@@ -1153,6 +1172,50 @@ class Workspace {
       DocName.events,
       event.copyWith(name: name?.trim(), archived: archived, updatedAt: Ids.nowMillis()),
     );
+    persist();
+  }
+
+  /// 事件列表的排序域：**未删除、未归档**，按 `order` 升序 —— 就是事件页显示的那一批。
+  ///
+  /// 已归档的事件不在里面：它们在归档区里，不该被列表上的"挪一格"顺手拖进来。
+  List<Event> _orderedEvents() {
+    final list = liveEvents.where((e) => !e.archived).toList(growable: false);
+    list.sort((a, b) => compareByOrder(a.order, a.id, b.order, b.id));
+    return list;
+  }
+
+  /// 事件还能不能往这个方向挪一格（Q28）——与任务侧的
+  /// [canMoveTaskWithinLine] 同一套口径：到头了要给一句反馈，不能静默。
+  bool canMoveEventWithinList(String id, {required bool up}) {
+    final event = findEvent(id);
+    if (event == null || event.deleted || event.archived) return false;
+
+    final list = _orderedEvents();
+    final index = list.indexWhere((each) => each.id == id);
+    if (index < 0) return false;
+    final target = up ? index - 1 : index + 1;
+    return target >= 0 && target < list.length;
+  }
+
+  /// 上移 / 下移一个事件 = 与相邻的那个**交换 `order`**（Q28）。
+  ///
+  /// 与任务侧的"往上 / 往下挪一格"是同一件事、同一套做法：列表顺序的唯一依据
+  /// 就是 `order`，"插到某处"只能靠交换相邻两条。到两端就是空操作，
+  /// 由调用方按 [canMoveEventWithinList] 给一句提示。
+  void moveEventWithinList(String id, {required bool up}) {
+    final event = findEvent(id);
+    if (event == null || event.deleted) throw const RuleViolation('事件不存在');
+    if (event.archived) throw const RuleViolation('已归档的事件不参与排序');
+    if (!canMoveEventWithinList(id, up: up)) return;
+
+    final list = _orderedEvents();
+    final index = list.indexWhere((each) => each.id == id);
+    final target = up ? index - 1 : index + 1;
+    final other = list[target];
+
+    final now = Ids.nowMillis();
+    _upsert(DocName.events, event.copyWith(order: other.order, updatedAt: now));
+    _upsert(DocName.events, other.copyWith(order: event.order, updatedAt: now));
     persist();
   }
 
@@ -1292,6 +1355,21 @@ class Workspace {
   /// `materializeTaskChain`）：分叉 / 合流要用户先理解"支路 / 分叉点 / 合流点"
   /// 三个概念，与"快速理清一件事的脉络"冲突。并行两条线请**开两个事件**。
 
+  /// 主线节点还能不能往这个方向挪一格（Q27）。
+  ///
+  /// 界面用它把"挪得动"与"已经在最前面 / 最后面"分开：到头的动作要**说一句**，
+  /// 不能点了毫无反应 —— 静默的空操作在用户那边等于"这个按钮坏了"。
+  bool canMoveTaskWithinLine(String id, {required bool up}) {
+    final task = findTask(id);
+    if (task == null || task.deleted || task.parentId != null) return false;
+
+    final line = mainLineOf(task.eventId);
+    final index = line.indexWhere((each) => each.id == id);
+    if (index < 0) return false;
+    final target = up ? index - 1 : index + 1;
+    return target >= 0 && target < line.length;
+  }
+
   /// 把一条主线节点挪到链路的下一个位置（上移 / 下移）。
   ///
   /// 顺序是本层唯一的排序信息，所以"插到某处"= 交换相邻两个节点的 `order`。
@@ -1406,26 +1484,137 @@ class Workspace {
     return ids;
   }
 
+  // ------------------------------------------------------------ 批量任务动作（Q26）
+
+  /// 批量动作共用的取数：按传入顺序逐个查，任何一个不存在就整批拒绝。
+  List<Task> _requireTasks(Iterable<String> ids) {
+    final out = <Task>[];
+    for (final id in ids) {
+      final task = findTask(id);
+      if (task == null || task.deleted) throw const RuleViolation('任务不存在');
+      out.add(task);
+    }
+    return out;
+  }
+
+  /// 批量设 / 清到期日。
+  ///
+  /// 与 [assignInspirations] 同一套做法：**先整体校验再落盘** —— 一条不合法就
+  /// 一条都不动，并给出一句能读懂的原因。逐条调用会让每次 `persist()` 都整份
+  /// 重写数据文件并轮转备份，批量场景下既慢又会留下"改了一半"的状态。
+  ///
+  /// 已归档的任务拒绝排期：归档是"不看了"，而到期日唯一的用处就是**催办**
+  /// （`overdueTasks()` 本来就排除已归档）—— 给一条不看的任务排期是空动作，
+  /// 与其静默生效，不如说清"先取消归档"。
+  void setTasksDue(Iterable<String> ids, String? dueAt) {
+    final targets = _requireTasks(ids);
+    if (targets.isEmpty) return;
+    for (final task in targets) {
+      if (task.archived) {
+        throw RuleViolation('「${task.title}」已经归档了 —— 先取消归档再排期');
+      }
+    }
+
+    final now = Ids.nowMillis();
+    for (final task in targets) {
+      _upsert(DocName.tasks, task.copyWith(dueAt: dueAt, updatedAt: now));
+    }
+    persist();
+  }
+
+  /// 批量归档会动到的 id 集合：每条**连同各自的子任务**（与单条
+  /// [setTaskArchived] 同一条级联规则）。
+  ///
+  /// 界面拿它说清"我选了 3 条，一共动了 7 条"（Q26 的二次确认）；真正落盘用的
+  /// 是**同一个集合**，所以确认框上的数字与改动条数永远对得上。
+  Set<String> taskArchiveImpact(Iterable<String> ids, {required bool archived}) {
+    final out = <String>{};
+    for (final id in ids) {
+      final task = findTask(id);
+      if (task == null || task.deleted) continue;
+      out.addAll(cascadeArchiveIds(taskTree, id, archived));
+    }
+    return out;
+  }
+
+  /// 批量归档 / 取消归档（级联子任务，与单条 [setTaskArchived] 同一条规则）。
+  ///
+  /// 同样**先整体校验再落盘**：已经处于目标状态的条目会让整批停下并说明原因 ——
+  /// 否则用户看到的是"批量归档成功"，而里面有几条其实早就归档了，
+  /// 报出来的条数与实际改动对不上。
+  void setTasksArchived(Iterable<String> ids, bool archived) {
+    final targets = _requireTasks(ids);
+    if (targets.isEmpty) return;
+    for (final task in targets) {
+      if (task.archived == archived) {
+        throw RuleViolation(
+          archived ? '「${task.title}」已经归档过了' : '「${task.title}」本来就没有归档',
+        );
+      }
+    }
+
+    final idsToWrite = taskArchiveImpact(
+      targets.map((task) => task.id),
+      archived: archived,
+    );
+    final now = Ids.nowMillis();
+    for (final id in idsToWrite) {
+      final task = findTask(id);
+      if (task != null) {
+        _upsert(DocName.tasks, task.copyWith(archived: archived, updatedAt: now));
+      }
+    }
+
+    // 取消归档会把一条主线任务**重新拉回判定域**（Q29）：已完成的事件若因此
+    // 不再满足条件，同样退回 —— 与单条 [setTaskArchived] 收口在同一处。
+    _revertIncompleteDoneEvents(targets.map((task) => task.eventId), now);
+    persist();
+  }
+
   /// 移动任务（含跨事件）。
   ///
-  /// 跨事件移动时**父引用强制归零**（设计文档 4.11：禁止跨事件父子）——
-  /// 调用方即便沿用旧父节点，也不会写出非法状态。
+  /// 三条口径：
+  ///   · **整棵子树一起走**（Q7）：任务树是一体的。只改被移那一条的 `event_id`，
+  ///     它的下级会留在原事件 —— 两个事件里都看不见它们，而父任务依旧被
+  ///     "未处理的子节点"阻塞（点勾选才报错）。这违反《数据契约》§4.3：
+  ///     `parent_task_id != null` → 父任务必须存在且 `event_id` 相同；
+  ///   · **归属决定类型**（《数据契约》§4.3：`standard ⟺ parent_task_id == null`）：
+  ///     提到主线就写 `standard`，挂到节点下就写 `subtask`。只改 `parent_id`
+  ///     不改 `task_type`，会留下"`subtask` + 空父节点"这种非法组合；
+  ///   · **跨事件移动时父引用强制归零**（设计文档 4.11：禁止跨事件父子）——
+  ///     调用方即便沿用旧父节点，也不会写出非法状态。
+  ///
+  /// 老数据里的 `parallel` 只在**归属真的变了**时才改写：没换父节点的移动
+  /// 原样留着它（《数据契约》§7：不许静默改写历史枚举值）。
   void moveTask(String id, {String? newParentTaskId, String? newEventId}) {
     final task = findTask(id);
-    if (task == null) throw const RuleViolation('任务不存在');
+    if (task == null || task.deleted) throw const RuleViolation('任务不存在');
     final targetEvent = newEventId ?? task.eventId;
-    if (findEvent(targetEvent) == null) throw const RuleViolation('目标事件不存在');
+    final event = findEvent(targetEvent);
+    if (event == null || event.deleted) throw const RuleViolation('目标事件不存在');
 
     final crossEvent = targetEvent != task.eventId;
     final parent = crossEvent ? null : newParentTaskId;
+    final parentChanged = parent != task.parentId;
+
+    // 自身 + 全部后代：跟着一起改归属，链上的顺序与父子关系一概不动
+    final subtreeIds =
+        taskTree.subtreeOf(id).map((node) => node.id).toList(growable: false);
+    final descendantCount = subtreeIds.length - 1;
 
     if (parent != null) {
       final parentTask = findTask(parent);
       if (parentTask == null || parentTask.deleted) throw const RuleViolation('父任务不存在');
       if (parentTask.eventId != targetEvent) throw const RuleViolation('父任务属于其它事件');
-      if (!parentTask.canHaveChild(task.taskType)) {
+      // 只有 `standard` / 历史 `parallel` 能装东西，`subtask` 是叶子
+      if (!parentTask.canHaveChild(TaskType.subtask)) {
+        throw RuleViolation('「${parentTask.title}」是子任务，下面不能再挂东西');
+      }
+      // 挂到节点下 = 自己变成 `subtask`，而子任务不能再有下级
+      if (parentChanged && descendantCount > 0) {
         throw RuleViolation(
-          '${parentTask.taskType.wire} 任务不能挂 ${task.taskType.wire} 子任务',
+          '这条任务下面还有 $descendantCount 个下级 —— 挂到别的节点下它就成了子任务，'
+          '而子任务不能再有下级。先把下级移走，或者把它留在主线上',
         );
       }
     }
@@ -1439,19 +1628,37 @@ class Workspace {
     );
     if (!check.allowed) throw RuleViolation(check.reason ?? '不能移动');
 
+    final now = Ids.nowMillis();
+    // 归属变了才动 `task_type`：没换父节点的移动不该顺手改写历史类型
+    final nextType = !parentChanged
+        ? task.taskType
+        : (parent == null ? TaskType.standard : TaskType.subtask);
+    // 换了归属或换了事件，就在新的一层里排到末尾（与新建任务的落点一致）
+    final placeAtEnd = parentChanged || crossEvent;
+
     _upsert(
       DocName.tasks,
       task.copyWith(
         eventId: targetEvent,
         parentId: parent,
-        order: _nextOrder(_siblingOrders(DocName.tasks, parent)),
-        updatedAt: Ids.nowMillis(),
+        taskType: nextType,
+        order: placeAtEnd
+            ? _nextOrder(_siblingOrders(DocName.tasks, parent))
+            : task.order,
+        updatedAt: now,
       ),
     );
 
+    for (final nodeId in subtreeIds) {
+      if (nodeId == id) continue;
+      final node = findTask(nodeId);
+      if (node == null || node.deleted) continue;
+      _upsert(DocName.tasks, node.copyWith(eventId: targetEvent, updatedAt: now));
+    }
+
     // 移进 / 移出 / 改变归属都会动到"某事件下参与判定的主线任务集合"（Q29）：
     // 移出的事件不再多一条，移进的事件可能从此不再满足完成条件 —— 两头都收口。
-    _revertIncompleteDoneEvents(<String>[task.eventId, targetEvent], Ids.nowMillis());
+    _revertIncompleteDoneEvents(<String>[task.eventId, targetEvent], now);
     persist();
   }
 

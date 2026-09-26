@@ -89,6 +89,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
     showToast(context, message, error: error);
   }
 
+  /// 这个事件下**已归档的主线节点**有几个（只在任务线为空时用来解释"为什么空"）。
+  int _archivedMainLineCount() => app.ws.liveTasks
+      .where((t) => t.eventId == eventId && t.parentId == null && t.archived)
+      .length;
+
   /// 这个任务是否还有未处理的直接子任务（决定状态按钮显不显示锁形）。
   ///
   /// 与任务线里那个「下级 d/t」**同一套取数**（Q18）：两处都排除已归档的子任务 ——
@@ -225,7 +230,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                   child: Text(
-                    '这条任务线还是空的 —— 一条线就是一件事的脉络，一个节点接着一个节点往下走',
+                    // 「空了」有两种（Q18）：新事件确实没任务，和节点全被归档了。
+                    // 已归档节点不再画在任务线上，所以后者必须说清去哪找回。
+                    _archivedMainLineCount() > 0
+                        ? '这条线的 ${_archivedMainLineCount()} 个主线节点都已归档 —— '
+                            '任务线只画未归档的节点；去「更多 → 归档区 → 已归档」取消归档'
+                        : '这条任务线还是空的 —— 一条线就是一件事的脉络，一个节点接着一个节点往下走',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )
@@ -708,16 +718,19 @@ class _TaskLine extends StatelessWidget {
         host.beginRename(task.id);
         break;
       case 'moveUp':
-        host.moveInLine(task.id, up: true);
+        _moveInLine(context, up: true);
         break;
       case 'moveDown':
-        host.moveInLine(task.id, up: false);
+        _moveInLine(context, up: false);
         break;
       case 'due':
         await setTaskDueAction(context, app, task);
         break;
       case 'clearDue':
         await clearTaskDueAction(context, app, task);
+        break;
+      case 'parent':
+        await changeTaskParentAction(context, app, task);
         break;
       case 'move':
         await moveTaskToEventAction(context, app, task);
@@ -732,6 +745,16 @@ class _TaskLine extends StatelessWidget {
         await deleteTaskAction(context, app, task);
         break;
     }
+  }
+
+  /// 在链上挪一格。**已经在两端时要说一句**（Q27）——
+  /// 静默的空操作在用户那边等于"这个按钮坏了"。
+  void _moveInLine(BuildContext context, {required bool up}) {
+    if (!host.app.ws.canMoveTaskWithinLine(task.id, up: up)) {
+      showToast(context, up ? '已经是最前面了' : '已经到最后了');
+      return;
+    }
+    host.moveInLine(task.id, up: up);
   }
 
   Future<void> _showActions(BuildContext context) async {
@@ -863,6 +886,9 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
       const TaskAction('clearDue', '清除到期日', Icons.event_busy_outlined),
     );
   }
+  // 归属：提到主线 / 挂到某个节点下（Q27）。与「移到其它事件…」是两件事 ——
+  // 一个改"属于哪条线"，一个改"挂在线上的哪一层"。
+  actions.add(const TaskAction('parent', '改归属…', Icons.account_tree_outlined));
   actions.add(const TaskAction('move', '移到其它事件…', Icons.swap_horiz));
   actions.add(
     task.archived

@@ -3,14 +3,17 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/common/format.dart';
 import 'package:guideline/ui/more/all_tasks_page.dart';
 
-/// 「全部任务」的这两条（实机反馈）：
+/// 「全部任务」的这几条：
 ///   · 顶上那排「全部 / 未完成 / 已完成 / 已搁置」分类**整行去掉**；
 ///   · 任务行：**左边只放任务名**，箭头没了，**到期日与完成圆钮靠右对齐**，
-///     所属事件仍在名字下面那一行。
+///     所属事件仍在名字下面那一行；
+///   · Q26：多选（长按进入、点条目切换、「全选」只作用于当前可见项）+
+///     批量设到期日 / 批量归档。
 void main() {
   late Directory tempDir;
 
@@ -195,5 +198,122 @@ void main() {
     expect(find.textContaining('3 天后'), findsOneWidget);
     expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
     expect(find.byIcon(Icons.chevron_right), findsNothing);
+  });
+
+  testWidgets('多选两条 → 批量设到期日：两条都变了、也落了盘（Q26）', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final first = app.ws.createTask(eventId: event.id, title: '第一条');
+    final second = app.ws.createTask(eventId: event.id, title: '第二条');
+
+    await openAllTasks(tester, app);
+
+    // 长按进入多选（与灵感页同一套习惯）
+    await tester.longPress(find.text('第一条'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 条'), findsOneWidget);
+
+    // 多选里点条目 = 切换选中（不再进事件详情）。
+    // 这时整行由 `AbsorbPointer` 接管，点的落点是那一行而不是文字，
+    // 所以关掉"没点到文字"的提醒。
+    await tester.tap(find.text('第二条'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 条'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('设到期日'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    // 选择器初值就是今天，直接确认 → 两条都设成今天
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    final today = Ids.todayDate();
+    expect(app.ws.findTask(first.id)!.dueAt, today);
+    expect(app.ws.findTask(second.id)!.dueAt, today);
+    expect(find.text('已选 2 条'), findsNothing, reason: '成功之后退出多选');
+
+    // 落盘：重新装配一次还读得到
+    final reloaded = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    expect(reloaded.ws.findTask(first.id)!.dueAt, today);
+    expect(reloaded.ws.findTask(second.id)!.dueAt, today);
+  });
+
+  testWidgets('批量归档：二次确认说清影响条数（含子任务），确认后父子一起归档（Q26）', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final main = app.ws.createTask(eventId: event.id, title: '主线任务');
+    final child = app.ws.createTask(
+      eventId: event.id,
+      title: '子任务甲',
+      parentTaskId: main.id,
+      type: TaskType.subtask,
+    );
+    final other = app.ws.createTask(eventId: event.id, title: '另一条');
+
+    await openAllTasks(tester, app);
+
+    await tester.longPress(find.text('主线任务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('另一条'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('归档'));
+    await tester.pumpAndSettle();
+    // 归档是级联的："我选了 2 条"与"一共动了 3 条"必须都说清
+    expect(find.textContaining('连同它们的子任务一共 3 条'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, '归档'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findTask(main.id)!.archived, isTrue);
+    expect(app.ws.findTask(child.id)!.archived, isTrue, reason: '归档级联子任务');
+    expect(app.ws.findTask(other.id)!.archived, isTrue);
+
+    // 落盘
+    final reloaded = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    expect(reloaded.ws.findTask(child.id)!.archived, isTrue);
+  });
+
+  testWidgets('批量归档里有一条已经归档（数据在别处变了）：整批不动并说明原因（Q26）', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final first = app.ws.createTask(eventId: event.id, title: '第一条');
+    final second = app.ws.createTask(eventId: event.id, title: '第二条');
+
+    await openAllTasks(tester, app);
+    await tester.longPress(find.text('第一条'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('第二条'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    // 模拟"数据在别处变了"：直接改数据层（不走 `app.run`，所以这一帧界面还没重建）
+    app.ws.setTaskArchived(second.id, true);
+
+    await tester.tap(find.byTooltip('归档'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, '归档'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已经归档过了'), findsOneWidget, reason: '要给出可读原因');
+    expect(app.ws.findTask(first.id)!.archived, isFalse, reason: '一条不合法就整批不动');
+  });
+
+  testWidgets('「全选」按当前可见项算，也能一键取消（Q26）', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    app.run(() => app.ws.createTask(eventId: event.id, title: '第一条'));
+    app.run(() => app.ws.createTask(eventId: event.id, title: '第二条'));
+
+    await openAllTasks(tester, app);
+    await tester.longPress(find.text('第一条'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 条'), findsOneWidget);
+
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 0 条'), findsOneWidget);
   });
 }

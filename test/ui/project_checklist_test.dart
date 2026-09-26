@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/events/event_detail_page.dart';
 import 'package:guideline/ui/projects/project_checklist.dart';
 
 import 'scroll_finders.dart';
@@ -393,5 +394,57 @@ void main() {
     expect(controller.text, '# 只留这一行\n');
     expect(controller.text, isNot(contains('不想给出去')));
     expect(project.id, isNotEmpty);
+  });
+
+  testWidgets('建成任务：选一个事件 → 任务真的建出，条目与正文一个字都没动（Q24）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目A');
+    app.run(() => app.ws.addProjectItem(project.id, '写解析层'));
+    app.run(() => app.ws.updateProject(project.id, implementation: '先把契约冻结'));
+    final event = app.ws.createEvent(name: '发布线');
+
+    await openProject(tester, app, '清单项目A');
+    await scrollTo(tester, find.text('写解析层'));
+    await tester.longPress(find.text('写解析层'));
+    await tester.pumpAndSettle();
+    expect(find.text('建成任务…'), findsOneWidget, reason: '规划 → 执行的桥');
+    await tester.tap(find.text('建成任务…'));
+    await tester.pumpAndSettle();
+
+    // 事件选择器沿用现成的那一个
+    await tester.tap(find.text('发布线'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.mainLineOf(event.id).map((t) => t.title), <String>['写解析层']);
+
+    // **条目不删、也不自动打勾**：它只是一份笔记
+    final reloaded = app.ws.findProject(project.id)!;
+    expect(reloaded.items.single.text, '写解析层');
+    expect(reloaded.items.single.done, isFalse);
+    expect(reloaded.implementation, '先把契约冻结', reason: '正文也一个字都不动');
+
+    // 建完要交代"建到哪去了" + 条目还在 + 能跳过去
+    expect(find.textContaining('已建成任务：发布线'), findsOneWidget);
+    expect(find.textContaining('清单条目留着'), findsOneWidget);
+    await tester.tap(find.text('去看看'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EventDetailPage), findsOneWidget);
+  });
+
+  testWidgets('建成任务：一个事件都没有时，说清先去开一条线（Q24）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目B');
+    app.run(() => app.ws.addProjectItem(project.id, '写解析层'));
+
+    await openProject(tester, app, '清单项目B');
+    await scrollTo(tester, find.text('写解析层'));
+    await tester.longPress(find.text('写解析层'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('建成任务…'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('先去「事件」里开一条线'), findsOneWidget);
+    expect(app.ws.liveTasks, isEmpty);
+    expect(app.ws.findProject(project.id)!.items.single.text, '写解析层');
   });
 }
