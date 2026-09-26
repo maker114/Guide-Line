@@ -564,8 +564,15 @@ void main() {
     );
 
     // 收起 / 展开分类一：数字都不该变（原来取的是"画出来的行数"，一收就变小）。
-    // 新版把展开箭头去掉了 —— 行首那根竖色条本身就是展开控件。
-    await tester.tap(find.byKey(projectColorBarKey(category.id)));
+    // 展开 / 收起走行尾的 ⋮ 菜单（行首那根色条不再是展开控件）。
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(projectRowKey(category.id)),
+        matching: find.byType(PopupMenuButton<String>),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('收起下级'));
     await tester.pumpAndSettle();
     expect(find.text('项目   3'), findsOneWidget, reason: '收起之后数字不变');
 

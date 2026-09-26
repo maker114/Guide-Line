@@ -5,16 +5,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
+import 'package:guideline/ui/projects/project_detail_page.dart';
 import 'package:guideline/ui/projects/project_tab.dart';
 
-/// 项目页列表的几件事（实机反馈 + Q1/Q2 + 2026-09-26 行首标识改版）：
-///   · **分类行没有展开箭头**：最左那根竖色条**本身就是**展开 / 收起控件；
-///   · **热区够大**：条只有 4dp 宽，点在条右侧十几 dp 处也要能展开；
-///   · **展开后是竖轨**：分类那一段向下延伸，每一行各画自己那一段、同色、首尾相接；
-///   · **子行保留自己的颜色圆点**（画在竖轨右侧约 14dp 处），没设色仍是灰空心圆；
-///   · **文本整体左移**，标题仍在同一条竖线上，且与竖轨之间留 ≥8dp；
-///   · **根目标的竖条不可点、不延伸**；
-///   · 展开 / 收起后子行的出现与消失；
+/// 项目页列表的几件事（实机反馈 + Q1/Q2 + 2026-09-26 行首标识第二版）：
+///   · **标题前是标识**：分类行与根目标行是一根**竖色条**，子行是**自己的色点**，
+///     一行里只出现一个记号；
+///   · **没有展开箭头**、**也不点色条展开**（点色条就是点这一行）——
+///     展开 / 收起收进行尾的 ⋮ 菜单，且只有"有下级"的分类行才有这一项；
+///   · **文本整体左移**：根行左内边距 16dp、子行 28dp；分类行与根目标行的
+///     标题起始竖线一致，子行整齐地再缩进一档；
+///   · **没设色的项目用灰条补齐**（色条）/ **灰空心圆**（色点），不留空位；
+///   · **根目标行没有下级**：菜单里没有展开 / 收起那一项；
 ///   · **项目状态图标与完成删除线都不再出现**（项目没有完成态，Q1）；
 ///   · **分类行只显示 名字 + 汇总**（Q2）：目的 / 日期一律不上树。
 void main() {
@@ -30,8 +32,8 @@ void main() {
 
   /// 开 App 并切到「项目」页（外壳默认停在灵感页）。
   ///
-  /// 三行根项目 + 两条子目标，颜色都**显式设定**：竖轨 / 短条 / 圆点的颜色
-  /// 要能一眼对上是哪一个项目的颜色，不能靠"新建时自动分配"的运气。
+  /// 三行根项目 + 两条子目标，颜色都**显式设定**：色条 / 色点要能一眼对上是
+  /// 哪一个项目的颜色，不能靠"新建时自动分配"的运气。
   Future<AppController> boot(WidgetTester tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final category = app.ws.createProject(title: '带子项目的');
@@ -62,23 +64,53 @@ void main() {
   Finder inTab(Finder matching) =>
       find.descendant(of: find.byType(ProjectTab), matching: matching);
 
-  /// 某一行的标识槽里那条竖线（短色条 / 轨段都用同一个 Key）。
-  Finder railOf(String projectId) =>
+  /// 某一行的整体（`ListTile`）—— 用来量"标题相对行左缘的内边距"。
+  Finder rowOf(String projectId) => inTab(find.byKey(projectRowKey(projectId)));
+
+  /// 某一行**标题前那根色条**（只有根行挂这个 Key；子行标题前是色点）。
+  Finder barOf(String projectId) =>
       inTab(find.byKey(projectColorBarKey(projectId)));
 
-  /// 竖线的渲染颜色（色条本体是共用控件 `ProjectColorBar`，颜色在它的
+  /// 某一行的色点（子行才有）。
+  Finder markerOf(String projectId) => find.descendant(
+        of: rowOf(projectId),
+        matching: find.byType(ProjectMarker),
+      );
+
+  /// 某一行的 ⋮ 菜单按钮。
+  Finder menuButtonOf(String projectId) => find.descendant(
+        of: rowOf(projectId),
+        matching: find.byType(PopupMenuButton<String>),
+      );
+
+  /// 打开某一行的 ⋮ 菜单。
+  Future<void> openMenu(WidgetTester tester, String projectId) async {
+    await tester.tap(menuButtonOf(projectId));
+    await tester.pumpAndSettle();
+  }
+
+  /// 关掉 ⋮ 菜单（点菜单外面的遮罩）。
+  Future<void> closeMenu(WidgetTester tester) async {
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pumpAndSettle();
+  }
+
+  /// 色条的渲染颜色（色条本体是共用控件 `ProjectColorBar`，颜色在它的
   /// `Container` 上）。
-  Color? railColorOf(WidgetTester tester, String projectId) {
+  Color? barColorOf(WidgetTester tester, String projectId) {
     final widget = tester.widget<Container>(
-      find.descendant(of: railOf(projectId), matching: find.byType(Container)),
+      find.descendant(of: barOf(projectId), matching: find.byType(Container)),
     );
     return (widget.decoration as BoxDecoration?)?.color;
   }
 
-  testWidgets('分类行没有展开箭头，最左就是那根竖色条', (tester) async {
+  testWidgets('分类行与根目标行：标题前是竖色条，且没有展开箭头', (tester) async {
     final app = await boot(tester);
     final category = app.ws.liveProjects.firstWhere(
       (p) => p.title == '带子项目的',
+    );
+    final colored = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '有颜色没子项目',
     );
 
     expect(
@@ -88,172 +120,116 @@ void main() {
     );
     expect(
       find.descendant(
-        of: inTab(find.byKey(projectRowKey(category.id))),
+        of: rowOf(category.id),
         matching: find.byType(AnimatedRotation),
       ),
       findsNothing,
       reason: '连"转过去"的那套控件也不该留',
     );
 
-    final rail = tester.getRect(railOf(category.id));
-    final row = tester.getRect(inTab(find.byKey(projectRowKey(category.id))));
+    // 分类行：标题左侧紧挨一条**自己的颜色**的竖条
+    final bar = tester.getRect(barOf(category.id));
+    final row = tester.getRect(rowOf(category.id));
     final title = tester.getRect(find.text('带子项目的'));
+    expect(barColorOf(tester, category.id), colorOfHex('#336699'));
     expect(
-      rail.left,
-      closeTo(row.left, 0.5),
-      reason: '竖条贴在这一行的最左（$rail vs $row）',
+      bar.left - row.left,
+      closeTo(16, 0.5),
+      reason: '色条在标题前（行左内边距 16dp），不再占最左那一整列',
     );
     expect(
-      title.left - rail.right,
-      greaterThanOrEqualTo(8),
-      reason: '标题与竖条之间要留 ≥8dp，不能贴在一起',
+      title.left - bar.right,
+      closeTo(6, 0.5),
+      reason: '色条与标题之间 6dp，紧挨着但不贴死',
+    );
+    expect(
+      bar.height,
+      greaterThan(bar.width),
+      reason: '标题前立的是「竖」条',
+    );
+
+    // 根目标行同档：自己的颜色、同样的内边距、同一条标题竖线
+    expect(barColorOf(tester, colored.id), colorOfHex('#009966'));
+    expect(
+      tester.getRect(barOf(colored.id)).left -
+          tester.getRect(rowOf(colored.id)).left,
+      closeTo(16, 0.5),
+    );
+    expect(
+      tester.getRect(find.text('有颜色没子项目')).left,
+      closeTo(title.left, 0.5),
+      reason: '分类行与根目标行的标题起始竖线一致',
+    );
+
+    // 分类行里没有色点（一个记号只出现一次）
+    expect(markerOf(category.id), findsNothing);
+  });
+
+  testWidgets('没设标识色的根行：标题前用灰条补齐，而不是留空', (tester) async {
+    final app = await boot(tester);
+    final plain = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '没颜色没子项目',
+    );
+    // 对比色取**另一个根层目标**（不是分类）：两边都是"标题前那一根色条"
+    final colored = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '有颜色没子项目',
+    );
+
+    final scheme = Theme.of(
+      tester.element(find.text('没颜色没子项目')),
+    ).colorScheme;
+    expect(barColorOf(tester, plain.id), scheme.outlineVariant, reason: '没设色 = 中性灰条');
+    expect(
+      barColorOf(tester, colored.id),
+      isNot(scheme.outlineVariant),
+      reason: '设了色就是那个色',
+    );
+
+    // 两条色条同宽同位（标题才会对齐）
+    expect(
+      tester.getRect(barOf(plain.id)).width,
+      tester.getRect(barOf(colored.id)).width,
+    );
+    expect(
+      tester.getRect(barOf(plain.id)).left -
+          tester.getRect(rowOf(plain.id)).left,
+      closeTo(16, 0.5),
     );
   });
 
-  testWidgets('点最左的竖色条就能展开 / 再点就能收起（热区比 4dp 的条宽得多）', (tester) async {
+  testWidgets('子行：标题前是子项自己的颜色圆点（没设色 = 灰空心圆），不画色条', (tester) async {
     final app = await boot(tester);
     final category = app.ws.liveProjects.firstWhere(
       (p) => p.title == '带子项目的',
     );
-
-    // 分类默认是展开的（`UiPrefs` 默认 true），两条子行都在
-    expect(inTab(find.text('子项目')), findsOneWidget);
-    expect(inTab(find.text('子项目乙')), findsOneWidget);
-
-    final rail = tester.getRect(railOf(category.id));
-    // **条本身只有 4dp 宽**：故意点在条右侧 12dp 处（条外面、槽位里面），
-    // 点不中就说明热区没做出来。
-    await tester.tapAt(Offset(rail.right + 12, rail.center.dy));
-    await tester.pumpAndSettle();
-
-    expect(app.isExpanded(category.id), isFalse, reason: '点色条 = 收起');
-    expect(
-      inTab(find.text('子项目')),
-      findsNothing,
-      reason: '收起后子行不画了',
-    );
-    expect(inTab(find.text('子项目乙')), findsNothing);
-    // 热区只做"展开 / 收起"这一件事：不该顺手把详情页推上来
-    expect(
-      inTab(find.text('带子项目的')),
-      findsOneWidget,
-      reason: '点色条不该打开详情页（那一槽是展开控件，不是整行的点击）',
-    );
-    expect(
-      tester.getRect(railOf(category.id)).height,
-      closeTo(18, 0.5),
-      reason: '收起时只剩分类自己那一段短色条，不往下延伸',
-    );
-
-    // 再点一次（这次正对竖条中心）就能展开
-    await tester.tap(railOf(category.id));
-    await tester.pumpAndSettle();
-    expect(app.isExpanded(category.id), isTrue, reason: '再点 = 展开');
-    expect(inTab(find.text('子项目')), findsOneWidget);
-    expect(inTab(find.text('子项目乙')), findsOneWidget);
-  });
-
-  testWidgets('展开后是竖轨：分类行与每个子行各一段，同色且首尾相接', (tester) async {
-    final app = await boot(tester);
-    final category = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '带子项目的',
-    );
-    expect(app.isExpanded(category.id), isTrue, reason: '这一组是展开态');
-
-    final rows = <String>['带子项目的', '子项目', '子项目乙'];
-    final rects = <String, Rect>{
-      for (final title in rows)
-        title: tester.getRect(railOf(
-          app.ws.liveProjects.firstWhere((p) => p.title == title).id,
-        )),
-    };
-
-    // 每一行都有一段自己的竖线，而且它占满整行高（不是 18dp 的短条）
-    for (final title in rows) {
-      final id = app.ws.liveProjects
-          .firstWhere((p) => p.title == title)
-          .id;
-      final row = tester.getRect(inTab(find.byKey(projectRowKey(id))));
-      expect(
-        rects[title]!.top,
-        closeTo(row.top, 0.5),
-        reason: '「$title」的轨段要从这一行顶端开始',
-      );
-      expect(
-        rects[title]!.bottom,
-        closeTo(row.bottom, 0.5),
-        reason: '「$title」的轨段要画到这一行末端（否则接缝处会有缝）',
-      );
-      expect(rects[title]!.height, greaterThan(18));
-    }
-
-    // 一条轨一个颜色：分类自己的颜色（子目标不是自己开一条轨）
-    final categoryColor = railColorOf(tester, category.id);
-    expect(categoryColor, colorOfHex('#336699'));
-    for (final title in <String>['子项目', '子项目乙']) {
-      final id = app.ws.liveProjects
-          .firstWhere((p) => p.title == title)
-          .id;
-      expect(
-        railColorOf(tester, id),
-        categoryColor,
-        reason: '「$title」那一段接着分类的轨，颜色必须一样',
-      );
-    }
-
-    // **连续**：相邻两段首尾相接（不是像素比对，是两段的上下边界重合）
-    expect(
-      rects['子项目']!.top,
-      closeTo(rects['带子项目的']!.bottom, 0.5),
-      reason: '分类那一段与第一条子行之间不能有缝',
-    );
-    expect(
-      rects['子项目乙']!.top,
-      closeTo(rects['子项目']!.bottom, 0.5),
-      reason: '两条子行之间不能有缝',
-    );
-    // 整条轨 = 三行各自的段拼起来
-    expect(
-      rects['子项目乙']!.bottom - rects['带子项目的']!.top,
-      closeTo(
-        rects['带子项目的']!.height +
-            rects['子项目']!.height +
-            rects['子项目乙']!.height,
-        0.5,
-      ),
-      reason: '这一组的竖轨应当正好覆盖分类行 + 全部可见子行',
-    );
-  });
-
-  testWidgets('子行仍有自己的颜色标记：圆点画在竖轨右侧，用的是子项自己的颜色', (tester) async {
-    final app = await boot(tester);
     final childA = app.ws.liveProjects.firstWhere((p) => p.title == '子项目');
     final childB = app.ws.liveProjects.firstWhere((p) => p.title == '子项目乙');
 
-    Finder markerOf(String id) => find.descendant(
-          of: inTab(find.byKey(projectRowKey(id))),
-          matching: find.byType(ProjectMarker),
-        );
+    // 子行不画色条：标题前只有自己那个圆点
+    expect(barOf(childA.id), findsNothing, reason: '子行不挂色条的 Key');
+    expect(
+      find.descendant(
+        of: rowOf(childA.id),
+        matching: find.byType(ProjectColorBar),
+      ),
+      findsNothing,
+      reason: '子行标题前是色点，不是色条',
+    );
 
-    // 子目标的圆点：自己的颜色（不是分类的颜色、也不是竖轨的颜色）
     final marker = tester.widget<ProjectMarker>(markerOf(childA.id));
-    expect(marker.color, '#cc3300', reason: '圆点用子项自己的颜色');
+    expect(marker.color, '#cc3300', reason: '圆点用**子项自己**的颜色');
     expect(
       marker.color,
-      isNot(railColorOf(tester, childA.id)),
-      reason: '圆点的颜色与竖轨的颜色是两件事',
+      isNot(category.color),
+      reason: '不是上级分类的颜色（竖轨那套已经取消）',
     );
 
-    // 圆点在竖轨**右侧**（圆心离竖轨右缘约 14dp），不叠在轨上
-    final dotRect = tester.getRect(markerOf(childA.id));
-    final railRect = tester.getRect(railOf(childA.id));
-    expect(dotRect.left, greaterThan(railRect.right));
-    expect(
-      dotRect.center.dx - railRect.right,
-      closeTo(14, 0.5),
-      reason: '口径：圆点画在竖轨右侧约 14dp 处',
-    );
-    expect(dotRect.width, closeTo(dotRect.height, 0.5), reason: '色点是正圆');
+    // 圆点在标题左侧那 18dp 的槽里，且是正圆
+    final dot = tester.getRect(markerOf(childA.id));
+    final dotRow = tester.getRect(rowOf(childA.id));
+    expect(dot.left - dotRow.left, closeTo(28, 0.5), reason: '子行左内边距 28dp，色点槽从这里起');
+    expect(dot.right, lessThan(tester.getRect(find.text('子项目')).left));
+    expect(dot.width, closeTo(dot.height, 0.5), reason: '色点是正圆');
 
     // 没设色的子项：灰色空心圆（既有行为，别丢）
     final plainMarker = tester.widget<ProjectMarker>(markerOf(childB.id));
@@ -266,17 +242,112 @@ void main() {
     expect(plainDecoration.border, isNotNull, reason: '没设色 = 有那圈灰描边');
   });
 
-  testWidgets('文本左移后，各行的标题仍在同一条竖线上', (tester) async {
+  testWidgets('色条不可点：点它不改变展开状态（它不是展开控件）', (tester) async {
+    final app = await boot(tester);
+    final category = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '带子项目的',
+    );
+    expect(app.isExpanded(category.id), isTrue, reason: '这一组默认展开');
+
+    await tester.tap(barOf(category.id));
+    await tester.pumpAndSettle();
+
+    expect(
+      app.isExpanded(category.id),
+      isTrue,
+      reason: '点色条不再展开 / 收起（那一版已经回退）',
+    );
+    expect(
+      find.byType(ProjectDetailPage),
+      findsOneWidget,
+      reason: '色条就在标题前、属于这一行：点它就是点这一行（打开详情），不是另一个控件',
+    );
+  });
+
+  testWidgets('⋮ 菜单：展开态给「收起下级」，点了真的收起', (tester) async {
+    final app = await boot(tester);
+    final category = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '带子项目的',
+    );
+    expect(app.isExpanded(category.id), isTrue);
+    expect(inTab(find.text('子项目')), findsOneWidget);
+
+    await openMenu(tester, category.id);
+    expect(find.text('收起下级'), findsOneWidget, reason: '展开态给「收起下级」');
+    expect(find.text('展开下级'), findsNothing);
+    // 原有项一个都不能少
+    for (final label in <String>['重命名', '移动到…', '归档', '删除']) {
+      expect(find.text(label), findsOneWidget, reason: '原有菜单项「$label」要留着');
+    }
+
+    await tester.tap(find.text('收起下级'));
+    await tester.pumpAndSettle();
+
+    expect(app.isExpanded(category.id), isFalse, reason: '菜单里点了就真的收起');
+    expect(inTab(find.text('子项目')), findsNothing, reason: '收起后子行不画了');
+    expect(inTab(find.text('子项目乙')), findsNothing);
+    expect(
+      inTab(find.text('带子项目的')),
+      findsOneWidget,
+      reason: '收起只影响下级，分类自己还在（也没顺手打开详情页）',
+    );
+    expect(find.byType(ProjectDetailPage), findsNothing);
+  });
+
+  testWidgets('⋮ 菜单：收起态给「展开下级」，点了真的展开', (tester) async {
+    final app = await boot(tester);
+    final category = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '带子项目的',
+    );
+    app.setExpanded(category.id, expanded: false);
+    await tester.pumpAndSettle();
+    expect(inTab(find.text('子项目')), findsNothing, reason: '先把它收起来');
+
+    await openMenu(tester, category.id);
+    expect(find.text('展开下级'), findsOneWidget, reason: '收起态给「展开下级」');
+    expect(find.text('收起下级'), findsNothing);
+
+    await tester.tap(find.text('展开下级'));
+    await tester.pumpAndSettle();
+
+    expect(app.isExpanded(category.id), isTrue, reason: '菜单里点了就真的展开');
+    expect(inTab(find.text('子项目')), findsOneWidget);
+    expect(inTab(find.text('子项目乙')), findsOneWidget);
+  });
+
+  testWidgets('没有下级的行：⋮ 菜单里没有展开 / 收起这一项', (tester) async {
+    final app = await boot(tester);
+    final plain = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '没颜色没子项目',
+    );
+    expect(
+      app.ws.childProjectsOf(plain.id),
+      isEmpty,
+      reason: '这一条确实没有下级',
+    );
+
+    await openMenu(tester, plain.id);
+    expect(find.text('展开下级'), findsNothing, reason: '没有下级就没有这一项');
+    expect(find.text('收起下级'), findsNothing);
+    for (final label in <String>['重命名', '移动到…', '归档', '删除']) {
+      expect(find.text(label), findsOneWidget, reason: '原有菜单项「$label」要留着');
+    }
+    await closeMenu(tester);
+  });
+
+  testWidgets('各行标题仍在同一条竖线上：根行 26dp、子行整齐地再缩进一档', (tester) async {
     final app = await boot(tester);
     final child = app.ws.liveProjects.firstWhere((p) => p.title == '子项目');
+    final category = app.ws.liveProjects.firstWhere(
+      (p) => p.title == '带子项目的',
+    );
 
-    // 三种不同的标识（分类的轨头、有色目标、无色目标）标题必须对齐
+    // 三行根项目（分类 + 有色目标 + 无色目标）的标题必须对齐
     final lefts = <String, double>{
       '带子项目的': tester.getRect(find.text('带子项目的')).left,
       '有颜色没子项目': tester.getRect(find.text('有颜色没子项目')).left,
       '没颜色没子项目': tester.getRect(find.text('没颜色没子项目')).left,
     };
-
     for (final entry in lefts.entries) {
       expect(
         entry.value,
@@ -285,146 +356,27 @@ void main() {
       );
     }
 
-    // 子行也走同一档左内边距（改版前子行比根行更靠右 6dp），
-    // 并且整列都比改版前更靠左：根行原来是 4+40+16=60、子行 36+18+12=66
-    final childLeft = tester.getRect(find.text('子项目')).left;
-    final childRow = tester.getRect(inTab(find.byKey(projectRowKey(child.id))));
+    // 根行：16dp 左内边距 + 4dp 色条 + 6dp 间距 = 标题左缘 26dp
+    final rootRow = tester.getRect(rowOf(category.id));
+    final rootLeft = lefts['带子项目的']! - rootRow.left;
+    expect(
+      rootLeft,
+      closeTo(26, 0.5),
+      reason: '根行标题左缘 = 16 + 4 + 6 = 26（行左缘 12，屏上 38；上一版是 60）',
+    );
+
+    // 子行：28dp 左内边距 + 18dp 色点槽 = 标题左缘 46dp，比根行再缩进一档
+    final childRow = tester.getRect(rowOf(child.id));
+    final childLeft = tester.getRect(find.text('子项目')).left - childRow.left;
     expect(
       childLeft,
-      closeTo(lefts['带子项目的']!, 0.5),
-      reason: '子行的标题与分类行的标题在同一条竖线上',
+      closeTo(46, 0.5),
+      reason: '子行标题左缘 = 28 + 18 = 46（屏上 58）',
     );
     expect(
-      childLeft - childRow.left,
-      lessThan(60),
-      reason: '左内边距要比改版前的 60 / 66 更小（文字整体左移）',
-    );
-  });
-
-  testWidgets('根目标的竖条：存在、不延伸、点了也不改变展开状态', (tester) async {
-    final app = await boot(tester);
-    final plain = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '没颜色没子项目',
-    );
-    // 给它一个"如果会被点开就会变"的初始状态
-    app.setExpanded(plain.id, expanded: false);
-    await tester.pumpAndSettle();
-
-    final rowFinder = inTab(find.byKey(projectRowKey(plain.id)));
-    expect(
-      find.descendant(of: rowFinder, matching: find.byType(ProjectMarker)),
-      findsNothing,
-      reason: '根目标没有上下级，槽里只有竖条、不该有色点',
-    );
-    // 槽位不接手势：点了照旧落到整行上（打开详情），不会变成展开控件
-    expect(
-      find.descendant(of: rowFinder, matching: find.byType(IgnorePointer)),
-      findsWidgets,
-      reason: '根目标的标识槽是 IgnorePointer，不接手势',
-    );
-
-    final rail = tester.getRect(railOf(plain.id));
-    expect(rail.width, closeTo(4, 0.5));
-    expect(
-      rail.height,
-      closeTo(18, 0.5),
-      reason: '不延伸：只有一条短色条',
-    );
-    expect(
-      railColorOf(tester, plain.id),
-      Theme.of(tester.element(find.text('没颜色没子项目'))).colorScheme.outlineVariant,
-      reason: '没设色用中性灰补齐，而不是留空',
-    );
-
-    await tester.tap(railOf(plain.id), warnIfMissed: false);
-    await tester.pumpAndSettle();
-    expect(
-      app.isExpanded(plain.id),
-      isFalse,
-      reason: '点了竖条也不该改变展开状态（它不是展开控件）',
-    );
-  });
-
-  testWidgets('没设标识色的目标：最左槽位用灰条补齐，而不是留空', (tester) async {
-    final app = await boot(tester);
-    final plain = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '没颜色没子项目',
-    );
-    // 对比色取**另一个根层目标**（不是分类）：两边都是"自己那一条短色条"
-    final colored = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '有颜色没子项目',
-    );
-
-    final scheme = Theme.of(tester.element(find.text('没颜色没子项目'))).colorScheme;
-    expect(railColorOf(tester, plain.id), scheme.outlineVariant, reason: '没设色 = 中性灰条');
-    expect(
-      railColorOf(tester, colored.id),
-      isNot(scheme.outlineVariant),
-      reason: '设了色就是那个色',
-    );
-    expect(colored.color, isNotNull);
-
-    // 两条色条占同样的位置（宽度一致），标题才会对齐
-    expect(
-      tester.getRect(railOf(plain.id)).width,
-      tester.getRect(railOf(colored.id)).width,
-    );
-  });
-
-  testWidgets('一行的标识槽里只有一个记号：分类是竖条、子目标是色点（批 B 第 ① 项）', (tester) async {
-    final app = await boot(tester);
-    final target = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '有颜色没子项目',
-    );
-    final category = app.ws.liveProjects.firstWhere(
-      (p) => p.title == '带子项目的',
-    );
-    final child = app.ws.liveProjects.firstWhere((p) => p.title == '子项目');
-
-    // 根层目标：这一行里**恰好**一根色条，且它在标题左侧
-    final bar = railOf(target.id);
-    expect(bar, findsOneWidget);
-    expect(
-      find.descendant(
-        of: inTab(find.byKey(projectRowKey(target.id))),
-        matching: find.byType(ProjectColorBar),
-      ),
-      findsOneWidget,
-      reason: '一个记号只出现一次：槽里那一根，标题前不该再有',
-    );
-    expect(
-      tester.getRect(bar).right,
-      lessThanOrEqualTo(tester.getRect(find.text('有颜色没子项目')).left),
-      reason: '这根竖条要落在标题左侧的槽位里',
-    );
-    expect(
-      tester.getRect(bar).height,
-      greaterThan(tester.getRect(bar).width),
-      reason: '槽位里放的是「竖」条',
-    );
-
-    // 分类行：也是竖条（展开时是轨头），没有箭头、没有色点
-    expect(railOf(category.id), findsOneWidget);
-    expect(
-      find.descendant(
-        of: inTab(find.byKey(projectRowKey(category.id))),
-        matching: find.byType(ProjectMarker),
-      ),
-      findsNothing,
-    );
-
-    // 子目标：仍然是色点，不是色条
-    expect(
-      find.descendant(
-        of: inTab(find.byKey(projectRowKey(child.id))),
-        matching: find.byType(ProjectMarker),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      app.ws.childProjectsOf(category.id),
-      isNotEmpty,
-      reason: '分类确实是"有下级"的那一条',
+      childLeft - rootLeft,
+      closeTo(20, 0.5),
+      reason: '子行整齐地再缩进一档',
     );
   });
 
