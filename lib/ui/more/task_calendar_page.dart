@@ -8,6 +8,7 @@ import '../../core/models/task.dart';
 import '../common/color_picker.dart';
 import '../common/format.dart';
 import '../common/task_tile.dart';
+import '../theme/shape_tokens.dart';
 import 'task_grouping.dart';
 
 /// 「接下来的任务」的**任务日历**：按月看哪几天有任务、分别属于哪条线。
@@ -299,7 +300,7 @@ class _DayCell extends StatelessWidget {
     return InkWell(
       key: calendarDayKey(date),
       onTap: () => onTap(date),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppShapes.nestedRadius),
       child: SizedBox(
         height: 46,
         child: Center(

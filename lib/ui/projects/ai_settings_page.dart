@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
 import '../common/dialogs.dart';
+import '../theme/shape_tokens.dart';
 
 /// AI 设置（设计文档 §2.2）。
 ///
@@ -178,7 +179,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       decoration: BoxDecoration(
                         color: (_testOk ? theme.colorScheme.primary : theme.colorScheme.error)
                             .withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(AppShapes.nestedRadius),
                       ),
                       child: SelectableText(
                         _testResult!,
