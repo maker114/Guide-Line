@@ -1,0 +1,7 @@
+{
+  // 打开这个文件夹时，VS Code 会提示装这两个扩展（Flutter 会带上 Dart）
+  "recommendations": [
+    "Dart-Code.flutter",
+    "Dart-Code.dart-code"
+  ]
+}

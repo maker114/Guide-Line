@@ -28,10 +28,12 @@
 
 - **精简程序文件：删掉全仓零调用的死代码**（不改任何功能与界面）
   - `lib/features/workspace.dart`：删掉恒为空的 `_touch()` 及其 28 处调用、
-    只为它而算的 4 处 `touched` 集合、零调用的 `reorder()` 与 `updateInspirationText()`
-  - `lib/core/tree/task_flow.dart`：删掉 `predecessorsOf()`、`hasFork`、`hasJoin`；
-    `test/core/task_flow_test.dart`、`test/core/task_flow_rules_test.dart` 里对应的
-    三条断言一并去掉（`isFork` / `isJoin` / `predecessorCountOf` 仍在，界面照旧）
+    只为它而算的 4 处 `touched` 集合、零调用的 `reorder()`
+  - `lib/core/tree/task_flow.dart`：**不在本批** —— 该文件连同 `predecessorsOf()`、
+    `hasFork` / `hasJoin` 与 `isFork` / `isJoin` / `predecessorCountOf`，
+    以及 `test/core/task_flow_test.dart`、`test/core/task_flow_rules_test.dart`，
+    都在本批之前的**任务线收成一条链**那次重构（`3776f22`）里、随「走向边 / 分叉 / 合流」
+    一并删除了；本批没有再动它
   - 其余零调用成员：`Document.liveCount` / `tombstoneCount`、`Canonical.compact()`、
     `DocName.fromFileName()` / `fromKey()`、`Project.isDone`、`AppInfo.technicalName`、
     `entityStatusLabel()`

@@ -1,0 +1,18 @@
+{
+  // Flutter SDK 的位置（本机装在 E:\flutter）。如果 VS Code 已经认出来，这一行可以删。
+  "dart.flutterSdkPath": "E:\\flutter",
+
+  // Dart 文件保存时自动格式化：改完不用手动排版，也避免手写缩进把结构弄乱
+  "[dart]": {
+    "editor.formatOnSave": true
+  },
+
+  // 保存即热重载（调试会话里 `Ctrl+S` 手机上一秒见效）
+  "dart.flutterHotReloadOnSave": "always",
+
+  // 源码一律 UTF-8：中文不会变问号/乱码
+  "files.encoding": "utf8",
+
+  // 这个仓库的注释与文档都是中文，搜索时不要把它们排除掉
+  "search.useIgnoreFiles": true
+}
