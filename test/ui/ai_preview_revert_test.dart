@@ -42,7 +42,7 @@ void main() {
     expect(find.text('退回上一版'), findsNothing);
     expect(app.implementationSnapshot(project.id), isNull);
 
-    await tester.tap(find.text('写入实现计划'));
+    await tester.tap(find.text('写入「如何解决」'));
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.implementation, 'AI 整理出来的正文');
@@ -82,7 +82,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('写入实现计划'));
+    await tester.tap(find.text('写入「如何解决」'));
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.implementation, '第一次整理出来的正文');

@@ -71,7 +71,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
             // 写入之后按钮就闲着：要改就改上面的文字再点一次也没意义（正文已是这一版），
             // 真想再来一次应该回上一页重新发起整理
             onPressed: _applied ? null : _apply,
-            child: Text(_applied ? '已写入' : '写入实现计划'),
+            child: Text(_applied ? '已写入' : '写入「如何解决」'),
           ),
         ],
       ),
@@ -102,7 +102,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
             child: Text(
-              '下面是模型给出的整理稿，可以直接改；写入后清单不受影响，只替换「实现计划」。',
+              '下面是模型给出的整理稿，可以直接改；写入后清单不受影响，只替换「如何解决」。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -129,7 +129,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
               _applied
                   ? '已写入。写入前的那一版正文已留档，想反悔就点上面的「退回上一版」——'
                       '留档只值一次反悔，退回后即销掉。'
-                  : '写入会覆盖原来的「实现计划」（清单条目不动），写入前会自动留一份旧版。',
+                  : '写入会覆盖原来的「如何解决」（清单条目不动），写入前会自动留一份旧版。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -164,14 +164,14 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
       _applied = true;
       _snapshot = widget.app.implementationSnapshot(widget.projectId);
     });
-    showToast(context, '已写入「实现计划」');
+    showToast(context, '已写入「如何解决」');
   }
 
   Future<void> _revert() async {
     final ok = await confirmAction(
       context,
       title: '退回上一版',
-      message: '把「实现计划」换回 AI 覆盖之前那一版？\n'
+      message: '把「如何解决」换回 AI 覆盖之前那一版？\n'
           '这份留档只会用这一次，退回之后就销掉了。',
       confirmLabel: '退回',
     );
@@ -189,7 +189,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
       // 再点一次「写入实现计划」又把它推回去了
       _text.text = widget.app.currentImplementation(widget.projectId);
     });
-    showToast(context, '已退回上一版「实现计划」');
+    showToast(context, '已退回上一版「如何解决」');
   }
 }
 

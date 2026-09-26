@@ -194,9 +194,8 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                     children: <Widget>[
                       Text('会发出去什么', style: theme.textTheme.labelLarge),
                       const SizedBox(height: 6),
-                      // 字段名与项目详情页一致（Q4）：「目的」→「有什么问题 / 思路」。
-                      // 线上提示词里的那一行仍写作「项目目的」（`ai_client.dart`），
-                      // 换它要连提示词一起改，不在本轮范围。
+                      // 字段名三处一致（Q4）：项目详情页、这一页的说明、线上提示词
+                      // （`ai_client.dart`）都写「有什么问题 / 思路」与「实现清单」。
                       _Bullet('项目名称、项目「有什么问题 / 思路」、清单里的条目文本与勾选状态'),
                       _Bullet('还有一段固定的提示词（要求它只整理、不新增内容）'),
                       const SizedBox(height: 12),

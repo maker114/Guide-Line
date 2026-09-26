@@ -349,7 +349,7 @@ void main() {
     );
 
     expect(prompt, contains('项目名称：标题'));
-    expect(prompt, contains('项目目的：（未填写）'));
+    expect(prompt, contains('"有什么问题 / 思路"：（未填写）'));
     expect(prompt, contains('- [x] 做了的'));
     expect(prompt, contains('- [ ] 没做的'));
   });

@@ -218,7 +218,7 @@ class HttpAiTextGenerator implements AiTextGenerator {
   static const String systemPrompt = '''
 你是一个中文写作助手，任务是「整理」，不是「创作」。
 
-用户会给你一个项目的名称、目的，以及一份待办清单。请把这份清单改写成一段连贯、
+用户会给你一个项目的名称、"有什么问题 / 思路"，以及一份实现清单。请把这份清单改写成一段连贯、
 通顺的中文说明，讲清「这个项目打算怎么做」。要求：
 
 1. 只整理，不新增：不得添加清单里没有的功能、步骤、数据或结论。
@@ -228,12 +228,14 @@ class HttpAiTextGenerator implements AiTextGenerator {
 4. 不要称呼「用户」或「你」，直接陈述这个项目本身；
 5. 只输出整理后的正文，前后不要任何解释、说明或客套话。''';
 
-  /// 用户消息：**只有项目标题、目的与清单条目**（设计文档 §2.2 的边界）。
+  /// 用户消息：**只有项目标题、"有什么问题 / 思路"与清单条目**（设计文档 §2.2 的边界）。
+  /// 字段名与界面一致（Q4）：「目的」→"有什么问题 / 思路"、「待办清单」→「实现清单」——
+  /// 界面上的"待办"只指事件里的任务，项目里那份叫清单。
   static String buildUserPrompt(PromptInput input) {
     final buffer = StringBuffer()
       ..writeln('项目名称：${input.projectTitle}')
-      ..writeln('项目目的：${input.purpose.trim().isEmpty ? '（未填写）' : input.purpose.trim()}')
-      ..writeln('待办清单：');
+      ..writeln('"有什么问题 / 思路"：${input.purpose.trim().isEmpty ? '（未填写）' : input.purpose.trim()}')
+      ..writeln('实现清单：');
     for (final item in input.items) {
       buffer.writeln('- [${item.done ? 'x' : ' '}] ${item.text}');
     }
