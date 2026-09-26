@@ -406,9 +406,10 @@ class _EventDetailPageState extends State<EventDetailPage> {
 /// **没有名字字段**：名字在标题栏（改名走标题栏的 ⋮ →「重命名」），
 /// 正文再放一遍只是把同一句话写两次。腾出来的位置给「时间与任务」。
 ///
-/// 为什么三者同一张卡：它们都是"这条线现在什么状态"的字段，按《界面规范》§3
-/// 的分组卡片规则应当同卡、行间一条 1px 细线（首行上方、末行下方不画）。
-/// 分成两张卡在手机上会白占一段空白与一圈卡片间距。
+/// 为什么三者同一张卡：它们都是"这条线现在什么状态"的字段 ——
+/// 上面的进度与状态是**一行总览**，下面的「时间与任务」是两行明细，
+/// 中间靠小标题与留白分开，**不画分割线**（实机反馈：一条线把一张卡切成几块）。
+/// 拆成两张卡则会白占一圈卡片间距，手机上不划算。
 class _EventHeader extends StatelessWidget {
   const _EventHeader({
     required this.host,
@@ -458,10 +459,7 @@ class _EventHeader extends StatelessWidget {
             ),
             // 空线不摆「时间与任务」：下面那句空态说明已经讲清了，
             // 再写一遍"还没排期 / 没有待做的节点"只是噪音。
-            if (mainLine.isNotEmpty) ...<Widget>[
-              const _HeaderDivider(),
-              _EventFacts(mainLine: mainLine),
-            ],
+            if (mainLine.isNotEmpty) _EventFacts(mainLine: mainLine),
           ],
         ),
       ),
@@ -469,34 +467,21 @@ class _EventHeader extends StatelessWidget {
   }
 }
 
-/// 卡片内两条设置之间的 1px 细线（《界面规范》§3：用 `outlineVariant`，
-/// **首行上方与末行下方都不画**）。
-class _HeaderDivider extends StatelessWidget {
-  const _HeaderDivider();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Divider(
-          height: 1,
-          thickness: 1,
-          color: Theme.of(context).colorScheme.outlineVariant,
-        ),
-      );
-}
-
 /// 「时间与任务」：这条线**急不急**（最近到期）+ **接下来做哪一件**。
 ///
 /// 这两件事原来只有事件列表卡头的一行小灰字（「最近 2026-09-28（3 天后） ·
 /// 接下来 · 某任务」），实机反馈：那行太小、也太挤，挪到详情页来，并且要好看。
 ///
-/// 做法是**两行等权的字段**（图标 + 小标签 + 值），而不是把小灰字放大：
+/// 做法是**两行"标题在左、内容在右"的字段**，而不是把小灰字放大：
 ///   · 到期日**单独染色**：逾期用 `UrgencyColors.overdue`（红），
 ///     其余用 `primary` —— 只把真急的事标出来，不把"还有半年"也刷成警报色；
 ///   · 「接下来」后面直接写任务名，比卡头那句被省略号截断的话完整；
 ///   · 值用 `bodyMedium`（比任务框里那行 `titleSmall` 轻一档）：它是一句摘要，
 ///     两处同时出现时得一眼看出哪一行才是能点开的任务本身；
-///   · 两行各占一整行、值最多两行省略，1.6 倍字体下也只是换行，不会挤爆。
+///   · 值最多两行省略 —— 1.6 倍字体下也只是换行，不会挤爆（`app_smoke_test` 守着）。
+///
+/// 这一段的顶上**不画分割线**（实机反馈）：与上面那排状态胶囊之间靠标题与留白分开就够了，
+/// 多一条线反而把一张卡切成三块。行与行之间也不用细线：两行本来就隔着 `SizedBox`。
 ///
 /// 没事可做（线上节点都终结了）时明确写「这条线没有待做的节点」，而不是留空 ——
 /// 空着会让人以为这块坏了。
@@ -517,7 +502,7 @@ class _EventFacts extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.only(left: 4, top: 10, bottom: 6),
+          padding: const EdgeInsets.only(left: 4, top: 12, bottom: 8),
           child: Text('时间与任务', style: theme.textTheme.labelMedium),
         ),
         _FactRow(
@@ -547,10 +532,13 @@ class _EventFacts extends StatelessWidget {
   }
 }
 
-/// 「时间与任务」里的一行字段：**图标 + 小标签 + 值**（值在标签下面，占满整行）。
+/// 「时间与任务」里的一行字段：**标题在左（图标 + 小标签）、内容在右**。
 ///
-/// 不用 `ListTile` 的理由：它的 `leading` 永远垂直居中，值一旦折成两行，
-/// 图标就会飘到两行中间；这里图标跟着标签走（`Row` 的顶部对齐），才是"字段"的样子。
+/// 不用 `ListTile` 的理由：它两端都留 16 的内边距，而这段在卡片里已经有 12 的卡片内边距，
+/// 再叠一层会让标题与上面的「时间与任务」对不齐；这里自己排，四个角的对齐全可控。
+///
+/// 左右两栏都设了上限（标签 88、值占剩下的）：两栏加起来还有富余，值偏左紧挨标题，
+/// 不会像两端对齐那样在中间扯出一条缝；窄屏 / 大字体下值折行也只是行变高。
 class _FactRow extends StatelessWidget {
   const _FactRow({
     required this.icon,
@@ -571,32 +559,40 @@ class _FactRow extends StatelessWidget {
   /// 值的颜色；不给就按 `highlighted` 取主题色 / 次要色。
   final Color? valueColor;
 
+  /// 标题那一栏的宽度上限。**必须留出上限**：不给的话「最近到期」在窄屏上会被
+  /// 右边的日期挤到折行，而它只有四个字，怎么都不该折。
+  static const double _labelWidth = 88;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = highlighted ? theme.colorScheme.primary : theme.colorScheme.outline;
     return Padding(
       padding: const EdgeInsets.only(left: 4),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(icon, size: 16, color: accent),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall,
+          // 标题栏单挂一个 key：用例要能"只看这一行的内容"，而不是全屏数标题
+          SizedBox(
+            key: ValueKey<String>('fact-label-$label'),
+            width: _labelWidth,
+            child: Row(
+              children: <Widget>[
+                Icon(icon, size: 16, color: accent),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 2),
-          Padding(
-            padding: const EdgeInsets.only(left: 22),
+          const SizedBox(width: 8),
+          Expanded(
             child: Text(
               value,
               maxLines: 2,
@@ -846,7 +842,9 @@ class _TaskLine extends StatelessWidget {
       tileColor: indent > 0
           ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35)
           : null,
-      contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 0),
+      // 行尾按 6 留边（原来顶到 0）：那一列是**到期日图标**，贴着行尾在实机上
+      // 看着像要掉出屏幕（实机反馈"贴得太边了"）。子任务行同理，一起往左挪。
+      contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 6),
       leading: TaskStatusButton(app: app, task: task, blocked: blocked),
       // 子任务行有缩进 + 三道前缀（竖线/箭头/间距）约 23dp 的固定开销，
       // 1.6 倍字体下标题的"文字本身宽度 + 固定开销"会差出 2dp。

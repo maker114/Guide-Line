@@ -168,7 +168,7 @@ void main() {
     expect(find.text('速记'), findsOneWidget, reason: '非灵感页才有速记按钮');
   });
 
-  testWidgets('速记按钮是与底栏滑块同一套的胶囊：高 48、宽 = 一格、色相同，且不压底栏（批 B 第 ③ 项）', (tester) async {
+  testWidgets('速记按钮是与底栏滑块同一套的胶囊：高 48、宽 = 一格、实心强调色，且不压底栏（批 B 第 ③ 项）', (tester) async {
     await boot(tester);
     await swipe(tester, 1); // 到项目页：非灵感页才有速记按钮
 
@@ -194,7 +194,10 @@ void main() {
     );
 
     // 形状与颜色：圆角 = 高度一半（24，与滑块共用 `_navRadius`）、
-    // 底色 = 底栏滑块那一套 `secondaryContainer`
+    // 底色 = **实心强调色**。以前两者同取 `secondaryContainer`（强调色 22% 透明度），
+    // 实机反馈"速记按钮看着是透明的"：那层淡色浮在列表 / 卡片上几乎看不出来
+    // （与页面底的对比度最低只有 1.94）。滑块在底栏内部、周围永远是那条实心底，
+    // 所以它保持原样；这颗浮在内容上的入口改用 `primary` / `onPrimary`。
     final decoration = tester
         .widget<DecoratedBox>(
           find
@@ -208,14 +211,24 @@ void main() {
     final scheme =
         Theme.of(tester.element(find.byType(CapturePillButton))).colorScheme;
     expect(decoration.borderRadius, BorderRadius.circular(24));
-    expect(decoration.color, scheme.secondaryContainer);
+    expect(decoration.color, scheme.primary, reason: '实心强调色，不再跟滑块共用淡色');
+    // 压在它上面的字必须读得清：`onPrimary` 与 `primary` 的对比度 ≥ 3:1
+    final light = <double>[
+      scheme.onPrimary.computeLuminance(),
+      scheme.primary.computeLuminance(),
+    ]..sort();
+    expect(
+      (light[1] + 0.05) / (light[0] + 0.05),
+      greaterThanOrEqualTo(3.0),
+      reason: '图标与「速记」两个字要压在实心强调色上',
+    );
     final indicatorDecoration = tester
         .widget<Container>(find.byKey(navIndicatorKey))
         .decoration as BoxDecoration;
     expect(
       indicatorDecoration.color,
-      decoration.color,
-      reason: '与底栏滑块同一套色，保证色系统一',
+      scheme.secondaryContainer,
+      reason: '底栏滑块保持原样（它坐在不透明的底栏里，不需要实心色）',
     );
 
     expect(

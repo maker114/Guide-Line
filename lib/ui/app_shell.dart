@@ -412,8 +412,14 @@ class AppBottomNav extends StatelessWidget {
 ///      [AppBottomNav.itemCount] 格，所以一格 = (屏宽 − 40) / 4，
 ///      用与底栏同一个 [navCellWidth] 算，**不写死像素**。
 ///
-/// 颜色与底栏滑块同一套（`secondaryContainer` / `onSecondaryContainer`），
-/// 阴影沿用底栏那层轻阴影，保证"右下角这颗"与"底栏那一条"是一家人。
+/// 颜色：**实心强调色**（`primary` / `onPrimary`），阴影沿用底栏那层轻阴影。
+///
+/// 以前这里跟底栏滑块一样取 `secondaryContainer`（= 强调色 22% 透明度），
+/// 实机反馈"速记按钮看着是透明的"：那层淡色压在**卡片、列表**上面时几乎看不出来
+/// （实测它与页面底的对比度只有 1.9~4.7，深色 + 墨黑主题下只有 1.94），
+/// 只有压在底栏那条不透明的白条上才像样。滑块留在底栏内部、周围永远是那条实心底，
+/// 所以它保持原样；右下角这颗是浮在内容上的动作入口，必须自己站得住。
+/// 前景取 `onPrimary`（按强调色明暗算出的黑或白），对比度由主题保证。
 ///
 /// **放不下就只留图标**：窄屏 + 1.6 倍字体时"图标 + 「速记」"会超过一格宽 ——
 /// 这时只画 `Icons.bolt`，但 `tooltip` 与语义标签**始终**是「速记」：
@@ -442,7 +448,7 @@ class CapturePillButton extends StatelessWidget {
       MediaQuery.sizeOf(context).width - navHorizontalPadding * 2,
     );
     final showLabel = _labelFits(context, theme, width);
-    final foreground = scheme.onSecondaryContainer;
+    final foreground = scheme.onPrimary;
 
     final content = showLabel
         ? Row(
@@ -467,7 +473,8 @@ class CapturePillButton extends StatelessWidget {
       height: height,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: scheme.secondaryContainer,
+          // 实心强调色：这颗按钮浮在列表 / 卡片上，必须有自己能站得住的底
+          color: scheme.primary,
           // 与底栏滑块**同一个** `_navRadius`：48 高时两端就是两个半径 24 的半圆
           borderRadius: BorderRadius.circular(_navRadius),
           boxShadow: <BoxShadow>[

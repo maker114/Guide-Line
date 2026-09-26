@@ -117,6 +117,21 @@ void main() {
     expect(find.byType(DatePickerDialog), findsOneWidget);
   });
 
+  testWidgets('任务行尾那个到期日图标不贴边：离卡片右缘留出余量', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    await openEvent(tester, app);
+
+    // 任务行那一整条（含它自己的内边距）与里面那颗日历图标的实际位置
+    final tile = tester.getRect(inLine(find.byType(ListTile)).first);
+    final icon = tester.getRect(inLine(find.byIcon(Icons.event_outlined)));
+
+    expect(
+      tile.right - icon.right,
+      greaterThanOrEqualTo(6),
+      reason: '行尾图标原本 contentPadding.right = 0，贴着行尾看着要掉出屏幕（实机反馈）',
+    );
+  });
+
   testWidgets('动作面板里只剩下"加一条 / 改这一条"的动作，没有走向类入口', (tester) async {
     final app = await appWithTask(withSubtask: true);
     await openEvent(tester, app);
