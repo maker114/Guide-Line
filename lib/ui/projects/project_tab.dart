@@ -17,11 +17,19 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 @visibleForTesting
 Key projectColorBarKey(String projectId) => Key('ProjectTile.colorBar.$projectId');
 
-/// 项目页**当前能看到几行**（列表里真的画出来的那些行）。
+/// 标题栏那个数字（「项目   3」）：**最外层有几条**。
 ///
-/// 标题栏上的「项目   4」用的就是它 —— 与列表同一个数：折叠起来的子项目
-/// 不算在内，标题里的数字和眼睛看到的行数永远一致。
-int visibleProjectCount(AppController app) => _flatten(app).length;
+/// 口径（2026-09-26 用户确认）：
+///   · **只数最外层** —— 分类下面的目标、甚至再套一层子分类，都不计入；
+///     例如 A / B / C 都属于「分类1」，那么只算「分类1」这一条；
+///   · **已归档的不计入**（它本来就不在列表里）；
+///   · **与收起 / 展开无关** —— 这里原来取的是"列表里画出来的行数"，
+///     于是一收起分类，标题上的数字就跟着变小（实机反馈的 bug）。
+int rootProjectCount(AppController app) => app.ws.projectTree
+    .childrenOf(null)
+    .whereType<Project>()
+    .where((project) => !project.archived && !project.deleted)
+    .length;
 
 /// 项目 Tab：**项目树（≤ 3 层）**。
 ///

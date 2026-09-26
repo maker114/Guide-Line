@@ -368,13 +368,22 @@ class _AppShellState extends State<AppShell> {
 
   /// 标题栏文案。
   ///
-  /// 项目页要**带上数量**（实机反馈「项目   4」）：数量原来在正文第一行
-  /// （「共 4 个项目」），与标题分居两行、白占一行高度。数字取的是
-  /// [visibleProjectCount] —— 与列表里画出来的行数同一个口径。
+  /// 项目页与事件页都要**带上数量**（实机反馈「项目   4」）：数量原来在正文第一行
+  /// （「共 4 个项目 / 共 2 个事件」），与标题分居两行、白占一行高度。
+  ///
+  /// 口径（2026-09-26 用户确认）：**只数最外层、已归档的不计、与收起 / 展开无关**。
+  /// 项目页数的是"根层有几条"（分类或目标都算一条，分类里面的一律不数）；
+  /// 事件页数的是未归档事件数。以前这里取的是"列表里画出来的行数"，
+  /// 一收起分类数字就变小 —— 正文那两行计数因此一并去掉了。
   String _titleFor(AppController app) {
-    final base = _titles[_index];
-    if (_index != 1) return base;
-    return '$base   ${visibleProjectCount(app)}';
+    switch (_index) {
+      case 1:
+        return '${_titles[1]}   ${rootProjectCount(app)}';
+      case 2:
+        return '${_titles[2]}   ${visibleEventCount(app)}';
+      default:
+        return _titles[_index];
+    }
   }
 
   @override

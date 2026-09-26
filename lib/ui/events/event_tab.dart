@@ -29,6 +29,13 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 ///   · 展开 / 收起用 `AnimatedSize` 做高度过渡，折叠状态存在 `UiPrefs` 里。
 ///
 /// 新建与重命名都是**页面内直接输入**，不弹对话框。
+/// 标题栏那个数字（「事件   2」）：**未归档的事件数**（与项目页同一套口径）。
+///
+/// 事件没有层级，所以"最外层"就是全部；同样**与卡片展开 / 收起无关** ——
+/// 数字只反映"这个页里有几件事"，不随眼睛看到的行数变化。
+int visibleEventCount(AppController app) =>
+    app.ws.liveEvents.where((event) => !event.archived).length;
+
 class EventTab extends StatefulWidget {
   const EventTab({super.key, required this.app});
 
@@ -55,13 +62,13 @@ class _EventTabState extends State<EventTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Text(
-            events.isEmpty ? '还没有事件' : '共 ${events.length} 个事件',
-            style: Theme.of(context).textTheme.labelLarge,
+        // 事件数已经挪到**标题栏**（「事件   2」，与项目页同一套口径），
+        // 这里只在一条事件都没有时留一句空态提示 —— 它不是计数行。
+        if (events.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Text('还没有事件', style: Theme.of(context).textTheme.labelLarge),
           ),
-        ),
         Expanded(
           child: ListView(
             padding: const EdgeInsets.only(bottom: 96),

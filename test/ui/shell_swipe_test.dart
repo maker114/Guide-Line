@@ -68,7 +68,7 @@ void main() {
     final cell = tester.getRect(find.byType(AppBottomNav)).width / 4;
 
     await swipe(tester, 2);
-    expect(find.text('共 1 个事件'), findsOneWidget);
+    expect(find.text('事件   1'), findsOneWidget);
     expect(pillLeft(tester), closeTo(cell * 2, 1));
 
     await swipe(tester, -1);
@@ -92,7 +92,7 @@ void main() {
 
     await tester.tap(find.text('事件'));
     await tester.pumpAndSettle();
-    expect(find.text('共 1 个事件'), findsOneWidget);
+    expect(find.text('事件   1'), findsOneWidget);
     expect(app.prefs.lastTabIndex, 2);
     expect(pillLeft(tester), closeTo(cell * 2, 1));
   });
@@ -113,5 +113,37 @@ void main() {
       reason: '滑走再滑回来，输入框里的内容不该没',
     );
     expect(app.ws.inspirationInbox, isEmpty, reason: '没点「记下」就不该落库');
+  });
+
+  testWidgets('标题栏的项目数不随收起 / 展开变化（只数最外层、不含已归档）', (tester) async {
+    final app = await boot(tester); // boot 里已经有一条「一个项目」
+
+    // 根层再加：一个分类（下面挂两个目标）+ 一个独立目标
+    final category = app.ws.createProject(title: '分类一');
+    app.run(() => app.ws.createProject(title: '目标甲', parentId: category.id));
+    app.run(() => app.ws.createProject(title: '目标乙', parentId: category.id));
+    app.run(() => app.ws.createProject(title: '独立目标'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('项目'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('项目   3'),
+      findsOneWidget,
+      reason: '只数最外层：一个项目 + 分类一 + 独立目标；分类里面那两个目标不算',
+    );
+
+    // 收起 / 展开分类一：数字都不该变（原来取的是"画出来的行数"，一收就变小）
+    final toggle = find.byTooltip('收起').evaluate().isNotEmpty
+        ? find.byTooltip('收起')
+        : find.byTooltip('展开');
+    await tester.tap(toggle.first);
+    await tester.pumpAndSettle();
+    expect(find.text('项目   3'), findsOneWidget, reason: '收起之后数字不变');
+
+    // 已归档的根项目不计入
+    app.run(() => app.ws.setProjectArchived(category.id, true));
+    await tester.pumpAndSettle();
+    expect(find.text('项目   2'), findsOneWidget, reason: '归档的那条不再计入');
   });
 }
