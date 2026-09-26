@@ -237,7 +237,10 @@ class _EventTabState extends State<EventTab> {
   }
 }
 
-/// 卡头：状态 + 事件名 + 「主线 3/5 · 当前 · 某任务」，右侧是这一条的动作菜单。
+/// 卡头：状态 + 事件名 + 「主线 3/5 已完成」，右侧是这一条的动作菜单。
+///
+/// 卡头**不再写"最近到期 / 接下来做什么"**：那两件事归事件详情页的
+/// 「时间与任务」看板（`event_detail_page.dart`，实机反馈）。
 class _EventCardHeader extends StatelessWidget {
   const _EventCardHeader({
     required this.app,
@@ -258,31 +261,7 @@ class _EventCardHeader extends StatelessWidget {
     // 同一条线会出现两个进度，而且会随"归档一个节点"虚涨（实机反馈）。
     final completion = app.ws.checkEventCompletion(event.id);
     final done = completion.judgedChildCount - completion.unfinishedCount;
-    // "先做哪个"要在列表上直接答得出来：取**还没终结的主线任务里最近的那个到期日**。
-    // 事件自己不带日期（历史裁定），所以这一行是卡片上唯一能表达紧迫度的地方。
-    final nextDue = mainLine
-        .where((t) =>
-            t.status == NodeStatus.pending && t.dueAt != null && t.dueAt!.isNotEmpty)
-        .map((t) => t.dueAt!)
-        .fold<String?>(
-          null,
-          (earliest, date) =>
-              earliest == null || date.compareTo(earliest) < 0 ? date : earliest,
-        );
-    final nextDueLabel = nextDue == null
-        ? null
-        : dueLabelOf(context, nextDue, reservedWidth: 300);
     final expanded = app.isExpanded(event.id);
-    // "当前节点" = 第一个还没终结的主线任务：列表上最该回答的就是这个问题
-    final current = mainLine
-        .where((t) => t.status == NodeStatus.pending)
-        .firstOrNull;
-    // 卡头下行一句话说清"急不急 + 做哪一步"。**必须是单个 Text** 才会自动省略：
-    // 拆成一排小 Text 在窄屏 + 1.6 倍字体下会把整行顶出边界（实测溢出 5px）。
-    final nextLine = <String>[
-      if (nextDueLabel != null) '最近 $nextDueLabel',
-      if (current != null) '接下来 · ${current.title}',
-    ].join(' · ');
 
     return ListTile(
       // 有主线任务才给展开箭头（与项目页的"有子项目才有箭头"一致）
@@ -327,46 +306,36 @@ class _EventCardHeader extends StatelessWidget {
           ),
         ],
       ),
-      // 卡头分两行：上行是进度与状态记号，下行是"最近到期 + 接下来做什么"。
-      // 挤成一行在 1.6 倍字体下会溢出（实测 5px），而这两件事都不能省 ——
-      // 一个回答"急不急"，一个回答"下一步做哪件"。
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      // 卡头只留**进度与状态记号**：它回答"这条线走到哪了"。
+      // "急不急 / 下一步做哪件"（最近到期 + 接下来）已按实机反馈挪进**事件详情页**
+      // 的「时间与任务」（`event_detail_page.dart` 的 `_EventFacts`），
+      // 那里有整行的位置、也能把日期单独染色；夹在卡头一行小灰字里反而看不见。
+      // 卡头这一行在 1.6 倍字体下本来就紧，去掉它顺带松了一档。
+      subtitle: Row(
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Icon(Icons.timeline, size: 13, color: theme.colorScheme.outline),
-              const SizedBox(width: 3),
-              Flexible(
-                child: Text(
-                  completion.judgedChildCount == 0
-                      ? '主线还没有可判定的任务'
-                      : '主线 $done/${completion.judgedChildCount} 已完成',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall,
-                ),
-              ),
-              // 已搁置的事件在列表里原本和正常事件长得一样，用户没法解释
-              // "为什么这条不催我" —— 给它一个明确的记号
-              if (event.status == NodeStatus.ignored) ...<Widget>[
-                const SizedBox(width: 6),
-                Text(
-                  '· 已搁置',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (nextLine.isNotEmpty)
-            Text(
-              nextLine,
+          Icon(Icons.timeline, size: 13, color: theme.colorScheme.outline),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              completion.judgedChildCount == 0
+                  ? '主线还没有可判定的任务'
+                  : '主线 $done/${completion.judgedChildCount} 已完成',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.labelSmall,
             ),
+          ),
+          // 已搁置的事件在列表里原本和正常事件长得一样，用户没法解释
+          // "为什么这条不催我" —— 给它一个明确的记号
+          if (event.status == NodeStatus.ignored) ...<Widget>[
+            const SizedBox(width: 6),
+            Text(
+              '· 已搁置',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
+            ),
+          ],
         ],
       ),
       trailing: PopupMenuButton<String>(

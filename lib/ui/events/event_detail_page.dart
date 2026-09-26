@@ -4,7 +4,6 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
-import '../../core/rules/completion.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/due_label.dart';
@@ -13,13 +12,29 @@ import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
+import '../common/urgency.dart';
 import '../theme/shape_tokens.dart';
+import 'event_next_up.dart';
 import 'fold_toggle_row.dart';
 import 'task_actions.dart';
 import 'task_fold.dart';
 
 /// 展开 / 收起箭头的旋转时长（与项目页、事件页同一个节奏）。
 const Duration _foldDuration = Duration(milliseconds: 180);
+
+/// 详情页里**任务线那一段**的 key（测试用；界面上看不见）。
+///
+/// 为什么需要它：事件详情页顶部那张卡里的「接下来」会**把当前节点的标题再写一遍**
+/// （那是它的职责：一句话答"下一步做哪件"）。于是"这一页里有几个「第四步」"
+/// 这类断言会数出两个 —— 想验"任务线里看得见哪几个节点"的用例得先把范围
+/// 收到任务线上（`find.descendant(of: find.byKey(eventDetailLineKey), …)`）。
+const Key eventDetailLineKey = Key('event-detail-line');
+
+/// 详情页顶部那张卡里**「时间与任务」那一段**的 key（测试用；界面上看不见）。
+///
+/// 它和 `eventDetailLineKey` 是一对：当前节点的标题在这两段里**各出现一次**
+/// （「接下来」的职责就是把它写出来），测试要能分别断言这两处。
+const Key eventFactsKey = Key('event-facts');
 
 /// 事件详情：**一条任务线的可视化**。
 ///
@@ -34,6 +49,12 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 /// 新建与重命名都是**页面内直接输入**：主线在任务线末尾，子任务在各自的框内，
 /// 重命名就在那一行原地改。只有"必须有副作用提示"的动作（到期 / 移动 / 归档 / 删除）
 /// 才用底部面板问一句。
+///
+/// **事件名不在这里改**（标题栏已经写着事件名了，正文再放一遍是重复 ——
+/// 与项目详情页同一条裁定）：改名收在标题右侧的 ⋮ 里，点「重命名」之后
+/// **标题栏原地变成输入框**。腾出来的位置给「时间与任务」
+/// （`_EventFacts`）：最近到期 + 接下来做哪一件，这两件事原来只挤在
+/// 事件列表卡头的一行小灰字里（实机反馈：挪到这里来，并且要好看）。
 class EventDetailPage extends StatefulWidget {
   const EventDetailPage({super.key, required this.app, required this.eventId});
 
@@ -49,6 +70,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   String get eventId => widget.eventId;
 
+  /// 标题栏是否处于"改名字"状态（与项目详情页同一套做法）。
+  bool _renaming = false;
+
+  final TextEditingController _titleController = TextEditingController();
+
   /// 正在原地重命名的任务 id
   String? _renamingTaskId;
 
@@ -60,6 +86,35 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 自动收起规则本身见 `task_fold.dart`；这里只负责"我需要时能再看回来"
   /// （实机反馈：折是折对了，可是想看的时候没地方点）。
   bool _showAllFolded = false;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  /// 进改名态：**全选原名**，长名字不用先删一遍（与项目详情页一致）。
+  void _startRename(Event event) {
+    _titleController
+      ..text = event.name
+      ..selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: event.name.length,
+      );
+    setState(() => _renaming = true);
+  }
+
+  void _cancelRename() => setState(() => _renaming = false);
+
+  /// 提交改名。**空名字不提交、保持原名** —— 与 `InlineTextField` 同一条约定
+  /// （必填项被清空时不能把标题清没）。
+  void _commitRename(Event event) {
+    final next = _titleController.text.trim();
+    setState(() => _renaming = false);
+    if (next.isEmpty || next == event.name) return;
+    final error = app.run(() => app.ws.updateEvent(event.id, name: next));
+    if (error != null) _toast(error, error: true);
+  }
 
   void _createTask({
     required String title,
@@ -149,7 +204,6 @@ class _EventDetailPageState extends State<EventDetailPage> {
         }
 
         final mainLine = ws.mainLineOf(eventId);
-        final completion = ws.checkEventCompletion(eventId);
         // 「已完成的老节点自动收起」：只留**当前节点的上一个节点**
         // （实机反馈：做完的任务一多，任务线就长得看不清现在做到哪了）
         final autoFoldedIds = autoFoldedMainLineIds(
@@ -164,67 +218,103 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
         return Scaffold(
           appBar: AppBar(
-            // 标题旁立一根事件标识色的竖条（与项目详情页同一个控件、同一套系统）
-            title: Row(
-              children: <Widget>[
-                ProjectColorBar(color: event.color, height: 22),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(event.name, overflow: TextOverflow.ellipsis),
-                ),
-              ],
-            ),
-            actions: <Widget>[
-              // 标识色入口：与项目详情页那个调色板图标一致
-              IconButton(
-                tooltip: event.color == null
-                    ? '标识色：点一下选'
-                    : '标识色 ${event.color}（长按清除）',
-                icon: Icon(
-                  Icons.palette_outlined,
-                  color: colorOfHex(event.color) ?? Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-                onPressed: () => _pickColor(context, event),
-                onLongPress: event.color == null ? null : () => _setColor(context, event, null),
-              ),
-              PopupMenuButton<String>(
-                tooltip: '更多',
-                onSelected: (value) async {
-                  switch (value) {
-                    case 'archive':
-                      final error = app.run(
-                        () => ws.setEventArchived(eventId, true),
-                      );
-                      if (!context.mounted) return;
-                      if (error != null) {
-                        showToast(context, error, error: true);
-                        return;
-                      }
-                      showToast(context, '已归档，整条任务线一起归档');
-                      Navigator.of(context).maybePop();
-                      break;
-                    case 'delete':
-                      await _deleteEvent(context, event);
-                      break;
-                  }
-                },
-                itemBuilder: (_) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem<String>(
-                    value: 'archive',
-                    child: Text('归档（含任务线）'),
+            // 改名态：标题栏**原地变成输入框**（与项目详情页同一套交互）
+            title: _renaming
+                ? TextField(
+                    controller: _titleController,
+                    autofocus: true,
+                    textInputAction: TextInputAction.done,
+                    style: Theme.of(context).textTheme.titleLarge,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      hintText: '事件名',
+                      border: InputBorder.none,
+                    ),
+                    onSubmitted: (_) => _commitRename(event),
+                  )
+                // 平时：标题旁立一根事件标识色的竖条（与项目详情页同一个控件、同一套系统）
+                : Row(
+                    children: <Widget>[
+                      ProjectColorBar(color: event.color, height: 22),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(event.name, overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
                   ),
-                  PopupMenuItem<String>(
-                    value: 'delete',
-                    child: Text('删除（含任务线）'),
-                  ),
-                ],
-              ),
-            ],
+            actions: _renaming
+                ? <Widget>[
+                    IconButton(
+                      tooltip: '取消',
+                      icon: const Icon(Icons.close),
+                      onPressed: _cancelRename,
+                    ),
+                    IconButton(
+                      tooltip: '保存',
+                      icon: const Icon(Icons.check),
+                      onPressed: () => _commitRename(event),
+                    ),
+                  ]
+                : <Widget>[
+                    // 标识色入口：与项目详情页那个调色板图标一致
+                    IconButton(
+                      tooltip: event.color == null
+                          ? '标识色：点一下选'
+                          : '标识色 ${event.color}（长按清除）',
+                      icon: Icon(
+                        Icons.palette_outlined,
+                        color: colorOfHex(event.color) ?? Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      onPressed: () => _pickColor(context, event),
+                      onLongPress: event.color == null ? null : () => _setColor(context, event, null),
+                    ),
+                    PopupMenuButton<String>(
+                      tooltip: '更多',
+                      onSelected: (value) async {
+                        switch (value) {
+                          case 'rename':
+                            _startRename(event);
+                            break;
+                          case 'archive':
+                            final error = app.run(
+                              () => ws.setEventArchived(eventId, true),
+                            );
+                            if (!context.mounted) return;
+                            if (error != null) {
+                              showToast(context, error, error: true);
+                              return;
+                            }
+                            showToast(context, '已归档，整条任务线一起归档');
+                            Navigator.of(context).maybePop();
+                            break;
+                          case 'delete':
+                            await _deleteEvent(context, event);
+                            break;
+                        }
+                      },
+                      itemBuilder: (_) => const <PopupMenuEntry<String>>[
+                        // 事件名只在标题栏改（正文不再摆一份，见类文档）
+                        PopupMenuItem<String>(
+                          value: 'rename',
+                          child: Text('重命名'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'archive',
+                          child: Text('归档（含任务线）'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Text('删除（含任务线）'),
+                        ),
+                      ],
+                    ),
+                  ],
           ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
             children: <Widget>[
-              _EventHeader(host: this, event: event, completion: completion),
+              // 事件自身的状态、进度，以及「时间与任务」（同一张卡，见 `_EventHeader`）
+              _EventHeader(host: this, event: event, mainLine: mainLine),
               const SizedBox(height: 12),
               if (mainLine.isEmpty)
                 Padding(
@@ -247,19 +337,28 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     expanded: _showAllFolded,
                     onTap: () => setState(() => _showAllFolded = !_showAllFolded),
                   ),
-                for (var i = 0; i < mainLine.length; i += 1)
-                  // 被自动收起的已完成老节点：不画它、也不画它前面那条连线
-                  if (!foldedIds.contains(mainLine[i].id)) ...<Widget>[
-                    // 相邻节点之间画一道连线，表示"接着做"
-                    if (i > 0 && !foldedIds.contains(mainLine[i - 1].id))
-                      const _VerticalConnector(),
-                    // 每个节点框按 id 认身份：展开 / 收起自动收起的节点时，后面的框
-                    // 会整体往上挪，按位置错配就会把它们行内的动画重放一遍（实机反馈）
-                    KeyedSubtree(
-                      key: ValueKey<String>('node-${mainLine[i].id}'),
-                      child: _TaskBox(host: this, task: mainLine[i]),
-                    ),
+                // 任务线整体挂一个 key（`eventDetailLineKey`）：界面测试要能
+                // "只看任务线"地断言 —— 上面那张卡里的「接下来」会把当前节点的
+                // 标题再写一遍，按全屏 count 去数就会数出两个。
+                Column(
+                  key: eventDetailLineKey,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (var i = 0; i < mainLine.length; i += 1)
+                      // 被自动收起的已完成老节点：不画它、也不画它前面那条连线
+                      if (!foldedIds.contains(mainLine[i].id)) ...<Widget>[
+                        // 相邻节点之间画一道连线，表示"接着做"
+                        if (i > 0 && !foldedIds.contains(mainLine[i - 1].id))
+                          const _VerticalConnector(),
+                        // 每个节点框按 id 认身份：展开 / 收起自动收起的节点时，后面的框
+                        // 会整体往上挪，按位置错配就会把它们行内的动画重放一遍（实机反馈）
+                        KeyedSubtree(
+                          key: ValueKey<String>('node-${mainLine[i].id}'),
+                          child: _TaskBox(host: this, task: mainLine[i]),
+                        ),
+                      ],
                   ],
+                ),
               ],
               const SizedBox(height: 16),
               Card(
@@ -302,22 +401,36 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 }
 
-/// 事件自身：名字（页内可改）+ 三态 + 主线完成情况。
+/// 事件自身那一张卡：**状态 + 进度 + 「时间与任务」**。
+///
+/// **没有名字字段**：名字在标题栏（改名走标题栏的 ⋮ →「重命名」），
+/// 正文再放一遍只是把同一句话写两次。腾出来的位置给「时间与任务」。
+///
+/// 为什么三者同一张卡：它们都是"这条线现在什么状态"的字段，按《界面规范》§3
+/// 的分组卡片规则应当同卡、行间一条 1px 细线（首行上方、末行下方不画）。
+/// 分成两张卡在手机上会白占一段空白与一圈卡片间距。
 class _EventHeader extends StatelessWidget {
   const _EventHeader({
     required this.host,
     required this.event,
-    required this.completion,
+    required this.mainLine,
   });
 
   final _EventDetailPageState host;
   final Event event;
-  final CompletionCheck completion;
+
+  /// 主线任务（`Workspace.mainLineOf` 的结果：排好序、已排除归档节点）
+  final List<Task> mainLine;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final app = host.app;
+    // 进度**只认一个算法**（与事件列表卡头共用 `checkEventCompletion`）：
+    // 分子含"已搁置"、分母排除"已归档"（Q17）
+    final completion = app.ws.checkEventCompletion(event.id);
+    final done = completion.judgedChildCount - completion.unfinishedCount;
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -325,20 +438,10 @@ class _EventHeader extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('事件名', style: theme.textTheme.labelLarge),
-            InlineTextField(
-              value: event.name,
-              hint: '事件名',
-              textStyle: theme.textTheme.titleMedium,
-              onSubmitted: (name) =>
-                  app.run(() => app.ws.updateEvent(event.id, name: name)),
-            ),
-            const SizedBox(height: 6),
             Text(
               completion.judgedChildCount == 0
                   ? '主线还没有可判定的任务'
-                  : '主线 ${completion.judgedChildCount - completion.unfinishedCount}'
-                        '/${completion.judgedChildCount} 已完成'
+                  : '主线 $done/${completion.judgedChildCount} 已完成'
                         '${completion.canComplete ? '（可以标记事件完成）' : ''}',
               style: theme.textTheme.bodySmall,
             ),
@@ -353,8 +456,157 @@ class _EventHeader extends StatelessWidget {
                 if (error != null) showToast(context, error, error: true);
               },
             ),
+            // 空线不摆「时间与任务」：下面那句空态说明已经讲清了，
+            // 再写一遍"还没排期 / 没有待做的节点"只是噪音。
+            if (mainLine.isNotEmpty) ...<Widget>[
+              const _HeaderDivider(),
+              _EventFacts(mainLine: mainLine),
+            ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 卡片内两条设置之间的 1px 细线（《界面规范》§3：用 `outlineVariant`，
+/// **首行上方与末行下方都不画**）。
+class _HeaderDivider extends StatelessWidget {
+  const _HeaderDivider();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Divider(
+          height: 1,
+          thickness: 1,
+          color: Theme.of(context).colorScheme.outlineVariant,
+        ),
+      );
+}
+
+/// 「时间与任务」：这条线**急不急**（最近到期）+ **接下来做哪一件**。
+///
+/// 这两件事原来只有事件列表卡头的一行小灰字（「最近 2026-09-28（3 天后） ·
+/// 接下来 · 某任务」），实机反馈：那行太小、也太挤，挪到详情页来，并且要好看。
+///
+/// 做法是**两行等权的字段**（图标 + 小标签 + 值），而不是把小灰字放大：
+///   · 到期日**单独染色**：逾期用 `UrgencyColors.overdue`（红），
+///     其余用 `primary` —— 只把真急的事标出来，不把"还有半年"也刷成警报色；
+///   · 「接下来」后面直接写任务名，比卡头那句被省略号截断的话完整；
+///   · 值用 `bodyMedium`（比任务框里那行 `titleSmall` 轻一档）：它是一句摘要，
+///     两处同时出现时得一眼看出哪一行才是能点开的任务本身；
+///   · 两行各占一整行、值最多两行省略，1.6 倍字体下也只是换行，不会挤爆。
+///
+/// 没事可做（线上节点都终结了）时明确写「这条线没有待做的节点」，而不是留空 ——
+/// 空着会让人以为这块坏了。
+class _EventFacts extends StatelessWidget {
+  const _EventFacts({required this.mainLine});
+
+  final List<Task> mainLine;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final nextUp = nextUpOf(mainLine);
+    final current = nextUp.task;
+    final due = nextUp.dueAt;
+
+    return Column(
+      key: eventFactsKey,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(left: 4, top: 10, bottom: 6),
+          child: Text('时间与任务', style: theme.textTheme.labelMedium),
+        ),
+        _FactRow(
+          icon: Icons.event_outlined,
+          highlighted: due != null,
+          label: '最近到期',
+          // 详情页这一行位置宽裕（没有事件名与完成钮抢宽度），
+          // 所以余量按最小估；窄屏放不下时 `dueLabelOf` 自己退成相对日。
+          value: due == null ? '还没排期' : dueLabelOf(context, due, reservedWidth: 120),
+          valueColor: due == null
+              ? theme.colorScheme.outline
+              : (isOverdue(due)
+                    ? UrgencyColors.ofContext(context).overdue
+                    : theme.colorScheme.primary),
+        ),
+        const SizedBox(height: 10),
+        _FactRow(
+          icon: current == null
+              ? Icons.check_circle_outline
+              : Icons.play_circle_outline,
+          highlighted: current != null,
+          label: '接下来',
+          value: current == null ? '这条线没有待做的节点' : current.title,
+        ),
+      ],
+    );
+  }
+}
+
+/// 「时间与任务」里的一行字段：**图标 + 小标签 + 值**（值在标签下面，占满整行）。
+///
+/// 不用 `ListTile` 的理由：它的 `leading` 永远垂直居中，值一旦折成两行，
+/// 图标就会飘到两行中间；这里图标跟着标签走（`Row` 的顶部对齐），才是"字段"的样子。
+class _FactRow extends StatelessWidget {
+  const _FactRow({
+    required this.icon,
+    required this.highlighted,
+    required this.label,
+    required this.value,
+    this.valueColor,
+  });
+
+  final IconData icon;
+
+  /// 这一行有没有内容（有则图标与值上主题色，没有则整体走次要色）
+  final bool highlighted;
+
+  final String label;
+  final String value;
+
+  /// 值的颜色；不给就按 `highlighted` 取主题色 / 次要色。
+  final Color? valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accent = highlighted ? theme.colorScheme.primary : theme.colorScheme.outline;
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(icon, size: 16, color: accent),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Padding(
+            padding: const EdgeInsets.only(left: 22),
+            child: Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: valueColor ?? (highlighted ? null : theme.colorScheme.outline),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

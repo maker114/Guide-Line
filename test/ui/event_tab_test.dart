@@ -7,6 +7,7 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/task.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/events/event_detail_page.dart';
+import 'package:guideline/ui/events/event_next_up.dart';
 import 'package:guideline/ui/events/task_fold.dart';
 
 /// 事件页改成"与项目页同一套观感"之后的接线：
@@ -85,6 +86,54 @@ void main() {
     });
   });
 
+  group('nextUpOf（「最近到期 + 接下来」的取数，列表页与详情页共用）', () {
+    Task task(String id, NodeStatus status, {String? dueAt}) => Task(
+          id: id,
+          eventId: 'e1',
+          parentTaskId: null,
+          taskType: TaskType.standard,
+          title: '任务 $id',
+          dueAt: dueAt,
+          status: status,
+          archived: false,
+          order: 1000,
+          completedAt: status == NodeStatus.done ? 1700000000000 : null,
+          createdAt: 1700000000000,
+          updatedAt: 1700000000000,
+          deleted: false,
+        );
+
+    test('最近到期只数还没终结的节点，并取日期最早的那个', () {
+      final nextUp = nextUpOf(<Task>[
+        task('a', NodeStatus.done, dueAt: '2000-01-01'),
+        task('b', NodeStatus.ignored, dueAt: '2000-02-01'),
+        task('c', NodeStatus.pending, dueAt: '2099-12-31'),
+        task('d', NodeStatus.pending, dueAt: '2026-09-28'),
+      ]);
+      expect(nextUp.dueAt, '2026-09-28', reason: '已完成 / 已搁置的不再催人，也不算"最近"');
+    });
+
+    test('接下来 = 第一个还没终结的节点（任务线的顺序就是接着做的顺序）', () {
+      final nextUp = nextUpOf(<Task>[
+        task('a', NodeStatus.done),
+        task('b', NodeStatus.ignored),
+        task('c', NodeStatus.pending),
+        task('d', NodeStatus.pending),
+      ]);
+      expect(nextUp.task?.id, 'c');
+    });
+
+    test('没有排期 / 没有未终结节点时都是 null，界面据此给空态', () {
+      final none = nextUpOf(<Task>[task('a', NodeStatus.pending)]);
+      expect(none.dueAt, isNull);
+      expect(none.task?.id, 'a');
+
+      final allDone = nextUpOf(<Task>[task('a', NodeStatus.done)]);
+      expect(allDone.dueAt, isNull);
+      expect(allDone.task, isNull);
+    });
+  });
+
   Future<AppController> bootWithLine(WidgetTester tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final event = app.ws.createEvent(name: '秋季发布');
@@ -106,7 +155,13 @@ void main() {
 
     // 卡头一眼看到进度
     expect(find.text('主线 3/4 已完成'), findsOneWidget);
-    expect(find.textContaining('接下来 · 第四步'), findsOneWidget);
+    // 但**不再**在卡头写"最近到期 / 接下来"：那两件事挪进了事件详情页的
+    // 「时间与任务」看板（实机反馈：卡头那行小灰字太挤）
+    expect(
+      find.textContaining('接下来 · 第四步'),
+      findsNothing,
+      reason: '列表卡头不再重复详情页的"时间与任务"',
+    );
 
     // 卡里嵌着任务：当前节点与它的上一个看得见
     expect(find.text('第四步'), findsOneWidget);
@@ -115,6 +170,19 @@ void main() {
     expect(find.text('第一步'), findsNothing);
     expect(find.text('第二步'), findsNothing);
     expect(find.textContaining('另有 2 个已完成节点'), findsOneWidget);
+
+    // 进详情页：这两件事在那里，而且是两行独立的字段，不是一行小灰字
+    await tester.tap(find.text('秋季发布'));
+    await tester.pumpAndSettle();
+    final facts = find.byKey(eventFactsKey);
+    expect(find.text('时间与任务'), findsOneWidget);
+    expect(find.descendant(of: facts, matching: find.text('最近到期')), findsOneWidget);
+    expect(find.descendant(of: facts, matching: find.text('接下来')), findsOneWidget);
+    expect(
+      find.descendant(of: facts, matching: find.text('第四步')),
+      findsOneWidget,
+      reason: '「接下来」要写出当前节点的名字',
+    );
   });
 
   testWidgets('卡头能收起整条线，再点一次展开', (tester) async {
@@ -323,8 +391,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final scheme = Theme.of(tester.element(find.text('搁置线的任务'))).colorScheme;
-    // 不再按全屏 Text 数"逾期"文案：卡头现在还会给一行「最近 …（逾期 N 天）」，
-    // 全屏计数会把它算进去。两条任务各自的日期由下面的 colorOf 逐条取。
+    // 不按全屏 Text 数"逾期"文案：列表卡头虽然不再写日期了，但全屏计数仍然脆
+    // （卡片里还有别的日期文案）。两条任务各自的日期由下面的 colorOf 逐条取。
 
     Color? colorOf(String taskTitle) {
       final row = find.ancestor(
@@ -344,7 +412,7 @@ void main() {
     expect(app.ws.overdueTasks().map((t) => t.title), <String>['进行中线的任务']);
   });
 
-  testWidgets('事件卡回答"先做哪个"：给最近到期日，搁置的事件有记号', (tester) async {
+  testWidgets('"先做哪个"在详情页回答：最近到期日只认最早的那个，搁置的事件有记号', (tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final event = app.ws.createEvent(name: '搬家');
     final far = app.ws.createTask(eventId: event.id, title: '慢慢来');
@@ -356,24 +424,64 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('事件'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('搬家'));
+    await tester.pumpAndSettle();
 
-    // 卡头（事件那一条 ListTile）里只出现**最近**的那个到期日
-    final header = find.ancestor(of: find.text('搬家'), matching: find.byType(ListTile));
+    // 「最近到期」那一行只出现**最近**的那个到期日
+    final facts = find.byKey(eventFactsKey);
     expect(
-      find.descendant(of: header, matching: find.textContaining('最近 2026-09-28')),
+      find.descendant(of: facts, matching: find.textContaining('2026-09-28')),
       findsOneWidget,
-      reason: '卡头要给出还没终结的主线任务里最近的那个到期日',
+      reason: '详情页要给出还没终结的主线任务里最近的那个到期日',
     );
     expect(
-      find.descendant(of: header, matching: find.textContaining('2099-12-31')),
+      find.descendant(of: facts, matching: find.textContaining('2099-12-31')),
       findsNothing,
-      reason: '不是最近的那个，不该出现在卡头',
+      reason: '不是最近的那个，不该出现在这一行',
     );
+
+    // 「接下来」那一行指第一个还没终结的节点（链上的顺序就是接着做的顺序）。
+    // 顺序由数据层说了算：同一批创建的任务 `order` 相同，`compareByOrder` 会退到
+    // 按 id 排 —— 所以这里不写死是哪一条，拿任务线的头一条来对。
+    final firstOpen = app.ws
+        .mainLineOf(event.id)
+        .firstWhere((t) => t.status == NodeStatus.pending);
+    expect(
+      find.descendant(of: facts, matching: find.text(firstOpen.title)),
+      findsOneWidget,
+    );
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
 
     // 搁置的事件在列表里原本和正常事件长得一样，用户没法解释"为什么它不催我"
     app.run(() => app.ws.setEventStatus(event.id, NodeStatus.ignored));
     await tester.pumpAndSettle();
     expect(find.text('· 已搁置'), findsOneWidget);
+  });
+
+  testWidgets('详情页改名收在 ⋮ 里：点「重命名」后标题栏原地变成输入框', (tester) async {
+    final app = await bootWithLine(tester);
+    final event = app.ws.liveEvents.single;
+
+    await tester.tap(find.text('秋季发布'));
+    await tester.pumpAndSettle();
+    expect(find.byType(EventDetailPage), findsOneWidget);
+    // 页内不再摆一份事件名（标题栏已经写着）：卡片里那行标签没了
+    expect(find.text('事件名'), findsNothing);
+
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('重命名'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(TextField), findsOneWidget, reason: '标题栏原地变成输入框');
+    await tester.enterText(find.byType(TextField), '冬季发布');
+    await tester.tap(find.byTooltip('保存'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findEvent(event.id)!.name, '冬季发布');
+    expect(find.text('冬季发布'), findsWidgets, reason: '标题栏要立刻显示新名字');
   });
 
   testWidgets('事件菜单能挪顺序：交换后列表顺序真的变了、也落了盘（Q28）', (tester) async {
