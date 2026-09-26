@@ -170,16 +170,18 @@ void main() {
       ws.addProjectItem(a.id, 'A 的第二条');
       ws.setProjectItemDone(a.id, a1.id, true);
       ws.addProjectItem(deep.id, 'C 的第一条');
+      // 分类自己就算有清单条目也**不计入汇总**（只数目标那一层；分类本不该有清单）
+      ws.addProjectItem(mid.id, '分类自己的清单');
 
       final summary = ws.summarizeCategory(root.id);
       // "有下级"的 mid 自己是分类，不算目标；A（叶子）与 C（叶子）才是目标
       expect(summary.targetCount, 2);
-      expect(summary.itemTotal, 3, reason: '只累加目标的清单条目');
+      expect(summary.itemTotal, 3, reason: '只累加目标的清单条目，分类自己的不算');
       expect(summary.itemDone, 1);
-      // 分类自己的清单不计入（分类不该有清单，这里只是把边界钉死）
-      final empty = ws.summarizeCategory(mid.id);
-      expect(empty.targetCount, 1);
-      expect(empty.itemTotal, 1);
+
+      final nested = ws.summarizeCategory(mid.id);
+      expect(nested.targetCount, 1, reason: 'mid 的子树上只有 C 是目标');
+      expect(nested.itemTotal, 1, reason: 'mid 自己的清单条目不算进去');
     });
   });
 

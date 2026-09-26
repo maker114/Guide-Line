@@ -12,6 +12,7 @@ import 'dialogs.dart';
 const String pickNone = '__none__';
 
 /// 分类不能当灵感的落点时给的那句提示（Q2：**灵感只落在目标上**）。
+/// 也用在同一份规则的另一道闸门上（`MergeEditorPage` / `applyMergeResult`）。
 const String categoryNotForInspiration = '分类不装灵感，请选一个目标或先建一个目标';
 
 /// 项目选择器：底部弹出的树形列表（带缩进）。
@@ -69,7 +70,7 @@ Future<String?> pickProject(
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                '只能选目标：$categoryNotForInspiration',
+                '灵感只能并进「目标」；分类只回答"归哪一类"。',
                 style: Theme.of(sheetContext).textTheme.bodySmall,
               ),
             ),

@@ -8,9 +8,10 @@ import '../common/dialogs.dart';
 ///
 /// 这是全应用**唯一会联网**的功能，所以这一页要把边界讲清楚：
 ///   · 请求只发到你自己填的地址，没有硬编码的第三方服务器；
-///   · **只发项目名称、目的、清单条目** —— 灵感原文、事件任务、其它项目都不发；
+///   · **只发项目名称、「有什么问题 / 思路」、清单条目** —— 灵感原文、事件任务、
+///     其它项目都不发；
 ///   · `apiKey` 存在系统安全存储里，**不进偏好文件、不进备份、不进导出**；
-///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「实现计划」；
+///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「如何解决」；
 ///   · 开关**即时生效**，地址 / 模型 / Key 只在你按「保存」时写入 ——
 ///     「测试连接」用临时配置试跑，**一个字都不存**。
 class AiSettingsPage extends StatefulWidget {
@@ -193,7 +194,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                     children: <Widget>[
                       Text('会发出去什么', style: theme.textTheme.labelLarge),
                       const SizedBox(height: 6),
-                      _Bullet('项目名称、项目目的、清单里的条目文本与勾选状态'),
+                      // 字段名与项目详情页一致（Q4）：「目的」→「有什么问题 / 思路」。
+                      // 线上提示词里的那一行仍写作「项目目的」（`ai_client.dart`），
+                      // 换它要连提示词一起改，不在本轮范围。
+                      _Bullet('项目名称、项目「有什么问题 / 思路」、清单里的条目文本与勾选状态'),
                       _Bullet('还有一段固定的提示词（要求它只整理、不新增内容）'),
                       const SizedBox(height: 12),
                       Text('不会发出去什么', style: theme.textTheme.labelLarge),

@@ -142,4 +142,36 @@ void main() {
     );
     expect(plain.id, isNotEmpty);
   });
+
+  testWidgets('根层的新建入口文案是「新建分类」（Q2：文案随层级走）', (tester) async {
+    await boot(tester);
+
+    expect(inTab(find.text('新建分类')), findsOneWidget);
+    expect(inTab(find.text('新建项目')), findsNothing, reason: 'Q2 已改名');
+  });
+
+  testWidgets('分类行只显示 名字 + 色条 + 汇总：目的与日期都不上树（Q2）', (tester) async {
+    final app = await boot(tester);
+    final category = app.ws.liveProjects.firstWhere((p) => p.title == '带子项目的');
+    // 故意给分类塞上"目标才有"的内容；再给下级挂一条清单，让汇总算得出来
+    app.run(() => app.ws.updateProject(
+          category.id,
+          purpose: '分类不该显示这句',
+          date: '2026-12-31',
+        ));
+    final child = app.ws.liveProjects.firstWhere((p) => p.title == '子项目');
+    app.run(() => app.ws.addProjectItem(child.id, '目标的一条'));
+    await tester.pumpAndSettle();
+
+    // 汇总：含 N 个目标 + 这些目标的清单勾选进度
+    expect(inTab(find.text('含 1 个目标')), findsOneWidget);
+    expect(inTab(find.text('清单 0/1 已完成')), findsOneWidget);
+
+    // 分类行上没有目的、也没有日期
+    expect(inTab(find.textContaining('分类不该显示这句')), findsNothing);
+    expect(inTab(find.textContaining('2026-12-31')), findsNothing);
+
+    // 目标行（下级）照旧
+    expect(inTab(find.text('子项目')), findsOneWidget);
+  });
 }
