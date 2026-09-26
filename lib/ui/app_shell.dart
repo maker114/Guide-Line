@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../core/rules/archive_zone.dart';
 import '../platform/data_directory.dart';
 import '../platform/shortcut_channel.dart';
+import 'common/dialogs.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
 import 'more/more_tab.dart';
@@ -358,6 +360,12 @@ class _AppShellState extends State<AppShell> {
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
 
+  /// 回收站到期清理的提示是否被关掉了。
+  ///
+  /// 关掉就是关掉（本次运行不再出现）：那是启动时的**维护动作**，
+  /// 用户看过一次、表示知道了，就没有理由每次重建界面再念一遍。
+  bool _trashNoticeClosed = false;
+
   /// 标题栏文案。
   ///
   /// 项目页要**带上数量**（实机反馈「项目   4」）：数量原来在正文第一行
@@ -458,7 +466,19 @@ class _AppShellState extends State<AppShell> {
           body: Column(
             children: <Widget>[
               if (app.startupWarnings.isNotEmpty)
-                _WarningBanner(messages: app.startupWarnings),
+                _WarningBanner(
+                  messages: app.startupWarnings,
+                  onTap: () => _showDataIncident(context, app),
+                ),
+              // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
+              // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
+              if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
+                _WarningBanner(
+                  messages: <String>[
+                    '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
+                  ],
+                  onDismiss: () => setState(() => _trashNoticeClosed = true),
+                ),
               if (app.overdueCount > 0)
                 _DueBanner(count: app.overdueCount, app: app),
               Expanded(
@@ -546,6 +566,63 @@ class _AppShellState extends State<AppShell> {
       ],
     );
   }
+
+  /// 数据事故的详情（Q16）：从哪一份备份恢复的、隔离文件叫什么，以及"先导出一份"。
+  ///
+  /// 告警条原来只有一行不可点的小字，用户看完最多"哦"一声；而事故之后**最该做的一件事
+  /// 恰恰是导出**（那是数据离开这台手机的唯一通道）。所以这里把话说全，
+  /// 并且把导出动作直接放在手边。
+  Future<void> _showDataIncident(BuildContext context, AppController app) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('数据恢复记录'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              for (final line in app.dataIncidentLines)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text('· $line'),
+                ),
+              const SizedBox(height: 6),
+              Text(
+                '这些文件都在应用私有目录：${app.dataDirectory.path}\n'
+                '隔离的原文件不会被覆盖，也不会自动删除；备份仍可在「备份与恢复」里查看。',
+                style: Theme.of(dialogContext).textTheme.bodySmall,
+              ),
+              if (app.exportOverdue) ...<Widget>[
+                const SizedBox(height: 8),
+                Text(
+                  '导出提醒已重新开始计时 —— 出过事故之后，先导出一份最要紧。',
+                  style: Theme.of(dialogContext).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+          // 能点的用胶囊（《界面规范》§2）：`FilledButton` 的默认形状就是胶囊
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              final result = await app.exportAndShare();
+              if (context.mounted) {
+                showToast(context, result.message, error: !result.ok);
+              }
+            },
+            child: const Text('一键导出'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// 让 `PageView` 里的一页**活着**。
@@ -574,44 +651,73 @@ class _KeepAlivePageState extends State<_KeepAlivePage>
   }
 }
 
-/// 启动告警条（数据文件损坏、从备份恢复之类）。
+/// 启动告警条（数据文件损坏、从备份恢复、回收站到期清理之类）。
 ///
 /// 做成**带外边距的卡片**而不是通栏色带（实机反馈："顶部标题栏偶尔背景颜色
 /// 不一样"）：通栏色带紧贴在标题栏下面，看着像是标题栏自己变了色；
 /// 而且满色的 `errorContainer` 违反"底色一律中性灰"这条主题约定。
+///
+/// 两种交互，按告警的性质给：
+///   · 数据事故（损坏 / 恢复）——**整条可点**，点开是"出了什么事、怎么办"，
+///     末尾还带一个「一键导出」。只有一行小字时用户能做的顶多是"哦"一声；
+///   · 维护提示（回收站清理）——**可关掉**。它没有"下一步动作"，
+///     但要让人确认自己看见了。
 class _WarningBanner extends StatelessWidget {
-  const _WarningBanner({required this.messages});
+  const _WarningBanner({required this.messages, this.onTap, this.onDismiss});
 
   final List<String> messages;
+  final VoidCallback? onTap;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.warning_amber_outlined,
+            size: 18,
+            color: theme.colorScheme.error,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              messages.join('；'),
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          if (onDismiss != null)
+            IconButton(
+              tooltip: '知道了',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: onDismiss,
+            )
+          else if (onTap != null)
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: theme.colorScheme.outline,
+            ),
+        ],
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: Card(
         margin: EdgeInsets.zero,
         elevation: 0,
         color: theme.colorScheme.surfaceContainerHigh,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                Icons.warning_amber_outlined,
-                size: 18,
-                color: theme.colorScheme.error,
+        child: onTap == null
+            ? row
+            : InkWell(
+                borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+                onTap: onTap,
+                child: row,
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  messages.join('；'),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

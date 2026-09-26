@@ -21,6 +21,13 @@ void main() {
 
   const day = 1788652800000; // 2026-09-06
 
+  /// 非会话保存之间的最小轮转间隔。
+  ///
+  /// 2026-09-26 起，**不在编辑会话里**的保存按 `AppStorage.rotateMinIntervalMillis`
+  /// 节流；所以"要看到轮转"的用例必须把时间戳拉开这么远，毫秒级的连存不再轮转
+  /// （那正是节流本身要防的事）。
+  const int step = AppStorage.rotateMinIntervalMillis;
+
   setUp(() {
     dir = Directory.systemTemp.createTempSync('guideline_store_');
     storage = AppStorage(AppPaths(dir));
@@ -29,6 +36,29 @@ void main() {
   tearDown(() {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
+
+  /// 读主文件里那个项目的标题。
+  String storeTitle() => StoreFile
+      .parse(storage.paths.storeFile.readAsStringSync(encoding: utf8), DecodeIssues())
+      .documentOf(DocName.projects)
+      .projectItems
+      .single
+      .title;
+
+  /// 读某一份滚动备份里那个项目的标题（没有这一份就返回 `null`）。
+  String? rollingTitle(int index) {
+    final file = storage.paths.rollingBackup(index);
+    if (!file.existsSync()) return null;
+    return StoreFile
+        .parse(file.readAsStringSync(encoding: utf8), DecodeIssues())
+        .documentOf(DocName.projects)
+        .projectItems
+        .single
+        .title;
+  }
+
+  int rollingCount() =>
+      storage.listBackups().where((b) => b.kind == BackupKind.rolling).length;
 
   StoreFile storeWith(String title, {int savedAt = 0}) => StoreFile(
         documents: <DocName, Document>{
@@ -93,7 +123,7 @@ void main() {
   group('备份轮转', () {
     test('第二次保存会把上一份轮转成 backup.1', () {
       storage.save(storeWith('第一版'), nowMillis: day);
-      storage.save(storeWith('第二版'), nowMillis: day + 1000);
+      storage.save(storeWith('第二版'), nowMillis: day + step);
 
       final backup1 = storage.paths.rollingBackup(1);
       expect(backup1.existsSync(), isTrue);
@@ -107,8 +137,8 @@ void main() {
 
     test('多次保存后按"越新越靠前"排列备份', () {
       storage.save(storeWith('v1'), nowMillis: day);
-      storage.save(storeWith('v2'), nowMillis: day + 1);
-      storage.save(storeWith('v3'), nowMillis: day + 2);
+      storage.save(storeWith('v2'), nowMillis: day + step);
+      storage.save(storeWith('v3'), nowMillis: day + 2 * step);
 
       String titleOf(int index) => StoreFile
           .parse(
@@ -126,9 +156,10 @@ void main() {
 
     test('滚动备份最多 10 份，最老的一份被挤掉（移位不能把旧数据留下）', () {
       // 一次多存几版：移位现在走"改名"，所以要确认第 11 版进来时
-      // 第 1 版被真正丢弃，而不是因为改名失败在原地留了个副本
+      // 第 1 版被真正丢弃，而不是因为改名失败在原地留了个副本。
+      // 每版之间拉开最小间隔，保证每一笔都真的轮转（节流见上面的说明）。
       for (var i = 0; i < 13; i += 1) {
-        storage.save(storeWith('v$i'), nowMillis: day + i * 1000);
+        storage.save(storeWith('v$i'), nowMillis: day + i * step);
       }
 
       String? titleOf(int index) {
@@ -173,9 +204,124 @@ void main() {
       );
     });
 
+    test('会话内：多笔写入只留一份备份，它存的是"进页面之前"的状态', () {
+      storage.save(storeWith('会话前'), nowMillis: day);
+      expect(rollingCount(), 0, reason: '那时磁盘上还没有"上一份"');
+
+      storage.beginEditSession();
+      storage.save(storeWith('会话中一'), nowMillis: day + 1000);
+      storage.save(storeWith('会话中二'), nowMillis: day + 2000);
+      storage.save(storeWith('会话中三'), nowMillis: day + 3000);
+
+      expect(rollingCount(), 1, reason: '一段编辑会话只留一份备份');
+      expect(rollingTitle(1), '会话前', reason: '这一份必须是"进页面之前"的存档');
+      expect(storeTitle(), '会话中三', reason: '主文件照旧每一笔都写');
+    });
+
+    test('会话结束后再进一次页面，允许再留一份', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+
+      storage.beginEditSession();
+      storage.save(storeWith('v2'), nowMillis: day + 1000);
+      storage.endEditSession();
+      expect(rollingCount(), 1);
+
+      storage.beginEditSession();
+      storage.save(storeWith('v3'), nowMillis: day + 2000);
+      storage.endEditSession();
+
+      expect(rollingCount(), 2);
+      expect(rollingTitle(1), 'v2', reason: '第二段会话的备份是"这段之前"的状态');
+      expect(rollingTitle(2), 'v1');
+    });
+
+    test('不在会话中：按最小间隔节流（不足间隔的保存不轮转）', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.save(storeWith('v2'), nowMillis: day + 1000);
+      expect(rollingCount(), 0, reason: '距上次轮转只有 1 秒，不该再挤一份');
+
+      storage.save(storeWith('v3'), nowMillis: day + step);
+      expect(rollingCount(), 1, reason: '够最小间隔了才轮转');
+      expect(rollingTitle(1), 'v2', reason: '轮转的是那一刻的主文件（v2）');
+      expect(storeTitle(), 'v3');
+    });
+
+    test('进页面但一笔都没写：备份数不变（轮转发生在第一笔写入时）', () {
+      storage.save(storeWith('会话前'), nowMillis: day);
+      final before = storage.listBackups().length;
+
+      storage.beginEditSession();
+      storage.endEditSession();
+
+      expect(storage.listBackups().length, before, reason: '什么都没改就不该留下存档');
+    });
+
+    test('日快照行为不变：会话里第一次轮转也会留当天那一份', () {
+      storage.save(storeWith('今天的开头'), nowMillis: day);
+      storage.beginEditSession();
+      storage.save(storeWith('会话内的改动'), nowMillis: day + 1000);
+      storage.endEditSession();
+
+      final dailies =
+          storage.listBackups().where((b) => b.kind == BackupKind.daily).toList();
+      expect(dailies, hasLength(1), reason: '同一天只留一份日快照');
+    });
+
+    test('从备份恢复仍然强制轮转（刚轮转过也要先把当前数据留住）', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.beginEditSession();
+      storage.save(storeWith('v2'), nowMillis: day + 1000); // 会话内第一次 → 轮转
+      storage.endEditSession();
+
+      final target = storage.paths.rollingBackup(1).path; // = v1
+      // 距上次轮转只有 1 秒：不走 force 的话这一步会什么都不留
+      storage.restoreFromBackup(target, nowMillis: day + 2000);
+
+      expect(rollingTitle(1), 'v2', reason: '恢复前的数据必须进了 backup.1');
+      expect(storeTitle(), 'v1', reason: '主文件换成了要恢复的那一份');
+    });
+
+    test('forceRotate 不等最小间隔（「立即备份一份」按的就是它）', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.save(storeWith('v2'), nowMillis: day + 1, forceRotate: true);
+
+      expect(rollingCount(), 1);
+      expect(rollingTitle(1), 'v1');
+    });
+
+    test('备份标签给的是时间点与条数，不再写"几次保存前"', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+      storage.save(storeWith('v2'), nowMillis: day + step);
+
+      final entries = storage.listBackups();
+      final rolling = entries.firstWhere((e) => e.kind == BackupKind.rolling);
+      expect(rolling.label, contains('上一份'));
+      expect(rolling.label, isNot(contains('次保存前')));
+      expect(rolling.label, contains('· 1 条'));
+      expect(rolling.recordCount, 1, reason: '这份备份里就一个项目');
+
+      final daily = entries.firstWhere((e) => e.kind == BackupKind.daily);
+      expect(daily.label, startsWith('日快照 '));
+      expect(daily.label, contains('· 1 条'));
+      expect(daily.recordCount, 1);
+    });
+
+    test('备份读不出来时 recordCount 给 null（不猜、也不写成 0 条）', () {
+      storage.save(storeWith('数据'), nowMillis: day);
+      storage.save(storeWith('数据二'), nowMillis: day + step);
+      storage.paths.rollingBackup(1).writeAsStringSync('{"broken": ');
+
+      final rolling = storage
+          .listBackups()
+          .firstWhere((b) => b.kind == BackupKind.rolling);
+      expect(rolling.recordCount, isNull);
+      expect(rolling.label, isNot(contains('条')), reason: '数不出条数就别写条数');
+      expect(rolling.path, contains('guideline.backup.1.json'), reason: '这一份仍然要列出来');
+    });
+
     test('备份列表按"滚动备份在前、日快照在后"给出可读标签', () {
       storage.save(storeWith('v1'), nowMillis: day);
-      storage.save(storeWith('v2'), nowMillis: day + 1);
+      storage.save(storeWith('v2'), nowMillis: day + step);
 
       final entries = storage.listBackups();
       expect(entries.first.kind, BackupKind.rolling);
@@ -187,8 +333,8 @@ void main() {
   group('删除备份', () {
     test('多份备份时，删掉指定的那一份，其余留着', () {
       storage.save(storeWith('v1'), nowMillis: day);
-      storage.save(storeWith('v2'), nowMillis: day + 1);
-      storage.save(storeWith('v3'), nowMillis: day + 2);
+      storage.save(storeWith('v2'), nowMillis: day + step);
+      storage.save(storeWith('v3'), nowMillis: day + 2 * step);
 
       final rolling = storage
           .listBackups()
@@ -208,7 +354,7 @@ void main() {
     test('只剩一份时拒绝删除（不把安全网清空）', () {
       // 首次保存只留日快照；再存一次才会轮转出滚动备份
       storage.save(storeWith('第一版'), nowMillis: day);
-      storage.save(storeWith('第二版'), nowMillis: day + 1);
+      storage.save(storeWith('第二版'), nowMillis: day + step);
 
       final rolling = storage
           .listBackups()
@@ -230,7 +376,7 @@ void main() {
 
     test('只认列出来的备份：主文件 / 偏好文件 / 随便一个路径都删不动', () {
       storage.save(storeWith('数据'), nowMillis: day);
-      storage.save(storeWith('数据二'), nowMillis: day + 1);
+      storage.save(storeWith('数据二'), nowMillis: day + step);
       final storeFile = storage.paths.storeFile;
       final prefsFile = storage.paths.prefsFile;
       final before = storage.listBackups().length;
@@ -250,8 +396,8 @@ void main() {
 
     test('删掉一份之后仍然能正常保存与恢复（不会把轮转搞乱）', () {
       storage.save(storeWith('v1'), nowMillis: day);
-      storage.save(storeWith('v2'), nowMillis: day + 1);
-      storage.save(storeWith('v3'), nowMillis: day + 2);
+      storage.save(storeWith('v2'), nowMillis: day + step);
+      storage.save(storeWith('v3'), nowMillis: day + 2 * step);
 
       final victim = storage
           .listBackups()
@@ -259,7 +405,7 @@ void main() {
       expect(storage.deleteBackup(victim.path), isNull);
 
       // 删完之后再存一次：轮转照常，主文件仍可读
-      storage.save(storeWith('v4'), nowMillis: day + 3);
+      storage.save(storeWith('v4'), nowMillis: day + 3 * step);
       final report = storage.load();
       expect(report.store.documentOf(DocName.projects).projectItems.single.title, 'v4');
       expect(victim.path == storage.paths.storeFile.path, isFalse);
@@ -324,7 +470,7 @@ void main() {
   group('损坏与恢复', () {
     test('主文件损坏 → 隔离现场 + 从备份自动恢复', () {
       storage.save(storeWith('完好版本'), nowMillis: day);
-      storage.save(storeWith('最新版本'), nowMillis: day + 1);
+      storage.save(storeWith('最新版本'), nowMillis: day + step);
       // 破坏主文件
       storage.paths.storeFile.writeAsStringSync('{"broken": ');
 
@@ -358,7 +504,7 @@ void main() {
 
     test('主文件不见了但有备份 → 从备份恢复并告警（不能当成全新安装）', () {
       storage.save(storeWith('第一份'), nowMillis: day);
-      storage.save(storeWith('第二份'), nowMillis: day + 1);
+      storage.save(storeWith('第二份'), nowMillis: day + step);
       // 模拟「死在 删旧文件 → 改名 那个窗口里」：主文件没了，备份还在。
       // 这正是原子替换必须一步到位的原因 —— 两步法会留下这个可被观测到的空洞。
       storage.paths.storeFile.deleteSync();
@@ -409,7 +555,7 @@ void main() {
 
     test('从备份恢复：能把指定备份写回主文件，且当前数据先被轮转走', () {
       storage.save(storeWith('要保留的旧数据'), nowMillis: day);
-      storage.save(storeWith('误操作后的数据'), nowMillis: day + 1);
+      storage.save(storeWith('误操作后的数据'), nowMillis: day + step);
 
       final backupPath = storage.paths.rollingBackup(1).path;
       final restored = storage.restoreFromBackup(backupPath, nowMillis: day + 2);
@@ -423,6 +569,82 @@ void main() {
         DecodeIssues(),
       );
       expect(rolled.documentOf(DocName.projects).projectItems.single.title, '误操作后的数据');
+    });
+
+    test('恢复报告带得上界面要用的名字：恢复来源与隔离文件（Q16 的告警条就靠它）', () {
+      storage.save(storeWith('完好版本'), nowMillis: day);
+      storage.save(storeWith('最新版本'), nowMillis: day + step);
+      storage.paths.storeFile.writeAsStringSync('{"broken": ');
+
+      final report = storage.load(nowMillis: day + 2 * step);
+
+      expect(report.recoveredFromBackup, isNotNull);
+      expect(
+        report.recoveredFromBackup,
+        endsWith('guideline.backup.1.json'),
+        reason: '告警里要说清"从哪一份备份恢复的"',
+      );
+      expect(report.quarantinedPaths, hasLength(1));
+      expect(
+        report.quarantinedPaths.single,
+        contains('guideline.json.corrupt.'),
+        reason: '隔离文件名要能直接显示给用户',
+      );
+      expect(report.hasProblems, isTrue, reason: '上层据此重新拉响导出提醒');
+    });
+  });
+
+  group('实现计划的历史正文（私有存档）', () {
+    test('存 / 读 / 销：只认项目 id，互不串味', () {
+      storage.saveImplementationSnapshot('p-1', '第一版正文');
+      storage.saveImplementationSnapshot('p-2', '另一个项目的正文');
+
+      expect(storage.readImplementationSnapshot('p-1'), '第一版正文');
+      expect(storage.readImplementationSnapshot('p-2'), '另一个项目的正文');
+      expect(storage.readImplementationSnapshot('没存过'), isNull);
+
+      storage.clearImplementationSnapshot('p-1');
+      expect(storage.readImplementationSnapshot('p-1'), isNull);
+      expect(storage.readImplementationSnapshot('p-2'), '另一个项目的正文',
+          reason: '销掉一个项目不该动别的项目');
+    });
+
+    test('它不进主数据文件、也不进备份（只是一次反悔用的留档）', () {
+      storage.save(storeWith('项目'), nowMillis: day);
+      storage.save(storeWith('项目·再改'), nowMillis: day + step);
+      final backupsBefore = storage.listBackups().map((b) => b.sizeBytes).toList();
+
+      storage.saveImplementationSnapshot('p-项目', '一段很长很长很长的旧正文');
+
+      expect(
+        storage.paths.storeFile.readAsStringSync(encoding: utf8).contains('一段很长很长很长'),
+        isFalse,
+        reason: '私有存档不能混进数据文件',
+      );
+      expect(storage.listBackups().map((b) => b.sizeBytes).toList(), backupsBefore);
+      expect(
+        storage.listBackups().every((b) => b.recordCount == 1),
+        isTrue,
+        reason: '备份的条数口径不该被这份存档影响',
+      );
+      final history = File(
+        '${dir.path}${Platform.pathSeparator}'
+        '${AppStorage.implementationHistoryFileName}',
+      );
+      expect(history.existsSync(), isTrue, reason: '它落在应用私有目录里');
+    });
+
+    test('存档坏了只当"没有历史"，不抛异常', () {
+      storage.saveImplementationSnapshot('p-1', '正文');
+      File(
+        '${dir.path}${Platform.pathSeparator}'
+        '${AppStorage.implementationHistoryFileName}',
+      ).writeAsStringSync('{ 坏掉的');
+
+      expect(storage.readImplementationSnapshot('p-1'), isNull);
+      // 还能继续写：坏文件被下一次保存整份覆盖
+      storage.saveImplementationSnapshot('p-1', '新的一版');
+      expect(storage.readImplementationSnapshot('p-1'), '新的一版');
     });
   });
 

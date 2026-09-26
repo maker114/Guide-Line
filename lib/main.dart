@@ -43,6 +43,10 @@ class GuidelineApp extends StatelessWidget {
         return MaterialApp(
           title: AppInfo.displayName,
           debugShowCheckedModeBanner: false,
+          // 编辑会话的观察者（Q3）：推开一个页面就是"一段编辑会话"，回到外壳就结束。
+          // 注册在这里而不是逐页埋点，是因为编辑面散在好几处、分属不同批次，
+          // 逐页加 begin/end 必然会漏；"进页面 → 离开"对所有页面都是同一个形状。
+          navigatorObservers: <NavigatorObserver>[controller.editSessionObserver],
           theme: buildAppTheme(prefs, Brightness.light),
           darkTheme: buildAppTheme(prefs, Brightness.dark),
           builder: (context, child) => AppBackground(

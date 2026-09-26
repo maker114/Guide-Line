@@ -260,13 +260,17 @@ class _TrashPane extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return _Pane(
-        note: '删除是「置墓碑」，数据还在文件里，$trashRetentionDays 天内随时可以恢复。',
+        note: '删除是「置墓碑」，数据还在文件里，$trashRetentionDays 天内随时可以恢复；'
+            '到期的条目会在下次启动时自动清除。',
         child: _empty('回收站是空的', '删除的项目 / 事件 / 任务会先落到这里'),
       );
     }
     return _Pane(
+      // 到期清理发生在**启动时**，不是"到点就删"：应用没运行时没有任何东西在跑。
+      // 这句必须写出来，否则用户会以为"还有 3 天"是精确到秒的倒计时。
       note: '只列「级联根」——恢复会连同被一起删掉的下级一起回来。'
-          '每条只保留 $trashRetentionDays 天，到期后自动清掉（「彻底删除」不可撤销）。',
+          '每条只保留 $trashRetentionDays 天，到期的条目会在下次启动时自动清除'
+          '（「彻底删除」不可撤销）。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -302,13 +306,27 @@ class _TrashPane extends StatelessWidget {
   }
 
   void _restore(BuildContext context, Entity entity) {
-    final error = app.run(() => app.ws.restoreFromTrash(_docOf(entity), entity.id));
+    final doc = _docOf(entity);
+    final restored = <String>{};
+    final error = app.run(() {
+      restored.addAll(app.ws.restoreFromTrash(doc, entity.id));
+    });
     if (error != null) {
       showToast(context, error, error: true);
       return;
     }
-    showToast(context, '已恢复：${entityTitle(entity)}');
+    // 删是级联删的，恢复也是级联恢复的 —— 提示必须说清**实际回来了多少**，
+    // 只报一个名字，用户会以为下级还留在回收站里（Q12）。
+    showToast(context, '已恢复：${_restoreScopeLabel(entity, doc, restored.length)}');
   }
+}
+
+/// 「已恢复」后面那半句：名字 + 实际范围与条数。
+String _restoreScopeLabel(Entity entity, DocName doc, int total) {
+  final name = entityTitle(entity);
+  if (total <= 1) return name;
+  if (doc == DocName.events) return '$name（含整条任务线，共 $total 条）';
+  return '$name（含下级，共 $total 条）';
 }
 
 // ---------------------------------------------------------------- 被隐藏

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import '../core/ids.dart';
 import '../core/json/store_file.dart';
@@ -14,6 +15,16 @@ import '../features/workspace.dart';
 import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
+
+/// 分享动作的可注入钩子（真机走 [DataTransferPlatform.shareFile]）。
+///
+/// 留这个口子的原因很具体：`share_plus` 在纯 Dart 测试里没有实现，而
+/// 「没分享出去就不算导出」这条语义**恰恰只有在"分享被取消"那条分支上才验得出来**。
+typedef ShareFileHook = Future<bool> Function(
+  String path, {
+  required String text,
+  required String subject,
+});
 
 /// 应用装配与动作门面（**单机形态**）。
 ///
@@ -30,17 +41,22 @@ class AppController extends ChangeNotifier {
     required this.workspace,
     required this.dataDirectory,
     required List<String> startupWarnings,
+    this.quarantinedPaths = const <String>[],
+    this.recoveredFromBackupPath,
     AiTextGenerator? aiGenerator,
     AiCredentialStore? credentialStore,
+    ShareFileHook? shareFile,
   })  : startupWarnings = List<String>.unmodifiable(startupWarnings),
         ai = aiGenerator ?? const HttpAiTextGenerator(),
-        credentials = credentialStore ?? const SecureAiCredentialStore();
+        credentials = credentialStore ?? const SecureAiCredentialStore(),
+        shareFile = shareFile ?? _defaultShareFile;
 
   /// 从磁盘装配（唯一入口）。
   static Future<AppController> bootstrap({
     Directory? dataDirectoryOverride,
     AiTextGenerator? aiGenerator,
     AiCredentialStore? credentialStore,
+    ShareFileHook? shareFile,
   }) async {
     final dir = await DataDirectory.resolve(override: dataDirectoryOverride);
     final storage = AppStorage(AppPaths(dir));
@@ -51,12 +67,36 @@ class AppController extends ChangeNotifier {
       workspace: workspace,
       dataDirectory: dir,
       startupWarnings: buildWarnings(report),
+      quarantinedPaths: report.quarantinedPaths,
+      recoveredFromBackupPath: report.recoveredFromBackup,
       aiGenerator: aiGenerator,
       credentialStore: credentialStore,
+      shareFile: shareFile,
     ).._loadBackgroundBytes();
     controller._purgeExpiredTrash();
+    controller._remindExportAfterIncident(report);
     return controller;
   }
+
+  static Future<bool> _defaultShareFile(
+    String path, {
+    required String text,
+    required String subject,
+  }) =>
+      DataTransferPlatform.shareFile(path, text: text, subject: subject);
+
+  /// 编辑会话的**路由观察者**：推开一个页面 = 一段编辑会话的开始，回到外壳 = 结束。
+  ///
+  /// 为什么用观察者而不是在每个编辑页里埋点：编辑面散在项目详情 / 事件详情 / 任务线 /
+  /// 合并编辑器等多个页面（分属不同批次、不同文件），逐页埋点必然会漏；
+  /// 而"进页面 → 离开"这件事对所有页面都是同一个形状，观察者是唯一不会漏的那一处。
+  ///
+  /// 只认 `PageRoute`：`showDialog` / 底部面板 / 弹出菜单走的是 `PopupRoute`，
+  /// 它们不是"编辑页面"，不该打断或重置会话。
+  late final NavigatorObserver editSessionObserver = _EditSessionObserver(
+    onEnter: storage.beginEditSession,
+    onLeave: storage.endEditSession,
+  );
 
   /// 启动时清一次回收站（墓碑只留 `trashRetentionDays` 天）。
   ///
@@ -74,6 +114,49 @@ class AppController extends ChangeNotifier {
   /// 上次启动清理掉了几条过期墓碑（0 = 没清）。
   int lastTrashPurgedCount = 0;
 
+  /// 本次启动被隔离保留的损坏文件（**完整路径**，界面只显示文件名）。
+  final List<String> quarantinedPaths;
+
+  /// 本次启动是用哪一份备份恢复的（`null` = 没发生恢复）。
+  final String? recoveredFromBackupPath;
+
+  /// 这次启动有没有发生过数据事故（损坏 / 隔离 / 自动恢复）。
+  bool get hasDataIncident =>
+      quarantinedPaths.isNotEmpty || recoveredFromBackupPath != null;
+
+  /// 恢复来源的**文件名**（告警条上要说的就是"从哪一份恢复的"）。
+  String? get recoveredFromBackupFileName => recoveredFromBackupPath == null
+      ? null
+      : _fileNameOf(recoveredFromBackupPath!);
+
+  /// 隔离文件的**文件名**列表（完整路径太长，界面上给名字 + 目录）。
+  List<String> get quarantinedFileNames =>
+      <String>[for (final path in quarantinedPaths) _fileNameOf(path)];
+
+  /// 告警条点开后逐条显示的明细。
+  List<String> get dataIncidentLines {
+    final lines = <String>[];
+    final from = recoveredFromBackupFileName;
+    if (from != null) lines.add('已从备份恢复：$from');
+    for (final name in quarantinedFileNames) {
+      lines.add('损坏的原文件已隔离保留：$name');
+    }
+    if (lines.isEmpty) {
+      lines.add('主数据文件读入时发现异常，已按《数据契约》的容错口径降级处理');
+    }
+    return lines;
+  }
+
+  /// 数据事故之后**重新拉响导出提醒**。
+  ///
+  /// 没有云端时导出是数据离开这台手机的唯一通道；刚发生过损坏或自动恢复，
+  /// 说明本地这一份已经不能全信 —— 这时界面上若还写着"上次导出很新，不用导"，
+  /// 等于把最该导出的一次轻轻放过。做法是把 `lastExportedAt` 清回"从未导出"。
+  void _remindExportAfterIncident(LoadReport report) {
+    if (!report.hasProblems) return;
+    workspace.updatePrefs(prefs.copyWith(lastExportedAt: null));
+  }
+
   final AppStorage storage;
 
   /// 恢复备份后会整体替换（UI 每次重建都读 `ws`，因此替换是安全的）
@@ -88,6 +171,9 @@ class AppController extends ChangeNotifier {
 
   /// `apiKey` 的保管处（默认 `flutter_secure_storage`）
   final AiCredentialStore credentials;
+
+  /// 把文件交给系统分享面板的动作（默认走平台通道；用例注入假实现）。
+  final ShareFileHook shareFile;
 
   Workspace get ws => workspace;
 
@@ -250,39 +336,89 @@ class AppController extends ChangeNotifier {
     return error;
   }
 
+  /// 手动留一份备份（「立即备份一份」）：**强制轮转**，不等最小间隔。
+  ///
+  /// 不复用 `workspace.snapshotNow()` 的原因：那个走的是 `save()` 的节流路径，
+  /// 而用户点这个按钮的意思就是"现在、立刻留一份"——节流会让这句话落空。
+  /// 返回 `null` 表示成功。
+  String? snapshotBackupNow() {
+    try {
+      storage.save(workspace.buildStoreFile(), forceRotate: true);
+      notifyListeners();
+      return null;
+    } on FileSystemException catch (error) {
+      return '保存失败，这次备份没有写进磁盘（${error.message}）。请检查存储空间后重试。';
+    }
+  }
+
+  // ------------------------------------------------------------ 实现计划的历史正文
+
+  /// 某项目「实现计划」的历史正文（AI 覆盖之前那一版）；没有返回 `null`。
+  String? implementationSnapshot(String projectId) =>
+      storage.readImplementationSnapshot(projectId);
+
+  /// 覆盖「实现计划」之前留一份旧正文（AI 预览页调用）。
+  void saveImplementationSnapshot(String projectId, String text) =>
+      storage.saveImplementationSnapshot(projectId, text);
+
+  /// 当前正文（留档用；取不到项目时给空串）。
+  String currentImplementation(String projectId) =>
+      workspace.findProject(projectId)?.implementation ?? '';
+
+  /// 把「实现计划」退回历史正文，然后**销掉这份历史**。
+  ///
+  /// 销掉是刻意的：一份历史只值一次反悔 —— 留着它，用户会以为"退回"可以反复按，
+  /// 而第二次按下时退回的其实还是同一份，与预期不符。返回 `null` 表示成功。
+  String? revertImplementation(String projectId) {
+    final snapshot = storage.readImplementationSnapshot(projectId);
+    if (snapshot == null) return '没有可退回的上一版';
+    final error = run(() => workspace.replaceImplementation(projectId, snapshot));
+    if (error != null) return error;
+    storage.clearImplementationSnapshot(projectId);
+    notifyListeners();
+    return null;
+  }
+
   // ------------------------------------------------------------ 导出 / 导入
 
   /// 导出整份数据并交给系统分享面板。
   ///
-  /// 分享是否成功**不影响导出本身**：文件已经落在应用私有目录里了，
-  /// 用户取消分享只是没把它发出去。
+  /// **"落到私有目录"与"离开这台手机"是两件事**（2026-09-26 定的口径）：
+  /// 文件写在应用私有目录里，用户一旦取消分享它就没出去，而卸载 App 会把私有目录
+  /// 一起删掉。所以只有 [shareFile] 真的返回 `true` 才记一次"已导出"——
+  /// 否则那句"超过 7 天没导出"的提醒不销账，用户不会被一个假账哄过去。
   Future<({bool ok, String message})> exportAndShare() async {
     try {
       final now = Ids.nowMillis();
       final bytes = ExportCodec.encode(workspace.buildStoreFile(), exportedAt: now);
       final file = storage.writeExport(bytes, nowMillis: now);
-      workspace.markExported(now);
-      notifyListeners();
-
       final name = _fileNameOf(file.path);
-      final shared = await DataTransferPlatform.shareFile(
+
+      final shared = await shareFile(
         file.path,
         text: 'Guide Line 数据导出',
         subject: 'Guide Line 数据导出',
       );
+      if (shared) {
+        workspace.markExported(now);
+        notifyListeners();
+        return (ok: true, message: '已导出并分享：$name');
+      }
       return (
         ok: true,
-        message: shared ? '已导出并分享：$name' : '已导出到应用私有目录：$name',
+        message: '文件只落在应用私有目录（$name），没有离开手机 —— '
+            '导出提醒不会销账；想销账请成功分享一次。',
       );
     } catch (error) {
       return (ok: false, message: '导出失败：$error');
     }
   }
 
-  /// 生成某项目的**交接说明**（Markdown）并交给系统分享面板。  ///
+  /// 生成某项目的**交接说明**（Markdown）并交给系统分享面板。
+  ///
   /// 与整库导出分开：这份只含**用户预览过的那一个项目**（目的、实现清单与正文、
   /// 待处理灵感、相关事件与任务线），用来丢给电脑上的 AI。
-  /// 分享是否成功不影响导出本身 —— 文件已经落在应用私有目录里了。
+  /// 分享是否成功不影响文件本身 —— 它已经落在应用私有目录里了（也不涉及导出提醒）。
   Future<({bool ok, String message})> exportHandoffAndShare({
     required String projectId,
     required String markdown,
@@ -296,14 +432,14 @@ class AppController extends ChangeNotifier {
         projectTitle: project?.title,
       );
       final name = _fileNameOf(file.path);
-      final shared = await DataTransferPlatform.shareFile(
+      final shared = await shareFile(
         file.path,
         text: '${project?.title ?? '项目'} · 交接说明',
         subject: '${project?.title ?? '项目'} · 交接说明',
       );
       return (
         ok: true,
-        message: shared ? '已导出并分享：$name' : '已导出到应用私有目录：$name',
+        message: shared ? '已导出并分享：$name' : '文件只落在应用私有目录：$name（没有分享出去）',
       );
     } catch (error) {
       return (ok: false, message: '导出失败：$error');
@@ -467,5 +603,59 @@ class AppController extends ChangeNotifier {
       warnings.add('解析时发现 ${report.issues.errors.length} 处问题，已按数据契约降级处理');
     }
     return warnings;
+  }
+}
+
+/// 把「推开一个页面 / 回到外壳」翻译成存储层的编辑会话。
+///
+/// 三条规则，都是为了"一段操作 = 一份备份"这件事不出错：
+///   · **只认 `PageRoute`**：对话框、底部面板、弹出菜单都是 `PopupRoute`，
+///     它们不算"进了另一个页面"，不该结束或重置会话；
+///   · **跳过第一个路由**：外壳自己是 Navigator 的初始路由，它的 `previousRoute`
+///     是 `null`。把它也算成"进页面"的话，App 一启动就永远停在会话里，
+///     非会话那套最小间隔节流就再也不会生效；
+///   · **按深度配对**：详情页里再推开一层时，只有回到外壳（深度归零）才算离开。
+///     所以要数着开着的页面，不能见 push 就进、见 pop 就出。
+class _EditSessionObserver extends NavigatorObserver {
+  _EditSessionObserver({required this.onEnter, required this.onLeave});
+
+  final void Function() onEnter;
+  final void Function() onLeave;
+
+  /// 当前推开的页面数（不含外壳自己）。
+  int _openPages = 0;
+
+  void _enter(Route<dynamic>? route, Route<dynamic>? previousRoute) {
+    if (route is! PageRoute || previousRoute == null) return;
+    _openPages += 1;
+    if (_openPages == 1) onEnter();
+  }
+
+  void _leave(Route<dynamic>? route) {
+    if (route is! PageRoute) return;
+    if (_openPages == 0) return;
+    _openPages -= 1;
+    if (_openPages == 0) onLeave();
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _enter(route, previousRoute);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => _leave(route);
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => _leave(route);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    // 替换（pushReplacement）目前一处都没用到，但漏掉它会让深度只增不减 ——
+    // 一旦将来用上，会话就再也不结束了。按"旧的离开 + 新的进来"处理。
+    if (oldRoute is! PageRoute) return;
+    _leave(oldRoute);
+    if (newRoute is! PageRoute) return;
+    _openPages += 1;
+    if (_openPages == 1) onEnter();
   }
 }

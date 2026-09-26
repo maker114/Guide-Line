@@ -10,7 +10,9 @@ import '../common/dialogs.dart';
 ///   · 请求只发到你自己填的地址，没有硬编码的第三方服务器；
 ///   · **只发项目名称、目的、清单条目** —— 灵感原文、事件任务、其它项目都不发；
 ///   · `apiKey` 存在系统安全存储里，**不进偏好文件、不进备份、不进导出**；
-///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「实现计划」。
+///   · 提示词与模型返回的原文都不落盘，只有你确认过的结果写进「实现计划」；
+///   · 开关**即时生效**，地址 / 模型 / Key 只在你按「保存」时写入 ——
+///     「测试连接」用临时配置试跑，**一个字都不存**。
 class AiSettingsPage extends StatefulWidget {
   const AiSettingsPage({super.key, required this.app});
 
@@ -90,6 +92,17 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   onChanged: (value) => setState(() => widget.app.setAiEnabled(value)),
                 ),
                 const Divider(height: 1),
+                // 「什么时候生效」这一句必须写在改的地方旁边：
+                // 开关是**即时生效**的，而地址 / 模型 / Key 要按「保存」——
+                // 两者混在一起时，用户会以为填完就已经存住了。
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Text(
+                    '开关即时生效；下面的地址 / 模型 / Key 要按右上角「保存」才写入，'
+                    '「测试连接」只试不存。',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
                 _Field(
                   label: 'API 地址',
                   hint: AiConfig.defaultBaseUrl,
@@ -126,6 +139,9 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                 // 加它的原因是一次真实的排查困难 —— 用户在手机上看到"没有这个网站"，
                 // 但地址栏里到底存的是什么、拼成了什么请求，界面上完全看不到，
                 // 只能靠猜。这里一次点击就能定位（地址错 / 密钥错 / 被限流）。
+                //
+                // 它**不写任何配置**：测试失败之后用户往往直接返回，
+                // "先存再测"等于把那个错地址 / 错 Key 悄悄留在了库里。
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                   child: Row(
@@ -144,7 +160,8 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          '会真的发一次请求（只发一句测试文字，不含你的任何数据）',
+                          '会真的发一次请求（只发一句测试文字，不含你的任何数据），'
+                          '但这一下不会保存 —— 存下来要按右上角「保存」',
                           style: theme.textTheme.labelSmall,
                         ),
                       ),
@@ -193,7 +210,8 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
     );
   }
 
-  Future<void> _save() async {    final config = AiConfig(
+  Future<void> _save() async {
+    final config = AiConfig(
       baseUrl: _baseUrl.text,
       apiKey: _apiKey.text,
       model: _model.text,
@@ -214,8 +232,13 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   }
 
   Future<void> _clearKey() async {
+    // 只动**已保存的那把 Key**：这里若拿输入框里的地址 / 模型去写，
+    // 就等于"点一下清除，顺手把还没按保存的编辑也存了"，跟这一页新写下的
+    // "地址 / 模型 / Key 要按「保存」才写入"自相矛盾。
+    final stored = await widget.app.readAiConfig();
+    if (!mounted) return;
     final error = await widget.app.saveAiConfig(
-      AiConfig(baseUrl: _baseUrl.text, apiKey: '', model: _model.text),
+      AiConfig(baseUrl: stored.baseUrl, apiKey: '', model: stored.model),
     );
     if (!mounted) return;
     if (error != null) {
@@ -229,33 +252,38 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   /// 真的发一次请求，把**实际地址**与**服务端原话**显示出来。
   ///
   /// 只发一句固定的测试文字，**不带用户任何数据** —— 这一点也写在按钮旁边。
+  ///
+  /// **用临时配置测，一个字都不落盘**：以前是"先 `saveAiConfig` 再测"，可用户
+  /// 测失败（地址写错、Key 粘错）之后多半直接返回，那份错配置就已经存住了，
+  /// 下一次真用 AI 整理时才炸 —— 那时他已经不记得自己试过什么。
+  /// 现在测试与保存彻底分开：测出来的问题当场看得见，存不存由他按「保存」决定。
   Future<void> _testConnection() async {
-    // 先把当前输入框里的值存下来再测：不然"改了地址没保存就去测"会测到旧配置
-    final saveError = await widget.app.saveAiConfig(
-      AiConfig(baseUrl: _baseUrl.text, apiKey: _apiKey.text, model: _model.text),
-    );
+    // 已保存的 Key **不在输入框里回显**（见 _load），所以框里为空时沿用安全存储里
+    // 那一把 —— 否则"只改地址、不改 Key"的人一测就得到"还没填 API Key"。
+    final stored = await widget.app.readAiConfig();
     if (!mounted) return;
-    if (saveError != null) {
-      setState(() {
-        _testOk = false;
-        _testResult = '保存配置失败：$saveError';
-      });
-      return;
-    }
+    final typedKey = _apiKey.text.trim();
+    final draft = AiConfig(
+      baseUrl: _baseUrl.text,
+      apiKey: typedKey.isEmpty ? stored.apiKey : typedKey,
+      model: _model.text,
+    );
+
     setState(() {
-      _apiKey.clear();
-      _keyStored = true;
       _testing = true;
       _testResult = null;
     });
 
-    final config = await widget.app.readAiConfig();
-    final result = await widget.app.testAiConnection(config);
+    final result = await widget.app.testAiConnection(draft);
     if (!mounted) return;
     setState(() {
       _testing = false;
       _testOk = result.ok;
-      _testResult = result.message;
+      // 成功时补一句"还没保存"：不然用户会以为测通 = 存好了，
+      // 关掉页面再回来发现地址还是旧的（这正是要避免的那类惊讶）。
+      _testResult = result.ok
+          ? '${result.message}\n\n（这次只是试跑：上面的配置还没保存，按右上角「保存」才会写入）'
+          : result.message;
     });
   }
 }
