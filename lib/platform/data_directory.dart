@@ -31,14 +31,16 @@ class AppInfo {
 
   static const String displayName = 'Guide Line';
 
-  static const String version = '1.1.0';
+  static const String version = '1.3.0';
 
-  static const String buildNumber = '2';
+  static const String buildNumber = '4';
 
-  /// 界面与导出里展示的完整版本（`1.1.0+2`）。
+  /// 界面与导出里展示的完整版本（`1.3.0+4`）。
   ///
   /// 只留这一个源头：以前 `pubspec.yaml`、关于对话框、更多页各写一遍，
   /// 发版时必然漏一个（1.0.0 就是漏到 1.1.0 才发现），所以这里拼出来给界面用。
+  /// **有测试守着**：`test/core/version_test.dart` 读 `pubspec.yaml` 的 `version:` 行，
+  /// 与这里的两个常量对照 —— 漏改哪一处都会让测试变红，不再靠人记得。
   static const String versionLabel = '$version+$buildNumber';
 
   /// Android 包名（真正的权威在 `android/app/build.gradle.kts`）。
