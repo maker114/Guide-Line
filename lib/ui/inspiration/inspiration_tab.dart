@@ -620,6 +620,13 @@ class InspirationTabState extends State<InspirationTab> {
               icon: Icons.drive_file_move_outline,
               onPressed: count == 0 ? null : () => _batchAssign(context),
             ),
+            // 多选合并（Q37）：≥2 条时是"一次并几条"，只剩 1 条时行为
+            // 与单条合并完全一样 —— 所以不按条数禁用，只按"有没有选中"。
+            _BarAction(
+              tooltip: '合并…',
+              icon: Icons.merge_type,
+              onPressed: count == 0 ? null : () => _batchMerge(context),
+            ),
             _BarAction(
               tooltip: '丢弃',
               icon: Icons.visibility_off_outlined,
@@ -658,6 +665,51 @@ class InspirationTabState extends State<InspirationTab> {
         projectId == null ? '已解除 ${ids.length} 条的分配' : '已分配 ${ids.length} 条',
       );
     }
+    _exitSelection();
+  }
+
+  /// 多选合并（Q37）：选中的多条**一次带进合并编辑器**，并进用户选定的目标。
+  ///
+  /// 三条口径：
+  ///   · **顺序 = 列表当前顺序**（灵感列表按创建时间倒序，也就是用户看到的
+  ///     从上到下）—— 追加原文各占一行、作为清单条目各成一条，都按它来；
+  ///   · **落点项目先选**：多选可能跨项目，所以不沿用"某一条"的归属；
+  ///     走的是同一个 `pickProject`，**分类不可选**（点了只给 Q2 那句提示）；
+  ///   · 合并完退出多选 —— 那些灵感已经不在这一页了（都进了归档区「已合并」）。
+  Future<void> _batchMerge(BuildContext context) async {
+    // 顺序取列表顺序：`inspirationInbox` 与页面上那份列表是同一个排序，
+    // 用选中的 id 过滤出来即可（Set 本身没有顺序）
+    final picks = widget.app.ws.inspirationInbox
+        .where((inspiration) => _selectedIds.contains(inspiration.id))
+        .toList(growable: false);
+    if (picks.isEmpty) return;
+
+    final picked = await pickProject(context, widget.app, title: '合并到哪个项目');
+    if (picked == null || !context.mounted) return;
+    final project = widget.app.ws.findProject(picked);
+    if (project == null || !context.mounted) return;
+
+    final result = await Navigator.of(context).push<MergeResult>(
+      MaterialPageRoute<MergeResult>(
+        builder: (_) => MergeEditorPage.many(
+          project: project,
+          inspirations: picks,
+          isCategory: widget.app.ws.isProjectCategory(project.id),
+        ),
+      ),
+    );
+    if (result == null || !context.mounted) return;
+
+    final merged = await applyMergeResultFor(
+      context,
+      widget.app,
+      project,
+      inspirations: picks,
+      result: result,
+    );
+    // 一句"并进了哪个项目、几条"的提示由 `applyMergeResultFor` 给；
+    // 只有真的并进去了才退出多选 —— 被 Q8 之类拦下时要留在原地重选
+    if (!merged || !context.mounted) return;
     _exitSelection();
   }
 

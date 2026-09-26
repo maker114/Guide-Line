@@ -44,6 +44,21 @@ const String _parallelGone =
 const String implementationUnchanged =
     '正文没有变化，这条灵感还没写进项目 —— 用「追加原文」或「作为清单条目」';
 
+/// 批量合并灵感的**落点**（Q37）—— 与单条的两个方法一一对应：
+/// [MergeLanding.implementation] ↔ [Workspace.mergeInspiration]，
+/// [MergeLanding.checklist] ↔ [Workspace.mergeInspirationAsItem]。
+///
+/// 界面上给的是三个选择（手改正文 / 追加原文 / 作为清单条目），但前两个最后
+/// 都是"给出一段新的正文"：**追加是文本拼接**（[Workspace.appendToImplementation]），
+/// 不是另一种数据动作，所以落点只有两个。
+enum MergeLanding {
+  /// 落点一 / 二：用给定的新正文（手改后的、或追加原文后的）替换「如何解决」。
+  implementation,
+
+  /// 落点三：选中的灵感**各成一条**「实现清单」条目。
+  checklist,
+}
+
 /// 分类的汇总（Q2）—— **只统计，不判定**。
 ///
 /// 口径（与《定义与边界》§2.1 / §2.2 一致，只用契约里已有的字段）：
@@ -902,6 +917,81 @@ class Workspace {
     _markInspirationMerged(inspiration, projectId, now);
     persist();
     return item;
+  }
+
+  /// 合并灵感 · **批量**（Q37）：选中的多条**一次落盘**并完。
+  ///
+  /// 规则与单条 [mergeInspiration] / [mergeInspirationAsItem] 完全一致，
+  /// 只是把"一条"换成"一批"：
+  ///   · 每条灵感都要在、都没合并过；目标项目要在、没被删除；
+  ///   · [MergeLanding.implementation]：[newImplementation] 就是新的「如何解决」——
+  ///     **空正文一律拒绝**，与当前正文一模一样也拒绝（Q8，[implementationUnchanged]）；
+  ///   · [MergeLanding.checklist]：[itemTexts] 与 [inspirationIds] **一一对应**
+  ///     （顺序就是落进清单的顺序），任何一条文本为空都整批拒绝；
+  ///   · **先整体校验再落盘**：任何一处不合法就一条都不动 —— 批量动作绝不留
+  ///     "改了一半"的半截状态（与 [assignInspirations]、[setTasksDue] 同一套做法）。
+  ///
+  /// 为什么不是"循环调单条"：那样每次都 `persist()` 重写整份文件并轮转备份，
+  /// 既慢，又会在中途失败时留下只并了一半的库。这里项目侧与灵感侧的改动跟着
+  /// **同一次** [persist] 写下去，单文件让这两处天然全有或全无。
+  void mergeInspirations({
+    required Iterable<String> inspirationIds,
+    required String projectId,
+    required MergeLanding landing,
+    String? newImplementation,
+    List<String>? itemTexts,
+  }) {
+    final ids = inspirationIds.toList(growable: false);
+    if (ids.isEmpty) return; // 空列表是安全的空操作，不写盘
+
+    final project = findProject(projectId);
+    if (project == null || project.deleted) throw const RuleViolation('目标项目不存在');
+
+    final inspirations = <Inspiration>[
+      for (final id in ids) _requireMergeable(id, projectId),
+    ];
+
+    // ---- 校验：全部通过之前一个字都不写 ----
+    String body = '';
+    final newItems = <ProjectItem>[];
+    switch (landing) {
+      case MergeLanding.implementation:
+        body = (newImplementation ?? '').trim();
+        if (body.isEmpty) throw const RuleViolation('正文不能是空的');
+        if (body == project.implementation) {
+          throw const RuleViolation(implementationUnchanged);
+        }
+      case MergeLanding.checklist:
+        final texts = itemTexts ?? const <String>[];
+        if (texts.length != ids.length) {
+          // 一条灵感对应一条清单条目：数目对不上就是调用方写错了，
+          // 与其猜"多的算谁的"，不如整批拒绝
+          throw const RuleViolation('清单条目要和灵感一一对应');
+        }
+        for (final text in texts) {
+          final trimmed = text.trim();
+          if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+          newItems.add(ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false));
+        }
+    }
+
+    // ---- 落盘：项目侧 + 灵感侧一次写完 ----
+    final now = Ids.nowMillis();
+    _upsert(
+      DocName.projects,
+      switch (landing) {
+        MergeLanding.implementation =>
+          project.copyWith(implementation: body, updatedAt: now),
+        MergeLanding.checklist => project.copyWith(
+            items: <ProjectItem>[...project.items, ...newItems],
+            updatedAt: now,
+          ),
+      },
+    );
+    for (final inspiration in inspirations) {
+      _markInspirationMerged(inspiration, projectId, now);
+    }
+    persist();
   }
 
   /// 两种合并共用的前置检查：灵感在、目标项目在、这条灵感还没合并过。

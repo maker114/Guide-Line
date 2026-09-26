@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/models/inspiration.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/inspiration/merge_editor_page.dart';
 
@@ -272,6 +273,79 @@ void main() {
     expect(find.text('如何解决（可编辑）'), findsOneWidget);
     expect(find.text('追加原文'), findsOneWidget);
     expect(find.text('作为清单条目'), findsOneWidget);
+  });
+
+  testWidgets('多选合并：原文按顺序列出来（默认展开），「追加原文」各占一行（Q37）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '项目辛');
+    app.run(() => app.ws.updateProject(project.id, implementation: '已有的一行'));
+    final first = app.ws.captureInspiration('第一条原文');
+    final second = app.ws.captureInspiration('第二条原文');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MergeEditorPage.many(
+          project: app.ws.findProject(project.id)!,
+          inspirations: <Inspiration>[first, second],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // "这次并的是哪几条"：条数写进标题、原文按顺序列出来，多条默认展开
+    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
+    expect(find.text('第一条原文'), findsOneWidget);
+    expect(find.text('第二条原文'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('第一条原文')).dy,
+      lessThan(tester.getTopLeft(find.text('第二条原文')).dy),
+      reason: '列出的顺序就是落进项目的顺序',
+    );
+
+    await tester.tap(find.text('追加原文'));
+    await tester.pumpAndSettle();
+
+    expect(editorText(tester), '已有的一行\n第一条原文\n第二条原文');
+    expect(
+      app.ws.findProject(project.id)!.implementation,
+      '已有的一行',
+      reason: '只改编辑框，没点保存就不该写盘',
+    );
+  });
+
+  testWidgets('多条 + 深色 + 1.6 倍字体、窄屏下这一页也不溢出（Q37）', (tester) async {
+    // 多条一起并时「灵感原文（参考）」默认展开（多一块固定高度），最容易挤爆布局
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await boot();
+    final project = app.ws.createProject(title: '一个名字相当长的项目名');
+    app.run(() => app.ws.updateProject(project.id, implementation: '一段相当长的正文，用来撑满编辑框'));
+    final inspirations = <Inspiration>[
+      app.ws.captureInspiration('一条比较长的灵感内容，用来检验放大字体后会不会挤爆布局', projectId: project.id),
+      app.ws.captureInspiration('另一条同样很长的灵感内容，多条一起并时参考面板默认是展开的', projectId: project.id),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: MergeEditorPage.many(
+          project: app.ws.findProject(project.id)!,
+          inspirations: inspirations,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('追加原文'), findsOneWidget);
+    expect(find.text('作为清单条目'), findsOneWidget);
+    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
   });
 
   testWidgets('分类不装灵感：给分类打开这一页时不给任何合并动作，只说明原因', (tester) async {

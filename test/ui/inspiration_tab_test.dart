@@ -222,6 +222,127 @@ void main() {
     );
   });
 
+  testWidgets('多选合并：一次进编辑器，追加原文把两条按顺序各占一行接进正文（Q37）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标项目');
+    app.run(() => app.ws.updateProject(project.id, implementation: '已有的正文'));
+    app.run(() => app.ws.captureInspiration('灵感甲', projectId: project.id));
+    app.run(() => app.ws.captureInspiration('灵感乙', projectId: project.id));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 合并顺序 = 列表当前顺序（创建时间倒序，也就是用户看到的从上到下）
+    final order = app.ws.inspirationInbox.map((i) => i.text).toList(growable: false);
+    expect(order.length, 2);
+    expect(
+      tester.getTopLeft(find.text(order[0])).dy,
+      lessThan(tester.getTopLeft(find.text(order[1])).dy),
+      reason: '列表上第一条就在第二条上面（顺序按它算）',
+    );
+
+    await tester.longPress(find.text(order[0]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(order[1]));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 条'), findsWidgets);
+
+    // 多选动作条上的「合并…」（与其它动作同一套胶囊图标按钮）
+    await tester.tap(find.byIcon(Icons.merge_type));
+    await tester.pumpAndSettle();
+    // 先选落点项目（多选可能跨项目）
+    await tester.tap(find.text('目标项目').last);
+    await tester.pumpAndSettle();
+
+    // 编辑器里要能看出"这次并的是哪几条"：多条按顺序列出来、默认展开
+    expect(find.textContaining('合并进「目标项目」'), findsOneWidget);
+    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
+    expect(find.text(order[0]), findsOneWidget);
+    expect(find.text(order[1]), findsOneWidget);
+
+    await tester.tap(find.text('追加原文'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+
+    expect(
+      app.ws.findProject(project.id)!.implementation,
+      '已有的正文\n${order[0]}\n${order[1]}',
+      reason: '多条原文按顺序各占一行接到正文末尾',
+    );
+    expect(app.ws.inspirationInbox, isEmpty);
+    expect(
+      app.ws.archiveZone.mergedInspirations.length,
+      2,
+      reason: '两条都要能在归档区「已合并」找回',
+    );
+    expect(find.textContaining('已把 2 条灵感并进「目标项目」'), findsOneWidget);
+    expect(find.text('已选 1 条'), findsNothing, reason: '合并完要退出多选');
+  });
+
+  testWidgets('多选合并「作为清单条目」：清单多出两条，顺序与列表一致（Q37）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标项目');
+    app.run(() => app.ws.captureInspiration('灵感甲', projectId: project.id));
+    app.run(() => app.ws.captureInspiration('灵感乙', projectId: project.id));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    final order = app.ws.inspirationInbox.map((i) => i.text).toList(growable: false);
+    await tester.longPress(find.text(order[0]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(order[1]));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.merge_type));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('目标项目').last);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('作为清单条目'));
+    await tester.pumpAndSettle();
+
+    final reloaded = app.ws.findProject(project.id)!;
+    expect(reloaded.items.map((i) => i.text), order, reason: '一条灵感一条，顺序与列表一致');
+    expect(reloaded.implementation, isEmpty, reason: '这个落点不碰正文');
+    expect(app.ws.inspirationInbox, isEmpty);
+    expect(app.ws.archiveZone.mergedInspirations.length, 2);
+    expect(find.textContaining('已把 2 条灵感追加到「目标项目」的清单'), findsOneWidget);
+  });
+
+  testWidgets('合并先选目标：分类点不动，只给一句「分类不装灵感」（Q37 / Q2）', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    app.ws.createProject(title: '发布 v1', parentId: category.id);
+    app.run(() => app.ws.captureInspiration('灵感甲', projectId: category.id));
+    app.run(() => app.ws.captureInspiration('灵感乙', projectId: category.id));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 只选了 1 条也能用「合并…」（行为等同单条合并）
+    await tester.tap(find.text('多选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.merge_type));
+    await tester.pumpAndSettle();
+
+    // 分类行明说"不装灵感"：点它只给提示，不往下走
+    expect(find.text('分类（不装灵感）'), findsOneWidget);
+    await tester.tap(find.text('工作').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('分类不装灵感，请选一个目标或先建一个目标'), findsOneWidget);
+    expect(find.textContaining('合并进「'), findsNothing, reason: '被拦下就不该进编辑器');
+    expect(app.ws.inspirationInbox.length, 2, reason: '一条都不许被合掉');
+    expect(app.ws.archiveZone.mergedInspirations, isEmpty);
+
+    // 选目标才继续
+    await tester.tap(find.text('发布 v1').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('合并进「发布 v1」'), findsOneWidget);
+  });
+
   testWidgets('写下来的时候就选好项目：选完「记下」直接就是已分配', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '目标项目');

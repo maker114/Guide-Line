@@ -7,19 +7,32 @@ import '../../features/workspace.dart';
 import '../common/dialogs.dart';
 import '../common/project_picker.dart';
 
-/// 合并编辑器交回去的结果：**这条灵感落在哪、落了什么文本**。
+/// 合并编辑器交回去的结果：**这次并的灵感落在哪、落了什么文本**。
 class MergeResult {
-  const MergeResult.intoImplementation(this.text) : asChecklistItem = false;
+  /// 落点一 / 二：写进「如何解决」的**新正文**。
+  ///
+  /// 多条一起并时，"追加原文"已经在编辑器里按顺序接好了，这里拿到的就是
+  /// 最终的整段正文 —— 落盘的是一条相同的路（替换正文）。
+  const MergeResult.intoImplementation(this.text)
+      : asChecklistItem = false,
+        itemTexts = const <String>[];
 
-  const MergeResult.intoChecklist(this.text) : asChecklistItem = true;
+  /// 落点三：作为「实现清单」的新条目，**一条灵感一条**，顺序即顺序。
+  const MergeResult.intoChecklist({required this.itemTexts})
+      : asChecklistItem = true,
+        text = '';
 
+  /// 落点一 / 二的新正文（落点三用不到它，那时正文一个字都不动）。
   final String text;
 
-  /// `true` = 作为清单的新一条追加；`false` = 写进「如何解决」
+  /// 落点三要追加的清单条目文本，与带进编辑器的灵感**一一对应**。
+  final List<String> itemTexts;
+
+  /// `true` = 作为清单的新条目追加；`false` = 写进「如何解决」
   final bool asChecklistItem;
 }
 
-/// 合并编辑器（**手机端形态**）：把一条灵感并进**目标**，页面上给**三种选择**。
+/// 合并编辑器（**手机端形态**）：把灵感并进**目标**，页面上给**三种选择**。
 ///
 /// ```
 /// 如何解决（可编辑）                    ← 一进来就是当前正文
@@ -27,31 +40,47 @@ class MergeResult {
 /// │ （正文原文，编辑框）                │
 /// └──────────────────────────────────┘
 ///  [追加原文]   [作为清单条目]
-///  灵感原文（参考）
+///  灵感原文（参考）                     ← 多条一起并时按顺序列出来、默认展开
 /// ```
 ///
-///   1. **手改正文**：照着这条灵感把正文改清楚，改完点右上角「保存」→ 替换
+///   1. **手改正文**：照着灵感把正文改清楚，改完点右上角「保存」→ 替换
 ///      「如何解决」；
-///   2. **追加原文**：把灵感文本原封不动**另起一行**接到正文末尾（只改编辑框，
-///      仍要点保存才写盘；不润色、不改写）；
-///   3. **作为清单条目**：不碰正文，直接把它追加成「实现清单」的新一条。
+///   2. **追加原文**：把灵感文本原封不动**另起一行**接到正文末尾（多条则
+///      **按顺序各占一行**；只改编辑框，仍要点保存才写盘；不润色、不改写）；
+///   3. **作为清单条目**：不碰正文，直接把它追加成「实现清单」的新一条
+///      （多条则**各成一条**，顺序就是带进来的顺序）。
 ///
-/// 三个动作都以"这条灵感已经处理掉"收尾（置为 `merged`，原文可在归档区
+/// 三个动作都以"这些灵感已经处理掉"收尾（置为 `merged`，原文可在归档区
 /// 「已合并」找回）。第 3 种是**立刻结束**的：编辑框里没保存的改动不会写回，
 /// 所以它单独做成一个按钮，而不是混进「保存」。
 ///
 /// **落点只能是目标**（Q2）：走到这一页的项目若已经有下级（= 分类），
 /// 这一页不给任何合并动作，只说明原因 —— 分类只回答"归哪一类"，不装灵感。
 class MergeEditorPage extends StatefulWidget {
-  const MergeEditorPage({
+  /// 单条合并（项目详情页那条老路）：一条灵感，行为一字不变。
+  MergeEditorPage({
     super.key,
     required this.project,
-    required this.inspiration,
+    required Inspiration inspiration,
+    this.isCategory = false,
+  }) : inspirations = <Inspiration>[inspiration];
+
+  /// **多选合并**（Q37）：一次把选中的多条带进来。
+  ///
+  /// [inspirations] 的顺序**就是**灵感列表上从上到下的顺序 ——
+  /// 「追加原文」各占一行、「作为清单条目」各成一条，都按它来；
+  /// 编辑器里的「灵感原文（参考）」也照它列，让用户看得出这次并的是哪几条。
+  const MergeEditorPage.many({
+    super.key,
+    required this.project,
+    required this.inspirations,
     this.isCategory = false,
   });
 
   final Project project;
-  final Inspiration inspiration;
+
+  /// 这次要并的灵感（至少一条）。
+  final List<Inspiration> inspirations;
 
   /// 这个项目**此刻是不是分类**（有未归档、未删除的直属下级）。
   ///
@@ -72,6 +101,23 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   bool _referenceExpanded = false;
 
   @override
+  void initState() {
+    super.initState();
+    // 多条一起并时，"这次并的是哪几条"必须一眼看得见（Q37）→ 默认展开；
+    // 单条维持原样（默认收起，想看得自己点一下）。
+    _referenceExpanded = widget.inspirations.length > 1;
+  }
+
+  /// 这次要并的灵感原文，**顺序即列表顺序**（参考面板与落点三共用一份）。
+  List<String> get _originalTexts =>
+      <String>[for (final inspiration in widget.inspirations) inspiration.text];
+
+  /// 文案里的主语：一条说"这条灵感"，多条说"N 条灵感"。
+  String get _subject => widget.inspirations.length > 1
+      ? '这 ${widget.inspirations.length} 条灵感'
+      : '这条灵感';
+
+  @override
   void dispose() {
     _implementation.dispose();
     super.dispose();
@@ -80,7 +126,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   /// 选择一：把改好的正文写回「如何解决」。
   ///
   /// 「一进来就是这个值、用户一个字没改」时**不保存**（Q8）：那样"合并"实际
-  /// 什么都没发生，灵感却会被标成已合并并离开灵感箱。业务层（`mergeInspiration`）
+  /// 什么都没发生，灵感却会被标成已合并并离开灵感箱。业务层（`mergeInspirations`）
   /// 同样会拒 —— 这里挡一道只是为了把话说在离用户最近的这一层。
   void _save() {
     final text = _implementation.text.trim();
@@ -96,19 +142,22 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
     Navigator.of(context).pop(MergeResult.intoImplementation(text));
   }
 
-  /// 选择二：灵感原文原封不动作为新的一行接到末尾（**仍要点保存**）。
+  /// 选择二：灵感原文原封不动作为新的一行接到末尾（多条**按顺序各占一行**，
+  /// **仍要点保存**）。
   void _appendOriginal() {
-    final next = Workspace.appendToImplementation(
-      _implementation.text,
-      widget.inspiration.text,
-    );
+    var next = _implementation.text;
+    for (final inspiration in widget.inspirations) {
+      next = Workspace.appendToImplementation(next, inspiration.text);
+    }
     _implementation.text = next;
     _implementation.selection = TextSelection.collapsed(offset: next.length);
   }
 
-  /// 选择三：不碰正文，直接把它追加成清单的新一条（点一下即结束合并）。
+  /// 选择三：不碰正文，直接把原文**各成一条**追加进清单（点一下即结束合并）。
   void _asChecklistItem() {
-    Navigator.of(context).pop(MergeResult.intoChecklist(widget.inspiration.text));
+    Navigator.of(context).pop(
+      MergeResult.intoChecklist(itemTexts: _originalTexts),
+    );
   }
 
   @override
@@ -131,12 +180,12 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
               child: Text(
                 '「${widget.project.title}」下面还有下级项目，它自己是分类 —— '
-                '分类只回答"归哪一类"。把这条灵感并进它下面的某个目标，或者先建一个目标。',
+                '分类只回答"归哪一类"。把$_subject并进它下面的某个目标，或者先建一个目标。',
                 style: theme.textTheme.bodySmall,
               ),
             ),
             _ReferencePanel(
-              text: widget.inspiration.text,
+              texts: _originalTexts,
               expanded: _referenceExpanded,
               onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
             ),
@@ -182,14 +231,16 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
                 minLines: null,
                 textAlignVertical: TextAlignVertical.top,
                 keyboardType: TextInputType.multiline,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  hintText: '照着这条灵感把正文改清楚，改完点右上角「保存」',
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  hintText: widget.inspirations.length > 1
+                      ? '照着这几条灵感把正文改清楚，改完点右上角「保存」'
+                      : '照着这条灵感把正文改清楚，改完点右上角「保存」',
                 ),
               ),
             ),
           ),
-          // 三个选择里最"一键"的那一个：直接把它变成清单的一条
+          // 三个选择里最"一键"的那一个：直接把它（们）变成清单的一条（每条一条）
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Align(
@@ -203,15 +254,17 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
           ),
           const SizedBox(height: 8),
           _ReferencePanel(
-            text: widget.inspiration.text,
+            texts: _originalTexts,
             expanded: _referenceExpanded,
             onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Text(
-              '「追加原文」和手改都走「保存」：保存后项目正文更新，这条灵感从灵感箱消失。'
-              '「作为清单条目」不碰正文，直接把原文追加成清单的新一条（上面没保存的改动不会写回）。'
+              '「追加原文」和手改都走「保存」：保存后项目正文更新，$_subject从灵感箱消失。'
+              '「作为清单条目」不碰正文，直接把原文追加成清单的新'
+              '${widget.inspirations.length > 1 ? '若干条（一条灵感一条）' : '一条'}'
+              '（上面没保存的改动不会写回）。'
               '两种情况都能在「更多 → 归档区 → 已合并」里「恢复为待处理」—— '
               '但项目里的内容不会退回（已经写进去的那一行 / 那条不会消失）。',
               style: theme.textTheme.bodySmall,
@@ -225,18 +278,20 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
 
 class _ReferencePanel extends StatelessWidget {
   const _ReferencePanel({
-    required this.text,
+    required this.texts,
     required this.expanded,
     required this.onToggle,
   });
 
-  final String text;
+  /// 这次并的灵感原文，**按列表顺序**列出（顺序就是落进项目的顺序）。
+  final List<String> texts;
   final bool expanded;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final many = texts.length > 1;
     return Material(
       color: theme.colorScheme.surfaceContainerHighest,
       child: Column(
@@ -245,7 +300,11 @@ class _ReferencePanel extends StatelessWidget {
           ListTile(
             dense: true,
             leading: const Icon(Icons.lightbulb_outline, size: 18),
-            title: Text('灵感原文（参考）', style: theme.textTheme.labelLarge),
+            // 多条时把条数写进标题：用户得先知道"这次并的是几条"
+            title: Text(
+              many ? '灵感原文（参考 · ${texts.length} 条）' : '灵感原文（参考）',
+              style: theme.textTheme.labelLarge,
+            ),
             trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),
             onTap: onToggle,
           ),
@@ -254,7 +313,31 @@ class _ReferencePanel extends StatelessWidget {
               constraints: const BoxConstraints(maxHeight: 200),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: SelectableText(text, style: theme.textTheme.bodyMedium),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (var index = 0; index < texts.length; index += 1) ...<Widget>[
+                      if (index > 0) const SizedBox(height: 8),
+                      // 多条时前面给个序号：顺序是这一页的承诺（各占一行 / 各成一条）
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          if (many)
+                            Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Text('${index + 1}', style: theme.textTheme.labelSmall),
+                            ),
+                          Expanded(
+                            child: SelectableText(
+                              texts[index],
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
         ],
@@ -263,55 +346,78 @@ class _ReferencePanel extends StatelessWidget {
   }
 }
 
-/// 把合并编辑器交回来的结果落到数据上（项目侧与灵感侧两个入口共用）。
+/// 把合并编辑器交回来的结果落到数据上（**单条**：项目详情页那条老路）。
 ///
-/// 两条路都走 `Workspace` 的跨文档动作（正文或清单 + 灵感状态一次落盘），
-/// 所以这里只负责"选哪条 + 给一句提示"。
-///
-/// **落点只能是目标**（Q2）：这里再挡一道 —— 万一入口那侧没把手上的项目判准
-/// （它是快照，看不到"有没有下级"），到了写数据这一步也不会悄悄落进分类。
-Future<void> applyMergeResult(
+/// 与灵感页多选那条路走**同一个** [applyMergeResultFor]，只是带一条灵感进去 ——
+/// 两条路的校验与提示因此不可能各说各话。
+Future<bool> applyMergeResult(
   BuildContext context,
   AppController app,
   Project project,
   Inspiration inspiration,
   MergeResult result,
-) async {
+) {
+  return applyMergeResultFor(
+    context,
+    app,
+    project,
+    inspirations: <Inspiration>[inspiration],
+    result: result,
+  );
+}
+
+/// 把合并编辑器交回来的结果落到数据上（**支持多条**，Q37）。
+///
+/// 这里只负责"选哪个项目 + 给一句提示"；真正的跨文档改动走 `Workspace` 的
+/// 批量动作（项目正文 / 清单 + 那些灵感的状态**一次落盘**）。
+///
+/// **落点只能是目标**（Q2）：这里再挡一道 —— 万一入口那侧没把手上的项目判准
+/// （它是快照，看不到"有没有下级"），到了写数据这一步也不会悄悄落进分类。
+/// 「正文没变」同样在**落盘这一步**再挡（Q8）：传进来的 `project` 是快照，
+/// 拿它比对会漏掉"用户在别处刚改过正文"的情况 —— 以库里的当前值为准。
+///
+/// 返回 `true` 表示真的写进去了（灵感页据此决定要不要退出多选）。
+Future<bool> applyMergeResultFor(
+  BuildContext context,
+  AppController app,
+  Project project, {
+  required List<Inspiration> inspirations,
+  required MergeResult result,
+}) async {
   if (app.ws.isProjectCategory(project.id)) {
     showToast(context, categoryNotForInspiration, error: true);
-    return;
+    return false;
   }
-  // 「正文没变」也要在**落盘这一步**挡（Q8）：传进来的 `project` 是快照，
-  // 拿它比对会漏掉"用户在别处刚改过正文"的情况 —— 以库里的当前值为准。
   if (!result.asChecklistItem &&
       result.text.trim() == (app.ws.findProject(project.id)?.implementation ?? '').trim()) {
     showToast(context, implementationUnchanged, error: true);
-    return;
+    return false;
   }
   final error = app.run(() {
-    if (result.asChecklistItem) {
-      app.ws.mergeInspirationAsItem(
-        inspirationId: inspiration.id,
-        projectId: project.id,
-        itemText: result.text,
-      );
-    } else {
-      app.ws.mergeInspiration(
-        inspirationId: inspiration.id,
-        projectId: project.id,
-        newImplementation: result.text,
-      );
-    }
+    app.ws.mergeInspirations(
+      inspirationIds: <String>[for (final inspiration in inspirations) inspiration.id],
+      projectId: project.id,
+      landing: result.asChecklistItem ? MergeLanding.checklist : MergeLanding.implementation,
+      newImplementation: result.text,
+      itemTexts: result.itemTexts,
+    );
   });
-  if (!context.mounted) return;
+  if (!context.mounted) return false;
   if (error != null) {
     showToast(context, error, error: true);
-    return;
+    return false;
   }
-  showToast(
-    context,
-    result.asChecklistItem
-        ? '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回'
-        : '已合并进「${project.title}」，原文可在归档区「已合并」找回',
-  );
+  final count = inspirations.length;
+  final String message;
+  if (result.asChecklistItem) {
+    message = count > 1
+        ? '已把 $count 条灵感追加到「${project.title}」的清单，原文可在归档区「已合并」找回'
+        : '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回';
+  } else {
+    message = count > 1
+        ? '已把 $count 条灵感并进「${project.title}」，原文可在归档区「已合并」找回'
+        : '已合并进「${project.title}」，原文可在归档区「已合并」找回';
+  }
+  showToast(context, message);
+  return true;
 }
