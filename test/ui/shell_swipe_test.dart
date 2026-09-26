@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/projects/project_tab.dart';
 import 'package:guideline/ui/shell_title.dart';
 
 /// 外壳的**左右滑动切页**（实机反馈）：四个页签排成一排，滑过去就换页，
@@ -562,11 +563,9 @@ void main() {
       reason: '只数最外层：一个项目 + 分类一 + 独立目标；分类里面那两个目标不算',
     );
 
-    // 收起 / 展开分类一：数字都不该变（原来取的是"画出来的行数"，一收就变小）
-    final toggle = find.byTooltip('收起').evaluate().isNotEmpty
-        ? find.byTooltip('收起')
-        : find.byTooltip('展开');
-    await tester.tap(toggle.first);
+    // 收起 / 展开分类一：数字都不该变（原来取的是"画出来的行数"，一收就变小）。
+    // 新版把展开箭头去掉了 —— 行首那根竖色条本身就是展开控件。
+    await tester.tap(find.byKey(projectColorBarKey(category.id)));
     await tester.pumpAndSettle();
     expect(find.text('项目   3'), findsOneWidget, reason: '收起之后数字不变');
 

@@ -10,15 +10,44 @@ import '../common/inline_editor.dart';
 import 'project_actions.dart';
 import 'project_detail_page.dart';
 
-/// 展开 / 收起箭头的旋转时长（项目页与事件页共用同一个节奏）。
-const Duration _foldDuration = Duration(milliseconds: 180);
-
-/// 标识色小色条的 Key：用例靠它确认"没设色的项目用的是灰条，而不是空位"。
+/// 行首"标识槽"的宽度：**展开 / 收起的点击热区就取这一整槽**（40dp）。
 ///
-/// 2026-09-26 批 B 第 ① 项之后，这根竖条挂在**根层目标行的最左槽位**里
-/// （`ProjectColorBar.leading`），不再是标题前那一段。
+/// 竖条本身只有 4dp 宽，单点那 4dp 点不中；槽位做成 40dp 宽 × 整行高，
+/// 热区就跟着有 40dp —— 槽位是透明的，加宽它**不改变外观**。
+const double _railSlotWidth = 40;
+
+/// 竖条 / 竖轨的宽度（同一档）。
+const double _railWidth = 4;
+
+/// 标识槽与行内容之间的间距（槽右缘 → 标题左缘）。
+const double _railSlotGap = 8;
+
+/// 子目标标识色圆点的直径（《界面规范》：色点用正圆）。
+const double _markerSize = 12;
+
+/// 圆点圆心相对竖轨右缘的偏移（用户口径：圆点画在**竖轨右侧约 14dp 处**）。
+const double _markerOffset = 14;
+
+/// 行内容的左内边距 = 标识槽 + 间距。
+///
+/// 改版前（实测屏幕坐标）：根层行标题左缘 72、子行 78；
+/// 改版后两档都是 **60**（= 卡片左缘 12 + 这里的 48）——
+/// 分类行与子行的文字都比原来靠左，且标题与竖轨之间留着 44dp（要求 ≥8dp）。
+const double _contentLeft = _railSlotWidth + _railSlotGap;
+
+/// 行首那条竖线的 Key：用例靠它确认"没设色的项目用的是灰条，而不是空位"，
+/// 也靠它量"展开后每行的轨段首尾相接"。
+///
+/// 它挂在**这一行自己的那一段竖线**上（2026-09-26 项目页改版）：
+///   · 分类展开时 = 整行高的一段轨（`ProjectColorBar.stretch`）；
+///   · 分类收起时、根层目标 = 一条 18dp 的短色条（`ProjectColorBar.leading`）。
 @visibleForTesting
 Key projectColorBarKey(String projectId) => Key('ProjectTile.colorBar.$projectId');
+
+/// 一整行（外层 `Stack`）的 Key：标识槽与 `ListTile` 是**兄弟**而不是父子，
+/// 用例要按行找"槽里的圆点 / 竖条"就得先按住这一行。
+@visibleForTesting
+Key projectRowKey(String projectId) => Key('ProjectTile.row.$projectId');
 
 /// 标题栏那个数字（「项目   3」）：**最外层有几条**。
 ///
@@ -36,8 +65,17 @@ int rootProjectCount(AppController app) => app.ws.projectTree
 
 /// 项目 Tab：**项目树（≤ 3 层）**。
 ///
-/// 手机上没有树控件的余地，所以用「扁平化 + 缩进 + 展开箭头」渲染：
+/// 手机上没有树控件的余地，所以用「扁平化 + 行首竖轨 + 展开色条」渲染：
 /// 折叠状态存在 `UiPrefs` 里，下次进来还是原样。
+///
+/// 行首的标识与展开交互（2026-09-26 用户逐条敲定）：
+///   · **分类行**：最左是一根竖色条，**点它就是展开 / 收起** —— 展开箭头已去掉；
+///     展开后这根条向下延伸成一条竖轨，把"分类 + 它当前可见的全部子行"框起来。
+///     实现上是**每一行各画自己那一段**（同色、首尾相接），不是一个量高度的
+///     跨行 `Stack`：前者天然连续、也不怕行高变化；
+///   · **子行**：竖轨右侧约 14dp 处仍是**子项自己的颜色圆点**（没设色 = 灰空心圆）；
+///   · **根层目标**（没下级）：最左也是一条竖条（自己的颜色，没设色用中性灰），
+///     但**不可点、不延伸**。
 ///
 /// 新建与重命名都是**页面内直接输入**（见 `InlineComposer` / `InlineTextField`）：
 /// 点一下原地变成输入框，不再弹对话框。
@@ -140,7 +178,7 @@ class _ProjectTabState extends State<ProjectTab> {
                                 if (_addingChildOf == group.root.project.id)
                                   Padding(
                                     padding: const EdgeInsets.only(
-                                      left: 40,
+                                      left: _contentLeft,
                                       bottom: 6,
                                     ),
                                     child: InlineComposer(
@@ -202,6 +240,7 @@ class _ProjectRow {
     required this.depth,
     required this.childCount,
     required this.expanded,
+    required this.railColor,
   });
 
   final Project project;
@@ -209,8 +248,23 @@ class _ProjectRow {
   final int childCount;
   final bool expanded;
 
+  /// 这一行的竖线用什么颜色（2026-09-26 改版）：
+  ///   · **分类行 = 自己的颜色** —— 它是这一组竖轨的轨头；
+  ///   · **根层目标 = 自己的颜色**（占位短条，不延伸）；
+  ///   · **子目标 = 上级分类的颜色** —— 它只是那条轨上的一段，
+  ///     颜色跟随轨头，否则一条轨会一行一个色。
+  final String? railColor;
+
   /// 角色判据（《定义与边界》§2.1）：**有下级 = 分类，没有下级 = 目标**。
   bool get isCategory => childCount > 0;
+
+  /// 这一行的竖线是"一整段轨"（占满整行高、与相邻行首尾相接），
+  /// 还是一条 18dp 的短色条：
+  ///   · 分类展开时 = 轨段（它下面还接着子行的那几段）；
+  ///   · 分类收起时 = 短色条（它自己就是展开控件，不延伸）；
+  ///   · 根层目标 = 短色条（不可点、不延伸）；
+  ///   · 子目标 = 轨段（可见就说明上级分类是展开的）。
+  bool get railSpansRow => isCategory ? expanded : depth > 0;
 }
 
 /// 一个主项目 + 它当前可见的下级（展开时才有）。
@@ -255,25 +309,32 @@ List<_ProjectRow> _flatten(AppController app) {
   final tree = app.ws.projectTree;
   final rows = <_ProjectRow>[];
 
-  void walk(String? parentId, int depth) {
+  /// [inheritedRail] = 当前这条轨的颜色（最近的展开分类自己的颜色）。
+  void walk(String? parentId, int depth, String? inheritedRail) {
     for (final project in tree.childrenOf(parentId).whereType<Project>()) {
       if (project.archived) continue;
       // 角色与下级列表同源：都用 `Workspace.childProjectsOf`（未归档、未删除的直属下级）
       final children = app.ws.childProjectsOf(project.id);
       final expanded = app.isExpanded(project.id);
+      final isCategory = children.isNotEmpty;
       rows.add(
         _ProjectRow(
           project: project,
           depth: depth,
           childCount: children.length,
           expanded: expanded,
+          // 分类与根层目标用自己的颜色（短条也好、轨头也好，都是"我是谁"）；
+          // 子目标接上级那条轨的颜色。
+          railColor: (isCategory || depth == 0)
+              ? project.color
+              : inheritedRail,
         ),
       );
-      if (children.isNotEmpty && expanded) walk(project.id, depth + 1);
+      if (isCategory && expanded) walk(project.id, depth + 1, project.color);
     }
   }
 
-  walk(null, 0);
+  walk(null, 0, null);
   return rows;
 }
 
@@ -302,92 +363,115 @@ class _ProjectTile extends StatelessWidget {
     // 既没体现层级、又白占一块纵向空间（实机反馈）。
     final isChild = row.depth > 0;
 
-    return ListTile(
-      dense: isChild,
-      visualDensity: isChild ? VisualDensity.compact : VisualDensity.standard,
-      // 主项目靠左（4dp 起），子项目明显右移 —— 靠**缩进差**表达主从关系，
-      // 而不是靠字号或分割线（实机反馈：原来的缩进差看不出来）
-      contentPadding: EdgeInsets.only(left: isChild ? 36 : 4, right: 4),
-      minLeadingWidth: isChild ? 18 : null,
-      // 左侧图标**槽位宽度固定**（实机反馈"第一条的左侧没有对齐"）：
-      // 展开箭头是 `IconButton`、色点是 `Icon` 那样的小控件，两者宽度本来就不同，
-      // 各画各的会把标题挤到不同的竖线上 —— 有下级的、没下级的、
-      // 有没有标识色的，标题必须都在同一条线上。
-      //
-      // 这一槽里**一个记号只出现一次**（2026-09-26 批 B 第 ① 项）：
-      //   · **有下级 = 分类** → 展开箭头；
-      //   · **根层目标**（没下级、depth 0）→ **竖色条**（原来它在标题前，
-      //     于是根目标这一行左边空一块、色条又在第二个位置出现）；
-      //   · **子目标**（depth > 0）→ 标识色小圆点。
-      // 项目状态图标与"完成删除线"随项目完成态一起从界面拿掉了（Q1）。
-      leading: SizedBox(
-        width: isChild ? 18 : 40,
-        child: Center(
-          child: row.isCategory
-              ? IconButton(
-                  tooltip: row.expanded ? '收起' : '展开',
-                  iconSize: isChild ? 18 : 22,
-                  padding: EdgeInsets.zero,
-                  constraints: BoxConstraints.tightFor(
-                    width: isChild ? 18 : 32,
-                    height: isChild ? 18 : 32,
-                  ),
-                  // 箭头**转过去**而不是换一个图标（实机反馈：加个动画）：
-                  // `chevron_right` 顺时针转 90° 正好是"朝下 = 已展开"
-                  icon: AnimatedRotation(
-                    turns: row.expanded ? 0.25 : 0,
-                    duration: _foldDuration,
-                    curve: Curves.easeOutCubic,
-                    child: const Icon(Icons.chevron_right),
-                  ),
-                  onPressed: () =>
-                      app.setExpanded(project.id, expanded: !row.expanded),
-                )
+    return Stack(
+      key: projectRowKey(project.id),
+      children: <Widget>[
+        ListTile(
+          dense: isChild,
+          visualDensity:
+              isChild ? VisualDensity.compact : VisualDensity.standard,
+          // 行首那条槽（竖轨 / 短色条 + 圆点）与 `ListTile` 是**兄弟**：
+          // `ListTile` 的 leading 槽没法画"占满整行高的竖轨"（它的 leading 只能
+          // 按标题那一块的高度居中），所以槽位单独放，行内容把左内边距让出来。
+          //
+          // 内容左内边距 = 标识槽 40dp + 间距 8dp（`_contentLeft`）：
+          // 根层行由 60dp 收到 48dp、子行由 66dp 收到 48dp —— 两档都更靠左，
+          // 且标题与竖轨之间留着 44dp（要求 ≥8dp）。
+          contentPadding: const EdgeInsets.only(left: _contentLeft, right: 4),
+          title: Text(
+            project.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            // 子项目降一档字号，层级靠字号与缩进一起表达
+            style: isChild ? theme.textTheme.bodyMedium : null,
+          ),
+          // 分类行只给**汇总**（Q2）：目的 / 实现计划 / 实现清单 / 日期 / 状态一律不显示 ——
+          // 分类只回答"归哪一类"。
+          //
+          // **一眼看出没有副标题时给 `null`**（实机反馈"第四条项目没有目标，标题
+          // 略微下移保证居中"）：留一个空副标题占位会让这一行和两行的行一样高、
+          // 内容却都挤在上半截，看着头重脚轻。给它真的没有副标题，ListTile 就按
+          // 单行排版，标题自然竖直居中、行也短一截。
+          subtitle: row.isCategory
+              ? _categorySubtitle(theme, app.ws.summarizeCategory(project.id))
               : (isChild
-                    ? ProjectMarker(color: project.color, size: 12)
-                    // 根层**目标**：竖色条占住这一槽。没设色时它自己用中性灰补齐
-                    // （既有行为，别丢）——空着会让根目标那一列看着缺一块。
-                    : ProjectColorBar.leading(
-                        key: projectColorBarKey(project.id),
-                        color: project.color,
-                      )),
+                    ? _childSubtitle(theme, project, row, due, overdue)
+                    : _rootSubtitle(theme, project, row, due, overdue)),
+          trailing: PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (value) async {
+              await _handleMenu(context, value);
+            },
+            // 「新建下级」与「打开详情」都已去掉（按实机反馈）：
+            //   · 打开详情：点这一行本身就是打开详情，菜单里再放一个是重复入口；
+            //   · 新建下级：进详情页用那个「新建目标」建（那里还能顺手填"有什么问题 / 思路"与日期）。
+            itemBuilder: (_) => const <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
+              PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
+              PopupMenuItem<String>(value: 'archive', child: Text('归档')),
+              PopupMenuItem<String>(value: 'delete', child: Text('删除')),
+            ],
+          ),
+          onTap: () => _open(context),
         ),
-      ),
-      title: Text(
-        project.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        // 子项目降一档字号，层级靠字号与缩进一起表达
-        style: isChild ? theme.textTheme.bodyMedium : null,
-      ),
-      // 分类行只给**汇总**（Q2）：目的 / 实现计划 / 实现清单 / 日期 / 状态一律不显示 ——
-      // 分类只回答"归哪一类"。
-      //
-      // **一眼看出没有副标题时给 `null`**（实机反馈"第四条项目没有目标，标题
-      // 略微下移保证居中"）：留一个空副标题占位会让这一行和两行的行一样高、
-      // 内容却都挤在上半截，看着头重脚轻。给它真的没有副标题，ListTile 就按
-      // 单行排版，标题自然竖直居中、行也短一截。
-      subtitle: row.isCategory
-          ? _categorySubtitle(theme, app.ws.summarizeCategory(project.id))
-          : (isChild
-                ? _childSubtitle(theme, project, row, due, overdue)
-                : _rootSubtitle(theme, project, row, due, overdue)),
-      trailing: PopupMenuButton<String>(
-        tooltip: '更多',
-        onSelected: (value) async {
-          await _handleMenu(context, value);
-        },
-        // 「新建下级」与「打开详情」都已去掉（按实机反馈）：
-        //   · 打开详情：点这一行本身就是打开详情，菜单里再放一个是重复入口；
-        //   · 新建下级：进详情页用那个「新建目标」建（那里还能顺手填"有什么问题 / 思路"与日期）。
-        itemBuilder: (_) => const <PopupMenuEntry<String>>[
-          PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
-          PopupMenuItem<String>(value: 'move', child: Text('移动到…')),
-          PopupMenuItem<String>(value: 'archive', child: Text('归档')),
-          PopupMenuItem<String>(value: 'delete', child: Text('删除')),
-        ],
-      ),
-      onTap: () => _open(context),
+        // 最左那一整条槽：竖线 + （子目标的）色点。
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: _railSlotWidth,
+          child: _railSlot(),
+        ),
+      ],
+    );
+  }
+
+  /// 行首的标识槽：**一条竖线**（分类展开后是整行高的一段轨）+ 子目标的色点。
+  ///
+  /// 这个槽同时也是**展开 / 收起的点击热区**（分类行整槽 40dp × 整行高 ——
+  /// 条本身只有 4dp，单点它点不中）。它是透明的，加宽不改变外观。
+  Widget _railSlot() {
+    final project = row.project;
+    // 竖线本身：展开的分类、子目标 = 占满整行高的一段轨；
+    // 收起的分类、根层目标 = 一条 18dp 的短色条。
+    final Widget rail = row.railSpansRow
+        ? ProjectColorBar.stretch(
+            key: projectColorBarKey(project.id),
+            color: row.railColor,
+            width: _railWidth,
+          )
+        : Center(
+            child: ProjectColorBar.leading(
+              key: projectColorBarKey(project.id),
+              color: row.railColor,
+            ),
+          );
+
+    final slot = Stack(
+      children: <Widget>[
+        Positioned(left: 0, top: 0, bottom: 0, width: _railWidth, child: rail),
+        // 子目标自己的标识色圆点（**子项自己的颜色**，没设色 = 灰空心圆），
+        // 画在竖轨右侧约 14dp 处 —— 圆点在这条槽里，不在标题前。
+        if (row.depth > 0 && !row.isCategory)
+          Positioned(
+            left: _railWidth + _markerOffset - _markerSize / 2,
+            top: 0,
+            bottom: 0,
+            width: _markerSize,
+            child: Center(
+              child: ProjectMarker(color: project.color, size: _markerSize),
+            ),
+          ),
+      ],
+    );
+
+    // 分类行：**整条槽就是展开控件**（用户口径：点色条展开 / 收起，不给别的提示）。
+    // 目标行：槽位不接手势 —— 点它照旧落到整行上（打开详情），别成一个死区。
+    if (!row.isCategory) return IgnorePointer(child: slot);
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => app.setExpanded(project.id, expanded: !row.expanded),
+      child: slot,
     );
   }
 

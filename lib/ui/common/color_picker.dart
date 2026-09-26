@@ -85,22 +85,43 @@ class ProjectColorBar extends StatelessWidget {
     required this.color,
     this.width = 4,
     this.height = 16,
-  });
+  }) : radius = _barRadius;
 
   /// **项目树最左槽位**那一档（2026-09-26 批 B 第 ① 项）。
   ///
   /// 色条从"标题前"挪进了项目树最左的图标槽位 —— 那一槽里
-  /// **一个记号只出现一次**：分类放展开箭头、根层目标放这根竖条、
+  /// **一个记号只出现一次**：分类放这根竖条（箭头已去掉）、根层目标也放它、
   /// 子目标放色点。语义、取色逻辑（没设色 → 中性灰）与调用方给的 Key
   /// 都不变，只是按 40dp / 18dp 的槽位换了一档尺寸。
   const ProjectColorBar.leading({super.key, required this.color})
       : width = 4,
-        height = 18;
+        height = 18,
+        radius = _barRadius;
+
+  /// **项目树展开后的竖轨**那一档（2026-09-26 项目页改版）。
+  ///
+  /// 与 [ProjectColorBar.leading] 的区别有两条：
+  ///   · **高度交给外层约束** —— 竖轨是"一行一段、首尾相接"拼出来的
+  ///     （分类行一段、每个可见子行各一段），行高由内容决定、构建时算不出来，
+  ///     所以这里不写死高度。放在 `Positioned(top: 0, bottom: 0)` 里就占满整行；
+  ///     注意松约束下它自己会缩成 0 高，**调用方必须给紧约束**。
+  ///   · **两端是平的** —— 每段各圆各的角会在接缝处留下一个 4dp 宽的小豁口
+  ///     （两段的圆角错开），一眼看去就是"轨断了一节"。
+  const ProjectColorBar.stretch({super.key, required this.color, this.width = 4})
+      : height = null,
+        radius = 0;
 
   /// 项目的标识色（`#rrggbb`），`null` → 中性灰
   final String? color;
   final double width;
-  final double height;
+
+  /// 高度；`null` = 由外层约束决定（见 [ProjectColorBar.stretch]）
+  final double? height;
+
+  /// 两端圆角半径；`0` = 平头（拼接竖轨时用，见 [ProjectColorBar.stretch]）
+  final double radius;
+
+  static const double _barRadius = 2;
 
   @override
   Widget build(BuildContext context) {
@@ -110,7 +131,7 @@ class ProjectColorBar extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: colorOfHex(color) ?? theme.colorScheme.outlineVariant,
-        borderRadius: BorderRadius.circular(2),
+        borderRadius: radius > 0 ? BorderRadius.circular(radius) : null,
       ),
     );
   }
