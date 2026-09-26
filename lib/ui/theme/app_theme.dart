@@ -8,10 +8,12 @@ import 'shape_tokens.dart';
 
 /// 全应用的**强调色**。
 ///
-/// 色值来自用户给的参考图（12 个 Hex），定义在 `core/models/project_palette.dart`
-/// —— 因为自动分配标志色的 `Workspace` 也要用它，而 features 不能依赖 ui。
+/// 色值定义在 `core/models/project_palette.dart`（**唯一来源**）——
+/// 因为自动分配标志色的 `Workspace` 也要用它，而 features 不能依赖 ui。
 abstract final class AccentColors {
-  /// 参考图里的 12 个色值（唯一来源在 core 的 `ProjectPalette`）。
+  /// 项目 / 事件共用的标识色板（现 **16** 支）：前 12 支来自用户给的参考图，
+  /// 后 4 支（靛蓝 / 橄榄 / 咖棕 / 青灰）是 2026-09-26 按同一套灰调配方补的 ——
+  /// "新色不比旧色更难区分"由 `test/core/project_palette_test.dart` 守着。
   static const List<String> hexes = ProjectPalette.hexes;
 }
 

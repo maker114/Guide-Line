@@ -42,6 +42,20 @@ const double _navRadius = _navHeight / 2;
 /// 纵向让指示器与胶囊等高。
 const double _navOuterPadding = 0;
 
+/// 底部导航条的**横向内边距**（左右各 20dp）。
+///
+/// 右下角那个速记胶囊必须与底栏的一格**等宽**，所以它也得按同一个内边距算 ——
+/// 这条数只在这里写一次，两边都用它（见 [navCellWidth]）。
+const double navHorizontalPadding = 20;
+
+/// 底栏**一格**的宽度 = 选中滑块的宽度 = 速记胶囊的宽度。
+///
+/// 输入是"扣掉横向内边距之后底栏能用的宽度"：一格 = 可用宽度 / 格数。
+/// 速记胶囊与底栏用**同一个函数**算，谁也不许写死像素
+/// （2026-09-26 批 B 第 ③ 项）。
+double navCellWidth(double availableWidth) =>
+    availableWidth / AppBottomNav.itemCount;
+
 /// 滑动时长：切换页签时胶囊从旧位置滑到新位置。
 ///
 /// 收得比上一版（300ms）短：实机反馈"太粘滞、像质量很大"，
@@ -233,7 +247,8 @@ class AppBottomNav extends StatelessWidget {
   final ValueChanged<int> onSelect;
   final int overdueCount;
 
-  static const int _itemCount = 4;
+  /// 底栏有几格。**速记胶囊的宽度也按它算**（见 [navCellWidth]），所以是公开的。
+  static const int itemCount = 4;
 
   @override
   Widget build(BuildContext context) {
@@ -242,7 +257,8 @@ class AppBottomNav extends StatelessWidget {
       builder: (context, constraints) {
         // 指示器与**一格同宽**：最左那格 left = 0、最右那格 right = 栏宽，
         // 两端圆弧于是与外部胶囊完全重合（圆角半径同为 `_navRadius`）。
-        final nominalWidth = constraints.maxWidth / _itemCount;
+        // 宽度与速记胶囊共用 [navCellWidth]，两处不会算出不同的数。
+        final nominalWidth = navCellWidth(constraints.maxWidth);
 
         // 指示器跟着 **PageView 的连续页位置**走，而不是自己跑一条动画。
         // 这样"手指拖到一半"与"松手后滑过去"用的是同一个数：
@@ -251,7 +267,7 @@ class AppBottomNav extends StatelessWidget {
         return ValueListenableBuilder<double>(
           valueListenable: page,
           builder: (context, value, _) {
-            final current = value.clamp(0.0, (_itemCount - 1).toDouble());
+            final current = value.clamp(0.0, (itemCount - 1).toDouble());
             final fromIndex = current.floor();
             final toIndex = current.ceil();
             final geometry = navIndicatorGeometry(
@@ -324,6 +340,126 @@ class AppBottomNav extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+/// 右下角的**速记胶囊**（自绘，2026-09-26 批 B 第 ③ 项）。
+///
+/// 形状尺寸与底栏那个"滑块"（`AppBottomNav` 的选中指示器）**一致**：
+///    · 高 [_navHeight]（48）；
+///    · 圆角 `_navRadius`（= 高度一半，同一个常量，所以两端圆弧同径）；
+///    · 宽 = 底栏**一格** —— 底栏在左右各 [navHorizontalPadding] 的内边距里排
+///      [AppBottomNav.itemCount] 格，所以一格 = (屏宽 − 40) / 4，
+///      用与底栏同一个 [navCellWidth] 算，**不写死像素**。
+///
+/// 颜色与底栏滑块同一套（`secondaryContainer` / `onSecondaryContainer`），
+/// 阴影沿用底栏那层轻阴影，保证"右下角这颗"与"底栏那一条"是一家人。
+///
+/// **放不下就只留图标**：窄屏 + 1.6 倍字体时"图标 + 「速记」"会超过一格宽 ——
+/// 这时只画 `Icons.bolt`，但 `tooltip` 与语义标签**始终**是「速记」：
+/// 按钮叫什么、点下去干什么，与它此刻多宽无关。
+class CapturePillButton extends StatelessWidget {
+  const CapturePillButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  /// 与底栏滑块同高（用例按它量"高度 48"）。
+  static const double height = _navHeight;
+
+  /// 按钮文字的**唯一出处**：`tooltip`、语义标签、显示出来的字都用它，
+  /// 免得三处各写一遍、改一处漏两处。
+  static const String label = '速记';
+
+  static const double _iconSize = 22;
+  static const double _gap = 6;
+  static const double _horizontalPadding = 10;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final width = navCellWidth(
+      MediaQuery.sizeOf(context).width - navHorizontalPadding * 2,
+    );
+    final showLabel = _labelFits(context, theme, width);
+    final foreground = scheme.onSecondaryContainer;
+
+    final content = showLabel
+        ? Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(Icons.bolt, size: _iconSize, color: foreground),
+              const SizedBox(width: _gap),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.clip,
+                  style: theme.textTheme.labelLarge?.copyWith(color: foreground),
+                ),
+              ),
+            ],
+          )
+        : Icon(Icons.bolt, size: _iconSize, color: foreground);
+
+    final pill = SizedBox(
+      width: width,
+      height: height,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.secondaryContainer,
+          // 与底栏滑块**同一个** `_navRadius`：48 高时两端就是两个半径 24 的半圆
+          borderRadius: BorderRadius.circular(_navRadius),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: scheme.shadow.withValues(alpha: 0.10),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        // 水波纹要画在这层 `Material` 上，才会落在底色之上；
+        // 用 `MaterialType.transparency` 而不是给一个颜色 —— 颜色只从 `colorScheme` 取。
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onPressed,
+            // 胶囊形状的水波纹：圆形的会溢出到按钮外面（`AppShapes.pill` 就是胶囊）
+            customBorder: AppShapes.pill,
+            child: Center(child: content),
+          ),
+        ),
+      ),
+    );
+
+    return showLabel
+        ? Tooltip(message: label, child: pill)
+        : Semantics(
+            label: label,
+            button: true,
+            child: Tooltip(
+              message: label,
+              // 只画图标时语义标签由外层 `Semantics` 给，别让工具提示再念一遍
+              excludeFromSemantics: true,
+              child: pill,
+            ),
+          );
+  }
+
+  /// 一格宽度是否放得下「图标 + 速记」。
+  ///
+  /// 用 `TextPainter` 按**当前字号缩放**实测，而不是写一个像素阈值：
+  /// 要防的正是"窄屏 + 1.6 倍字体"那种情况，写死的数一定会算错。
+  bool _labelFits(BuildContext context, ThemeData theme, double width) {
+    final painter = TextPainter(
+      text: TextSpan(text: label, style: theme.textTheme.labelLarge),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final needed = _horizontalPadding * 2 + _iconSize + _gap + painter.width;
+    painter.dispose();
+    return needed <= width;
   }
 }
 
@@ -509,17 +645,14 @@ class _AppShellState extends State<AppShell> {
               ),
             ],
           ),
+          // 速记按钮（2026-09-26 批 B 第 ③ 项）：**自绘的胶囊**，
+          // 形状尺寸与底栏的滑块一致（高 48、圆角 `_navRadius`、宽 = 一格）。
+          // 灵感页不显示（那一页整个就是速记）；位置与间距仍交给 `Scaffold`
+          // 的 `floatingActionButton` 槽位 —— 它本来就会把按钮抬到底栏**上方**，
+          // 不会压住底栏。点击行为不变：切到灵感页并聚焦速记框。
           floatingActionButton: _index == 0
               ? null
-              // 速记按钮：**胶囊形**（按实机反馈）。
-              // `FloatingActionButton.extended` 的默认圆角是 16，看着仍是个圆角方块；
-              // 这里显式给 StadiumBorder 才是真正的胶囊。
-              : FloatingActionButton.extended(
-                  onPressed: _goCapture,
-                  shape: const StadiumBorder(),
-                  icon: const Icon(Icons.bolt),
-                  label: const Text('速记'),
-                ),
+              : CapturePillButton(onPressed: _goCapture),
           // 底部导航：**自绘的长条胶囊**。
           //
           // 为什么不用 `NavigationBar`（试过三版都不对）：
@@ -534,7 +667,12 @@ class _AppShellState extends State<AppShell> {
           // 而外部胶囊用的是**同一个** `_navRadius` —— 选中最左 / 最右那格时
           // 两段圆弧完全重合（等宽等径又对齐），中间几格则是一个纯胶囊。
           bottomNavigationBar: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+            padding: const EdgeInsets.fromLTRB(
+              navHorizontalPadding,
+              0,
+              navHorizontalPadding,
+              18,
+            ),
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,

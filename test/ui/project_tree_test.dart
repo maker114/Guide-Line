@@ -4,14 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/projects/project_tab.dart';
 
-/// 项目页列表的几件事（实机反馈 + Q1/Q2）：
-///   · **左侧图标槽位对齐**：展开箭头是 `IconButton`、目标行的色点是 `Icon`、
-///     标识色条有的有有的没有 —— 各画各的会把标题挤到不同竖线上；
+/// 项目页列表的几件事（实机反馈 + Q1/Q2 + 批 B 第 ① 项）：
+///   · **左侧图标槽位对齐**：展开箭头是 `IconButton`、目标的色条是几 dp 宽的
+///     `Container`、子目标的色点又是 `Icon` —— 各画各的会把标题挤到不同竖线上；
+///   · **一个记号只出现一次**：分类放展开箭头、根层目标放竖色条、子目标放色点，
+///     标题前不再另画一条色条；
 ///   · 展开 / 收起箭头**转过去**，不是换一个图标；
 ///   · **项目状态图标与完成删除线都不再出现**（项目没有完成态，Q1）；
-///   · **分类行只显示 名字 + 色条 + 汇总**（Q2）：目的 / 日期一律不上树。
+///   · **分类行只显示 名字 + 汇总**（Q2）：目的 / 日期一律不上树。
 void main() {
   late Directory tempDir;
 
@@ -88,10 +91,12 @@ void main() {
     expect(renderedTurns(), closeTo(0, 0.001), reason: '收起后箭头朝右');
   });
 
-  testWidgets('没设标识色的项目：用灰条补齐那个位置，而不是留空', (tester) async {
+  testWidgets('没设标识色的目标：最左槽位用灰条补齐，而不是留空', (tester) async {
     final app = await boot(tester);
     final plain = app.ws.liveProjects.firstWhere((p) => p.color == null);
-    final colored = app.ws.liveProjects.firstWhere((p) => p.color != null);
+    // 对比色取**另一个根层目标**（不是分类）：分类那一槽放的是展开箭头
+    final colored = app.ws.liveProjects
+        .firstWhere((p) => p.title == '有颜色没子项目');
 
     Color? barColorOf(String projectId) {
       // 色条本体是共用控件 `ProjectColorBar`，渲染颜色在它里面的 `Container` 上
@@ -107,11 +112,83 @@ void main() {
     final scheme = Theme.of(tester.element(find.text('没颜色没子项目'))).colorScheme;
     expect(barColorOf(plain.id), scheme.outlineVariant, reason: '没设色 = 中性灰条');
     expect(barColorOf(colored.id), isNot(scheme.outlineVariant), reason: '设了色就是那个色');
+    expect(colored.color, isNotNull);
 
     // 两条色条占同样的位置（宽度一致），标题才会对齐
     expect(
       tester.getSize(find.byKey(projectColorBarKey(plain.id))).width,
       tester.getSize(find.byKey(projectColorBarKey(colored.id))).width,
+    );
+  });
+
+  testWidgets('根层目标的记号在最左槽位里，标题前不再重复一条色条（批 B 第 ① 项）', (tester) async {
+    final app = await boot(tester);
+    final target = app.ws.liveProjects
+        .firstWhere((p) => p.title == '有颜色没子项目');
+    final category = app.ws.liveProjects
+        .firstWhere((p) => p.title == '带子项目的');
+
+    Finder tileOf(String title) => find.ancestor(
+          of: find.text(title),
+          matching: find.byType(ListTile),
+        );
+
+    // 根层目标：这一行里**恰好**一根色条，且它在最左槽位（标题左边）
+    final bar = find.byKey(projectColorBarKey(target.id));
+    expect(bar, findsOneWidget);
+    expect(
+      find.descendant(
+        of: tileOf('有颜色没子项目'),
+        matching: find.byType(ProjectColorBar),
+      ),
+      findsOneWidget,
+      reason: '一个记号只出现一次：色条只该在最左槽位里那一根，标题前不该再有',
+    );
+    final barRect = tester.getRect(bar);
+    expect(
+      barRect.right,
+      lessThanOrEqualTo(tester.getRect(find.text('有颜色没子项目')).left),
+      reason: '这根色条要落在标题左侧的槽位里',
+    );
+    expect(
+      barRect.height,
+      greaterThan(barRect.width),
+      reason: '槽位里放的是「竖」条，不是标题前那一小段',
+    );
+
+    // 分类行的记号是展开箭头，不是色条（同一槽位只放一个记号）
+    expect(
+      find.descendant(
+        of: tileOf('带子项目的'),
+        matching: find.byType(ProjectColorBar),
+      ),
+      findsNothing,
+      reason: '分类的记号是展开箭头，色条不该和它挤在同一个槽位',
+    );
+    expect(
+      find.descendant(
+        of: tileOf('带子项目的'),
+        matching: find.byIcon(Icons.chevron_right),
+      ),
+      findsOneWidget,
+    );
+
+    // 子目标：仍然是色点，不是色条
+    expect(
+      find.descendant(of: tileOf('子项目'), matching: find.byType(ProjectMarker)),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: tileOf('子项目'),
+        matching: find.byType(ProjectColorBar),
+      ),
+      findsNothing,
+    );
+    expect(
+      app.ws.childProjectsOf(category.id),
+      isNotEmpty,
+      reason: '分类确实是"有下级"的那一条',
     );
   });
 
@@ -150,7 +227,7 @@ void main() {
     expect(inTab(find.text('新建项目')), findsNothing, reason: 'Q2 已改名');
   });
 
-  testWidgets('分类行只显示 名字 + 色条 + 汇总：目的与日期都不上树（Q2）', (tester) async {
+  testWidgets('分类行只显示 名字 + 展开箭头 + 汇总：目的与日期都不上树（Q2）', (tester) async {
     final app = await boot(tester);
     final category = app.ws.liveProjects.firstWhere((p) => p.title == '带子项目的');
     // 故意给分类塞上"目标才有"的内容；再给下级挂一条清单，让汇总算得出来

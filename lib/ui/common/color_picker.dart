@@ -4,13 +4,29 @@ import '../theme/app_theme.dart';
 
 /// 标识色的候选色板（灵感整理第 10 条）。
 ///
-/// 色值就是用户给的那组 [AccentColors.hexes] —— 低饱和的灰调彩色，
-/// 用来在小面积上互相区分，不抢内容。
+/// 色值就是 [AccentColors.hexes]（唯一来源是 core 的 `ProjectPalette`）——
+/// 低饱和的灰调彩色，用来在小面积上互相区分，不抢内容。
+/// 2026-09-26 从 12 支加到 **16 支**（补靛蓝 / 橄榄 / 咖棕 / 青灰四段色相），
+/// 挑选口径与可辨距离写在 `lib/core/models/project_palette.dart` 的注释里，
+/// 由 `test/core/project_palette_test.dart` 守着。
 ///
 /// 刻意**不做"任意取色"**：项目标识色的用途是"在项目树里一眼认出来"，
 /// 一组够区分就够了；放开成任意色反而容易调出彼此难分的近色，
 /// 还会让导出文件里出现一堆只差一位的色值。想换风格就换主题，不必逐个项目调色。
 const List<String> projectColorChoices = AccentColors.hexes;
+
+/// 取色方阵**固定 4 列**（16 支色 = 4 列 × 4 行）。
+///
+/// 为什么不跟随屏宽自动折行：格数一多，"哪一支是刚才那支"就找不到北了 ——
+/// 4 × 4 的方阵在哪种屏宽下都长一个样，用户第二次进来还认得位置。
+const int _swatchColumns = 4;
+
+/// 色块之间的间隔（横竖同值）。
+const double _swatchGap = 12;
+
+/// 单个色块的 Key：用例靠它数"4 列 × 4 行"、并点中某一支。
+@visibleForTesting
+Key colorSwatchKey(String hex) => Key('ColorPicker.swatch.$hex');
 
 /// `#rrggbb` → `Color`；解析不了返回 `null`（与 `Canonical.normalizeHexColor` 同一口径）。
 Color? colorOfHex(String? hex) {
@@ -71,6 +87,16 @@ class ProjectColorBar extends StatelessWidget {
     this.height = 16,
   });
 
+  /// **项目树最左槽位**那一档（2026-09-26 批 B 第 ① 项）。
+  ///
+  /// 色条从"标题前"挪进了项目树最左的图标槽位 —— 那一槽里
+  /// **一个记号只出现一次**：分类放展开箭头、根层目标放这根竖条、
+  /// 子目标放色点。语义、取色逻辑（没设色 → 中性灰）与调用方给的 Key
+  /// 都不变，只是按 40dp / 18dp 的槽位换了一档尺寸。
+  const ProjectColorBar.leading({super.key, required this.color})
+      : width = 4,
+        height = 18;
+
   /// 项目的标识色（`#rrggbb`），`null` → 中性灰
   final String? color;
   final double width;
@@ -124,38 +150,34 @@ Future<String?> _pickMarkerColor(
     builder: (sheetContext) {
       final theme = Theme.of(sheetContext);
       return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Text(title, style: theme.textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(hint, style: theme.textTheme.bodySmall),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: <Widget>[
-                  for (final hex in projectColorChoices)
-                    _Swatch(
-                      hex: hex,
-                      selected: current == hex,
-                      onTap: () => Navigator.of(sheetContext).pop(hex),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.of(sheetContext).pop(''),
-                  icon: const Icon(Icons.format_color_reset_outlined),
-                  label: const Text('不用标识色'),
+        // 面板内容**可以滚**：窄屏 + 1.6 倍字体下 4 行色块加标题会顶到
+        // 底部面板的高度上限，不滚就是一条溢出报错（批 B 第 ② 项）。
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(hint, style: theme.textTheme.bodySmall),
+                const SizedBox(height: 14),
+                ..._swatchGrid(
+                  current: current,
+                  onPick: (hex) => Navigator.of(sheetContext).pop(hex),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(sheetContext).pop(''),
+                    icon: const Icon(Icons.format_color_reset_outlined),
+                    label: const Text('不用标识色'),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -163,8 +185,52 @@ Future<String?> _pickMarkerColor(
   );
 }
 
+/// 把色板排成 **4 列 × 4 行**（最后一行不满 4 个时也不拉伸、不居中）。
+///
+/// 每行自己是一个 `Row`，而不是 `Wrap` / `GridView`：
+///   · `Wrap` 的每行格数跟屏宽走，平板上一行能塞 6 个，"4 × 4"就不成立了；
+///   · `GridView` 会把格子约束成"等分宽度"，40dp 的圆会被拉到几十 dp 大。
+/// 固定尺寸的 `Row` 是唯一能同时钉住"列数"和"圆的大小"的写法。
+Iterable<Widget> _swatchGrid({
+  required String? current,
+  required void Function(String hex) onPick,
+}) {
+  final rows = <Widget>[];
+  final hexes = projectColorChoices;
+  for (var start = 0; start < hexes.length; start += _swatchColumns) {
+    final row = hexes.skip(start).take(_swatchColumns).toList(growable: false);
+    rows.add(
+      Padding(
+        padding: EdgeInsets.only(top: start == 0 ? 0 : _swatchGap),
+        child: Row(
+          children: <Widget>[
+            for (var i = 0; i < row.length; i += 1)
+              Padding(
+                padding: EdgeInsets.only(
+                  right: i == row.length - 1 ? 0 : _swatchGap,
+                ),
+                child: _Swatch(
+                  key: colorSwatchKey(row[i]),
+                  hex: row[i],
+                  selected: current == row[i],
+                  onTap: () => onPick(row[i]),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+  return rows;
+}
+
 class _Swatch extends StatelessWidget {
-  const _Swatch({required this.hex, required this.selected, required this.onTap});
+  const _Swatch({
+    super.key,
+    required this.hex,
+    required this.selected,
+    required this.onTap,
+  });
 
   final String hex;
   final bool selected;

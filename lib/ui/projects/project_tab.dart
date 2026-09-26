@@ -14,6 +14,9 @@ import 'project_detail_page.dart';
 const Duration _foldDuration = Duration(milliseconds: 180);
 
 /// 标识色小色条的 Key：用例靠它确认"没设色的项目用的是灰条，而不是空位"。
+///
+/// 2026-09-26 批 B 第 ① 项之后，这根竖条挂在**根层目标行的最左槽位**里
+/// （`ProjectColorBar.leading`），不再是标题前那一段。
 @visibleForTesting
 Key projectColorBarKey(String projectId) => Key('ProjectTile.colorBar.$projectId');
 
@@ -311,9 +314,12 @@ class _ProjectTile extends StatelessWidget {
       // 各画各的会把标题挤到不同的竖线上 —— 有下级的、没下级的、
       // 有没有标识色的，标题必须都在同一条线上。
       //
-      // 现在这一槽只有两种东西：**有箭头 = 分类（有下级）**，**没箭头 = 目标**。
-      // 项目状态图标与"完成删除线"随项目完成态一起从界面拿掉了（Q1）；
-      // 子项目仍用一个标识色小圆点表达归属。
+      // 这一槽里**一个记号只出现一次**（2026-09-26 批 B 第 ① 项）：
+      //   · **有下级 = 分类** → 展开箭头；
+      //   · **根层目标**（没下级、depth 0）→ **竖色条**（原来它在标题前，
+      //     于是根目标这一行左边空一块、色条又在第二个位置出现）；
+      //   · **子目标**（depth > 0）→ 标识色小圆点。
+      // 项目状态图标与"完成删除线"随项目完成态一起从界面拿掉了（Q1）。
       leading: SizedBox(
         width: isChild ? 18 : 40,
         child: Center(
@@ -339,32 +345,20 @@ class _ProjectTile extends StatelessWidget {
                 )
               : (isChild
                     ? ProjectMarker(color: project.color, size: 12)
-                    : const SizedBox.shrink()),
+                    // 根层**目标**：竖色条占住这一槽。没设色时它自己用中性灰补齐
+                    // （既有行为，别丢）——空着会让根目标那一列看着缺一块。
+                    : ProjectColorBar.leading(
+                        key: projectColorBarKey(project.id),
+                        color: project.color,
+                      )),
         ),
       ),
-      title: Row(
-        children: <Widget>[
-          // 标识色（灵感整理第 10 条）：一小段色条，扫一眼就能把项目区分开。
-          // **没设色就用中性灰补齐这个位置**（实机反馈）：空着会让标题一列一个位置；
-          // 灰条既把位置占住，又明说"这一项还没有归属色"。子项目已有色点，不再画色条。
-          if (!isChild)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: ProjectColorBar(
-                key: projectColorBarKey(project.id),
-                color: project.color,
-              ),
-            ),
-          Expanded(
-            child: Text(
-              project.title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              // 子项目降一档字号，层级靠字号与缩进一起表达
-              style: isChild ? theme.textTheme.bodyMedium : null,
-            ),
-          ),
-        ],
+      title: Text(
+        project.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        // 子项目降一档字号，层级靠字号与缩进一起表达
+        style: isChild ? theme.textTheme.bodyMedium : null,
       ),
       // 分类行只给**汇总**（Q2）：目的 / 实现计划 / 实现清单 / 日期 / 状态一律不显示 ——
       // 分类只回答"归哪一类"。

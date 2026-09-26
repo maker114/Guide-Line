@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
+import 'package:guideline/core/models/project_palette.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
 import 'package:guideline/ui/more/task_grouping.dart';
 
@@ -403,6 +405,64 @@ void main() {
     await tester.pumpAndSettle();
     await tester.pageBack();
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('标识色取色器：16 支色排成 4 列 × 4 行，窄屏 + 1.6 倍字体下不溢出（批 B 第 ② 项）', (tester) async {
+    // 360 × 780 逻辑像素（常见手机）+ 1.6 倍字体：底部面板最容易顶穿的一种屏
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    app.ws.createProject(title: '要设色的项目');
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(brightness: Brightness.dark, useMaterial3: true),
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: AppShell(app: app),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 项目详情页的标识色入口 → 底部取色面板
+    await switchTab(tester, '项目');
+    await tester.tap(find.text('要设色的项目').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.palette_outlined).first);
+    await tester.pumpAndSettle();
+
+    // 16 支色一支不少（面板被压出屏幕也不会溢出，因为内容是可滚的）
+    for (final hex in ProjectPalette.hexes) {
+      expect(find.byKey(colorSwatchKey(hex)), findsOneWidget, reason: '$hex 没画出来');
+    }
+    expect(ProjectPalette.hexes, hasLength(16));
+
+    // 排布：每 4 个一行、每 4 个一列 —— 同行的 top 一致、同列的 left 一致
+    final cells = ProjectPalette.hexes
+        .map((hex) => tester.getRect(find.byKey(colorSwatchKey(hex))))
+        .toList(growable: false);
+    for (var i = 0; i < cells.length; i += 1) {
+      for (var j = i + 1; j < cells.length; j += 1) {
+        final sameRow = (cells[i].top - cells[j].top).abs() < 0.5;
+        final sameColumn = (cells[i].left - cells[j].left).abs() < 0.5;
+        if (i ~/ 4 == j ~/ 4) {
+          expect(sameRow, isTrue, reason: '第 ${i ~/ 4 + 1} 行里的色块没排在同一行');
+          expect(sameColumn, isFalse, reason: '同行两支色重叠到了同一列');
+        } else if (i % 4 == j % 4) {
+          expect(sameColumn, isTrue, reason: '第 ${i % 4 + 1} 列里的色块没排在同一列');
+        }
+      }
+    }
+
+    // 点一支新色（靛蓝）要能落库：面板的接线没被排布改动打断
+    await tester.tap(find.byKey(colorSwatchKey('#5A6BAF')));
+    await tester.pumpAndSettle();
+    expect(app.ws.liveProjects.single.color?.toUpperCase(), '#5A6BAF');
   });
 
   testWidgets('损坏恢复的告警条点得开：来源、隔离文件名与「一键导出」都在（Q16）', (tester) async {

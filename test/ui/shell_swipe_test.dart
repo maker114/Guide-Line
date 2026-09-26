@@ -86,6 +86,123 @@ void main() {
     expect(find.text('速记'), findsOneWidget, reason: '非灵感页才有速记按钮');
   });
 
+  testWidgets('速记按钮是与底栏滑块同一套的胶囊：高 48、宽 = 一格、色相同，且不压底栏（批 B 第 ③ 项）', (tester) async {
+    await boot(tester);
+    await swipe(tester, 1); // 到项目页：非灵感页才有速记按钮
+
+    final nav = tester.getRect(find.byType(AppBottomNav));
+    final pill = tester.getRect(find.byType(CapturePillButton));
+    final indicator = tester.getRect(find.byKey(navIndicatorKey));
+
+    expect(pill.height, closeTo(48, 0.01), reason: '与底栏滑块同高（48）');
+    expect(
+      pill.width,
+      closeTo(nav.width / 4, 0.5),
+      reason: '宽度 = 底栏一格 = (底栏可用宽 / 4)，与底栏同一套算法',
+    );
+    expect(
+      pill.width,
+      closeTo(indicator.width, 0.5),
+      reason: '此刻与选中滑块等宽（同一格）',
+    );
+    expect(
+      pill.bottom,
+      lessThan(nav.top),
+      reason: '速记按钮要抬在底栏上方，不能压住底栏',
+    );
+
+    // 形状与颜色：圆角 = 高度一半（24，与滑块共用 `_navRadius`）、
+    // 底色 = 底栏滑块那一套 `secondaryContainer`
+    final decoration = tester
+        .widget<DecoratedBox>(
+          find
+              .descendant(
+                of: find.byType(CapturePillButton),
+                matching: find.byType(DecoratedBox),
+              )
+              .first,
+        )
+        .decoration as BoxDecoration;
+    final scheme =
+        Theme.of(tester.element(find.byType(CapturePillButton))).colorScheme;
+    expect(decoration.borderRadius, BorderRadius.circular(24));
+    expect(decoration.color, scheme.secondaryContainer);
+    final indicatorDecoration = tester
+        .widget<Container>(find.byKey(navIndicatorKey))
+        .decoration as BoxDecoration;
+    expect(
+      indicatorDecoration.color,
+      decoration.color,
+      reason: '与底栏滑块同一套色，保证色系统一',
+    );
+
+    expect(
+      find.descendant(
+        of: find.byType(CapturePillButton),
+        matching: find.text('速记'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('窄屏 + 1.6 倍字体：一格放不下就只画图标，但 tooltip 与语义标签仍是「速记」', (tester) async {
+    // 360 × 780 逻辑像素（常见手机）；1.6 倍字体下一格只有 (360 − 40) / 4 = 80dp
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(1.6)),
+          child: child!,
+        ),
+        home: AppShell(app: app),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(
+        of: find.byType(CapturePillButton),
+        matching: find.text('速记'),
+      ),
+      findsNothing,
+      reason: '一格宽度放不下「图标 + 速记」，这时只画图标',
+    );
+    expect(
+      find.descendant(
+        of: find.byType(CapturePillButton),
+        matching: find.byIcon(Icons.bolt),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('速记'), findsOneWidget, reason: 'tooltip 不能跟着文字一起消失');
+
+    final semantics = tester.ensureSemantics();
+    expect(
+      find.bySemanticsLabel('速记'),
+      findsOneWidget,
+      reason: '只画图标时，语义标签是唯一能念出「速记」的地方',
+    );
+    semantics.dispose();
+
+    // 点击行为不变：切到灵感页并把光标放进速记框
+    await tester.tap(find.byType(CapturePillButton));
+    await tester.pumpAndSettle();
+    expect(find.text('未处理 0 条'), findsOneWidget, reason: '点它应当回到灵感页');
+    // `focusCapture` 里还挂着一个 450ms 的"再要一次键盘"（HyperOS 实测需要），
+    // 让它跑完再收尾 —— 否则测试框架会判"还有 Timer 没结束"
+    await tester.pump(const Duration(milliseconds: 500));
+  });
+
   testWidgets('点底栏切页与滑动切页结果一致', (tester) async {
     final app = await boot(tester);
     final cell = tester.getRect(find.byType(AppBottomNav)).width / 4;
