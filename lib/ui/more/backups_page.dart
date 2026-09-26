@@ -58,7 +58,7 @@ class BackupsPage extends StatelessWidget {
               if (backups.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('还没有备份。保存过一次数据后就会出现。'),
+                  child: Text('还没有备份。随便改点什么存一次，它就会出现 —— 没有云端时，它是唯一的安全网。'),
                 )
               else
                 for (final entry in backups)
