@@ -43,18 +43,6 @@ Color? nodeStatusColor(NodeStatus status, ColorScheme scheme) {
   }
 }
 
-String taskTypeLabel(TaskType type) {
-  switch (type) {
-    case TaskType.standard:
-      return '标准';
-    case TaskType.subtask:
-      return '子任务';
-    // 历史类型：老数据里可能还有，界面上一律按子任务对待（见 [TaskType]）
-    case TaskType.parallel:
-      return '子任务';
-  }
-}
-
 /// 实体类型名（归档区、搜索结果里给条目"贴标签"用）。
 String entityTypeLabel(Entity entity) {
   if (entity is Project) return '项目';
