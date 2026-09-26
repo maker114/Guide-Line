@@ -319,4 +319,54 @@ void main() {
         reason: '筛选条与空态各说一次"一共还有多少条"');
     expect(find.text('清除筛选'), findsWidgets, reason: '筛选条与空态各给一次出口');
   });
+
+  testWidgets('已归档项目下的灵感真的从列表里消失，并给一行去处提示（Q10）', (tester) async {
+    final app = await boot();
+    final live = app.ws.createProject(title: '还在做的项目');
+    final archived = app.ws.createProject(title: '归档掉的项目');
+    app.run(() => app.ws.captureInspiration('看得见的灵感', projectId: live.id));
+    app.run(() => app.ws.captureInspiration('被藏起来的灵感', projectId: archived.id));
+    app.run(() => app.ws.setProjectArchived(archived.id, true));
+
+    // 数据层：列表与统计都是同一个口径
+    expect(app.ws.inspirationInbox.map((i) => i.text), <String>['看得见的灵感']);
+    expect(app.ws.inspirationsHiddenByArchivedProjects, 1);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('看得见的灵感'), findsOneWidget);
+    expect(find.text('被藏起来的灵感'), findsNothing, reason: '归档项目承诺过它不再占列表');
+    expect(find.text('未处理 1 条'), findsOneWidget, reason: '计数与列表同一套取数');
+    expect(
+      find.textContaining('另有 1 条在已归档项目下'),
+      findsOneWidget,
+      reason: '从列表里消失的东西必须有个去处，不能静默吞掉',
+    );
+
+    // 取消归档 → 回到列表，提示也随之消失
+    app.run(() => app.ws.setProjectArchived(archived.id, false));
+    await tester.pumpAndSettle();
+    expect(find.text('被藏起来的灵感'), findsOneWidget);
+    expect(find.textContaining('另有 1 条在已归档项目下'), findsNothing);
+    expect(find.text('未处理 2 条'), findsOneWidget);
+  });
+
+  testWidgets('全部灵感都被归档项目遮住时，空态也要说清"去哪看"（Q10）', (tester) async {
+    final app = await boot();
+    final archived = app.ws.createProject(title: '归档掉的项目');
+    app.run(() => app.ws.captureInspiration('被藏起来的灵感', projectId: archived.id));
+    app.run(() => app.ws.setProjectArchived(archived.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('灵感箱是空的'), findsOneWidget);
+    expect(
+      find.textContaining('另有 1 条在已归档项目下'),
+      findsWidgets,
+      reason: '"空"是算出来的空 —— 不说清楚，用户会以为灵感被删了'
+          '（提示条与空态各说一次，说明这条信息确实显眼）',
+    );
+  });
 }

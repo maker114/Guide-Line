@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/ui/app_shell.dart';
@@ -170,5 +171,70 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('已恢复：孤单的项目'), findsOneWidget);
+  });
+
+  testWidgets('「已合并」的动作叫「恢复为待处理（项目里的内容不会退回）」（Q9）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标项目');
+    final inspiration = app.ws.captureInspiration('合并掉的灵感', projectId: project.id);
+    app.run(() => app.ws.mergeInspiration(
+          inspirationId: inspiration.id,
+          projectId: project.id,
+          newImplementation: '写进项目的正文',
+        ));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('已合并 1'));
+    await tester.pumpAndSettle();
+
+    // 分区说明先说清代价，动作名再说一遍 —— 名字与语义必须一致
+    expect(
+      find.textContaining('恢复为待处理只把灵感放回灵感箱，项目里的内容不会退回'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('恢复为待处理（项目里的内容不会退回）'),
+      findsOneWidget,
+      reason: '叫"撤销合并"会让人以为项目里那条也一起退回去了',
+    );
+    expect(find.text('撤销合并'), findsNothing);
+
+    await tester.tap(find.text('恢复为待处理（项目里的内容不会退回）'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已恢复为待处理（项目里的内容不会退回）'), findsOneWidget);
+    expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
+    expect(
+      app.ws.findProject(project.id)!.implementation,
+      '写进项目的正文',
+      reason: '项目里的内容不退回 —— 这正是名字里要写清的那半句',
+    );
+  });
+
+  testWidgets('「已归档」分区说明写清单独归档的子任务也能在这里找回（Q18）', (tester) async {
+    final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final parent = app.ws.createTask(eventId: event.id, title: '父任务');
+    final sub = app.ws.createTask(
+      eventId: event.id,
+      title: '被归档的子任务',
+      parentTaskId: parent.id,
+      type: TaskType.subtask,
+    );
+    app.run(() => app.ws.setTaskArchived(sub.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('单独归档的子任务也能在这里找回'),
+      findsOneWidget,
+      reason: '任务线里不再显示已归档节点，说明里必须给出去处',
+    );
+    // 它真的在这一区里（父节点还活着 → 它就是归档根）
+    expect(find.text('被归档的子任务'), findsOneWidget);
   });
 }
