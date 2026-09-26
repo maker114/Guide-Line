@@ -366,7 +366,7 @@ void main() {
       scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
-    expect(find.text('长按条目可以上移、下移、删除'), findsOneWidget);
+    expect(find.text('长按条目可以建成任务、上移、下移、删除'), findsOneWidget);
     await tester.tap(find.text('重拆 / 清空'));
     await tester.pumpAndSettle();
     expect(find.text('整理清单'), findsOneWidget, reason: '面板本身也不能在放大字体下溢出');

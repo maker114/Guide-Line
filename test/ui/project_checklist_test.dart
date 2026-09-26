@@ -198,8 +198,8 @@ void main() {
     // 入口必须**看得见**：上一批把「重拆 / 清空」整个删掉，拆错了就再没有重来入口
     expect(find.text('重拆 / 清空'), findsOneWidget);
     expect(find.byTooltip('清单：按正文重拆 / 清空'), findsOneWidget);
-    // 上移 / 下移 / 删除只有长按这一条路，界面上得有一句说明
-    expect(find.text('长按条目可以上移、下移、删除'), findsOneWidget);
+    // 上移 / 下移 / 建成任务 / 删除只有长按这一条路，界面上得有一句说明
+    expect(find.text('长按条目可以建成任务、上移、下移、删除'), findsOneWidget);
 
     await tester.tap(find.text('重拆 / 清空'));
     await tester.pumpAndSettle();
