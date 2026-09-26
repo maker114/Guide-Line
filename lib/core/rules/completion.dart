@@ -33,7 +33,10 @@ class CompletionCheck {
   final int judgedChildCount;
   final int unfinishedCount;
 
-  /// 条件未满足时给用户的解释（"还有 2 个子项目未处理"）。
+  /// 条件未满足时给用户的解释（"还有 2 个子节点未处理"）。
+  ///
+  /// 现在只有**事件与任务**会用到它：项目没有完成态（《定义与边界》§2.1/Q1），
+  /// 所以"父项目为什么还不能完成"这句话整体消失了。
   String? get reason => canComplete ? null : '还有 $unfinishedCount 个子节点未处理';
 }
 
