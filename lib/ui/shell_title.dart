@@ -3,10 +3,28 @@ import 'package:flutter/material.dart';
 
 /// 标题栏翻页过渡的**横向位移幅度**（dp）。
 ///
-/// 取 10（要求给的区间是 8~12）：再小就看不出方向，再大就像在滑一列字。
-/// 位移与透明度都只由**连续页位置的小数部分**决定 —— 拖到一半再拖回来，
-/// 标题按同一个公式回到原样（不存在"必须靠动画补回来"的状态）。
-const double shellTitleShift = 10;
+/// **原值 10 → 新值 18（2026-09-26 批 D 第 ① 项）**。为什么要加：10 那一版
+/// 实机反馈"拖动切页时标题还是显得硬切"—— 位移那一档与底栏滑块挪出去的量相比
+/// 太小，两层叠在一起时看着像没动。18 是"看得出方向"的上限，再大就像在滑一列字。
+///
+/// 位移与透明度都只由**连续页位置的小数部分**决定（见 [shellTitleFade]）——
+/// 拖到一半再拖回来，标题按同一个公式回到原样（不存在"必须靠动画补回来"的状态）。
+const double shellTitleShift = 18;
+
+/// 翻页过渡的**形状**：smoothstep `t²(3 − 2t)`。
+///
+/// **线性 → smoothstep（2026-09-26 批 D 第 ① 项）**。原来是线性的 `t`：
+/// 两层各按 `t` 与 `1 − t` 叠着，中间那一段两个标题同时有接近一半的浓度，
+/// 实机看着"略微糊"。smoothstep 两头平、中间陡（在 0 与 1 处导数为 0）：
+/// 刚起步、快到位时都把主导权更干脆地交给其中一层，"两层都看得见"的区间
+/// 明显变短，换页就显得利落；中点仍然各半，不偏袒任何一侧。
+///
+/// 位移**与不透明度共用这一个数**：`dx` 与 `opacity` 于是永远互补，
+/// 拖回来是原样倒放，落位时也天然收干净。
+double shellTitleFade(double t) {
+  final x = t.clamp(0.0, 1.0);
+  return x * x * (3 - 2 * x);
+}
 
 /// 翻页过渡中某一页标题所在**图层**的 Key。
 ///
@@ -72,15 +90,19 @@ class ShellTitle extends StatelessWidget {
         if (upper == lower || t < _epsilon) return Text(titleAt(lower));
         if (t > 1 - _epsilon) return Text(titleAt(upper));
 
+        // 位移与不透明度**共用**这一个数（smoothstep）：
+        // 两层的不透明度仍然互补，位移也仍然与它一一对应（见 [shellTitleFade]）
+        final fade = shellTitleFade(t);
+
         return Stack(
-          // 两层都要往原位旁边挪最多 10dp，默认的裁剪会把挪出去的那一侧切掉
+          // 两层都要往原位旁边挪最多 18dp，默认的裁剪会把挪出去的那一侧切掉
           clipBehavior: Clip.none,
           alignment: Alignment.centerLeft,
           children: <Widget>[
             // 低页码那一层：页位置靠近它时完全不透明、贴着左端
-            _layer(lower, opacity: 1 - t, dx: -shellTitleShift * t),
-            // 高页码那一层：从右侧 10dp 处淡入
-            _layer(upper, opacity: t, dx: shellTitleShift * (1 - t)),
+            _layer(lower, opacity: 1 - fade, dx: -shellTitleShift * fade),
+            // 高页码那一层：从右侧 18dp 处淡入
+            _layer(upper, opacity: fade, dx: shellTitleShift * (1 - fade)),
           ],
         );
       },

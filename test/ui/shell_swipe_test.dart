@@ -75,6 +75,61 @@ void main() {
       .transform
       .storage[12];
 
+  /// 标题过渡的那一档（批 D 第 ① 项）：位移 10 → 18，透明度线性 → smoothstep。
+  group('ShellTitle 的过渡幅度', () {
+    test('位移幅度加到 18dp', () {
+      expect(shellTitleShift, 18);
+    });
+
+    test('smoothstep：两头平、中间陡，中点仍然是一半', () {
+      expect(shellTitleFade(0), closeTo(0, 1e-12));
+      expect(shellTitleFade(1), closeTo(1, 1e-12));
+      expect(shellTitleFade(0.5), closeTo(0.5, 1e-12), reason: '中点各半，不偏袒任何一侧');
+      // 两头平（0 与 1 处导数为 0）：离开起点时旧标题还更实，逼近终点时新标题
+      // 更早占主导 —— 线性时这两个数就是 0.25 与 0.75
+      expect(shellTitleFade(0.25), lessThan(0.25), reason: '刚起步：旧标题还更实');
+      expect(shellTitleFade(0.75), greaterThan(0.75), reason: '快到位：新标题更早占主导');
+
+      // 单调 + 对称：拖回来是原样倒放，不存在"必须靠动画补回来"的状态
+      var previous = -1.0;
+      for (var step = 0; step <= 100; step += 1) {
+        final t = step / 100;
+        final value = shellTitleFade(t);
+        expect(value, greaterThanOrEqualTo(previous - 1e-12), reason: 't=$t 倒退了');
+        expect(value + shellTitleFade(1 - t), closeTo(1, 1e-12),
+            reason: 't=$t 两层不透明度不再互补');
+        previous = value;
+      }
+
+      // 越界的输入（浮点除法的尾巴）照样夹在 0 / 1 之间
+      expect(shellTitleFade(-0.5), 0);
+      expect(shellTitleFade(1.5), 1);
+    });
+
+    test('"两层都看得见"的区间比线性短 —— 这是"不糊"的量化口径', () {
+      // 两层不透明度都落在 [0.2, 0.8] 的那一段有多长（越短越利落）。
+      double bothVisibleSpan(double Function(double) fade) {
+        var lo = -1.0;
+        var hi = -1.0;
+        for (var step = 0; step <= 1000; step += 1) {
+          final t = step / 1000;
+          final s = fade(t);
+          if (s >= 0.2 && s <= 0.8) {
+            if (lo < 0) lo = t;
+            hi = t;
+          }
+        }
+        return hi - lo;
+      }
+
+      expect(bothVisibleSpan((t) => t), closeTo(0.6, 0.01), reason: '线性时正好是 [0.2, 0.8]');
+      expect(bothVisibleSpan(shellTitleFade), lessThan(0.45),
+          reason: 'smoothstep 该把"两层都浓"的区间收掉一大截');
+      expect(bothVisibleSpan(shellTitleFade), greaterThan(0.3),
+          reason: '也不能收成硬切（那就退回"整数页号切换"了）');
+    });
+  });
+
   testWidgets('向左滑一下：从灵感页翻到项目页，底栏胶囊跟着过去', (tester) async {
     final app = await boot(tester);
     final cell = tester.getRect(find.byType(AppBottomNav)).width / 4;
@@ -273,6 +328,8 @@ void main() {
     expect(dx[1], closeTo(shellTitleShift * opacity[0], 1e-9));
     expect(dx[0], greaterThanOrEqualTo(-shellTitleShift - 1e-9));
     expect(dx[1], lessThanOrEqualTo(shellTitleShift + 1e-9));
+    // 两层位移之差恒等于位移幅度（10 → 18），与手指停在哪儿无关
+    expect(dx[1] - dx[0], closeTo(shellTitleShift, 1e-9));
 
     // 拖回起点：标题**原样**回来（不是靠动画补回来的）
     await gesture.moveBy(Offset(width * 0.4, 0));
@@ -293,6 +350,38 @@ void main() {
     await tester.pumpAndSettle();
     // 松手落位后同样不留图层
     expect(inTitle(find.byType(Opacity)), findsNothing);
+  });
+
+  testWidgets('标题过渡用的是 smoothstep：同样一段拖动，起点附近涨得慢、中段涨得快（批 D 第 ① 项）', (tester) async {
+    await boot(tester);
+    final width = tester.getRect(find.byType(PageView)).width;
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView)),
+    );
+
+    // 第一段：从 0 出发拖 1/4 屏 —— smoothstep 在起点附近平，浓度涨得慢
+    await gesture.moveBy(Offset(-width * 0.25, 0));
+    await tester.pump();
+    final firstLeg = layerOpacity(tester, 1);
+
+    // 第二段：再拖 3/8 屏，落进斜率最大的中段 —— 浓度涨得快
+    await gesture.moveBy(Offset(-width * 0.375, 0));
+    await tester.pump();
+    final secondLeg = layerOpacity(tester, 1) - firstLeg;
+
+    // 换算成"每 dp 拖动涨多少浓度"：线性实现两段一样大（都是 1/屏宽），
+    // smoothstep 的第二段该明显更大 —— 这正是"不糊"的来源。
+    // （第一段会被手势的 touch slop 吃掉一点，所以只用比例，不写死数值。）
+    expect(secondLeg / 0.375, greaterThan(firstLeg / 0.25 * 1.3),
+        reason: '中段没有比起点附近陡，说明用的还是线性那一版');
+    expect(firstLeg, greaterThan(0.05), reason: '起点附近也不能压成 0（那就是硬切）');
+    expect(secondLeg, greaterThan(0.05));
+    expect(layerOpacity(tester, 0) + layerOpacity(tester, 1), closeTo(1, 1e-9));
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(inTitle(find.byType(Opacity)), findsNothing, reason: '落位后收干净');
   });
 
   testWidgets('点底栏切页时标题也在过渡（与翻页同一条时间线）', (tester) async {
@@ -326,7 +415,7 @@ void main() {
     return samples;
   }
 
-  testWidgets('点按切换：指示器轻微过冲（一格行程的 3%~5%）再吸回，落位与页面一致', (tester) async {
+  testWidgets('点按切换：指示器过冲更明显（一格行程的 6%~8%）再吸回，落位与页面一致', (tester) async {
     await boot(tester);
     final bar = tester.getRect(find.byType(AppBottomNav));
     final cell = bar.width / 4;
@@ -340,10 +429,11 @@ void main() {
 
     expect(peak, greaterThan(target + 1),
         reason: '点按应当有过冲；"感觉不到惯性"就是少了这一下');
-    expect(peak, lessThanOrEqualTo(target + cell * 0.05 + 0.5),
-        reason: '过冲不许超过一格行程的 5%，否则看着像没对准');
-    expect(peak, greaterThanOrEqualTo(target + cell * 0.03 - 0.5),
-        reason: '过冲也不能小到看不出来');
+    // 批 D 第 ② 项：y1 1.35 → 1.5，峰值 4.1% → 8%，上界跟着抬到 8%
+    expect(peak, lessThanOrEqualTo(target + cell * 0.085 + 0.5),
+        reason: '过冲不许超过一格行程的 8%，否则看着像没对准');
+    expect(peak, greaterThanOrEqualTo(target + cell * 0.06 - 0.5),
+        reason: '过冲也不能小到看不出来（原来那一档只有 4.1%）');
 
     // 落位：页面、底栏、标题三者一致（结束值相同，过冲不留错位）
     expect(find.text('事件   1'), findsOneWidget);

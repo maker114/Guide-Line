@@ -91,7 +91,7 @@ void main() {
           reason: '退化那一档就是原值，比例正好是 1 : 1.5');
     });
 
-    test('点按的过冲有界（行程的 3%~5%），而且照样正好落在整数格上', () {
+    test('点按的过冲更明显但有界（约行程的 8%），而且照样正好落在整数格上', () {
       // 只取**不贴两端**的跳法：贴边时过冲会被导航条夹住（下一条用例管那个）
       const jumps = <List<double>>[
         <double>[0, 80],
@@ -120,10 +120,14 @@ void main() {
           if (beyond > overshoot) overshoot = beyond;
         }
         final ratio = overshoot / travel;
-        expect(ratio, greaterThan(0.03),
+        // 批 D 第 ② 项：y1 1.35 → 1.5，峰值 4.1% → 8%（x1 / x2 与收尾形状没动）。
+        // 上界跟着抬到 8%：再高（`easeOutBack` 是 10%）看着就像没对准。
+        // 下界取 6%：明显高于原来那一档，才叫"点按感觉得到惯性"。
+        // （若实机手感偏弹，只把 y1 降到 1.45 → 峰值 6.6%，这条用例照样过。）
+        expect(ratio, greaterThan(0.06),
             reason: '$jump 的过冲太小，点按就还是"平"的');
-        expect(ratio, lessThanOrEqualTo(0.05),
-            reason: '$jump 的过冲超过行程的 5%，看着像没对准');
+        expect(ratio, lessThanOrEqualTo(0.081),
+            reason: '$jump 的过冲超过行程的 8%，看着像没对准');
 
         // 结束值必须与常规曲线**一模一样**：页面翻页读的是同一个连续页位置，
         // 只要落点一致，过冲就不会留下错位
