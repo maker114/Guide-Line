@@ -183,6 +183,30 @@ void main() {
       findsOneWidget,
       reason: '「接下来」要写出当前节点的名字',
     );
+
+    // 左小右大 + 右侧右对齐：两行内容的右缘落在同一条竖线上，
+    // 且内容比标签大（实机反馈："左小右大很好看，右边要对齐"）。
+    // 不去数值那串文字（日期文案会随"今天"变、任务名页面上还有一份），
+    // 直接量两行**标题栏的右缘**：标题栏是定宽的，它的右缘就是内容区的右缘。
+    double labelRight(String label) => tester
+        .getRect(find.byKey(ValueKey<String>('fact-label-$label')))
+        .right;
+    expect(
+      labelRight('最近到期'),
+      closeTo(labelRight('接下来'), 0.5),
+      reason: '两行内容的右缘要对齐',
+    );
+    final valueStyle = tester
+        .widget<Text>(find.descendant(of: facts, matching: find.text('第四步')))
+        .style!;
+    final labelStyle = tester
+        .widget<Text>(find.descendant(of: facts, matching: find.text('接下来')))
+        .style!;
+    expect(
+      valueStyle.fontSize,
+      greaterThan(labelStyle.fontSize!),
+      reason: '左小右大：内容要比标签大一档',
+    );
   });
 
   testWidgets('卡头能收起整条线，再点一次展开', (tester) async {

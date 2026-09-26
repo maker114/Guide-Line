@@ -127,7 +127,7 @@ void main() {
 
     expect(
       tile.right - icon.right,
-      greaterThanOrEqualTo(6),
+      greaterThanOrEqualTo(12),
       reason: '行尾图标原本 contentPadding.right = 0，贴着行尾看着要掉出屏幕（实机反馈）',
     );
   });

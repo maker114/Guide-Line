@@ -472,13 +472,16 @@ class _EventHeader extends StatelessWidget {
 /// 这两件事原来只有事件列表卡头的一行小灰字（「最近 2026-09-28（3 天后） ·
 /// 接下来 · 某任务」），实机反馈：那行太小、也太挤，挪到详情页来，并且要好看。
 ///
-/// 做法是**两行"标题在左、内容在右"的字段**，而不是把小灰字放大：
+/// 做法是**两行"左小右大、右侧右对齐"的字段**，而不是把小灰字放大：
+///   · 左边是图标 + 小标签（`labelSmall`），右边是内容（`bodyLarge`，比标签大一档）；
+///   · 内容**向右对齐**：两行的右缘落在同一条竖线上，扫下来是一条直线；
 ///   · 到期日**单独染色**：逾期用 `UrgencyColors.overdue`（红），
 ///     其余用 `primary` —— 只把真急的事标出来，不把"还有半年"也刷成警报色；
 ///   · 「接下来」后面直接写任务名，比卡头那句被省略号截断的话完整；
-///   · 值用 `bodyMedium`（比任务框里那行 `titleSmall` 轻一档）：它是一句摘要，
-///     两处同时出现时得一眼看出哪一行才是能点开的任务本身；
 ///   · 值最多两行省略 —— 1.6 倍字体下也只是换行，不会挤爆（`app_smoke_test` 守着）。
+///
+/// 值用 `bodyLarge` 而不是任务框那行 `titleSmall`（14 / 中粗）：字号更大、字重更轻，
+/// 一眼分得出"这是摘要"与"那是能点开的任务本身"。
 ///
 /// 这一段的顶上**不画分割线**（实机反馈）：与上面那排状态胶囊之间靠标题与留白分开就够了，
 /// 多一条线反而把一张卡切成三块。行与行之间也不用细线：两行本来就隔着 `SizedBox`。
@@ -532,13 +535,14 @@ class _EventFacts extends StatelessWidget {
   }
 }
 
-/// 「时间与任务」里的一行字段：**标题在左（图标 + 小标签）、内容在右**。
+/// 「时间与任务」里的一行字段：**左小右大 + 右侧右对齐**。
 ///
-/// 不用 `ListTile` 的理由：它两端都留 16 的内边距，而这段在卡片里已经有 12 的卡片内边距，
-/// 再叠一层会让标题与上面的「时间与任务」对不齐；这里自己排，四个角的对齐全可控。
+/// 左边是图标 + 小标签（`labelSmall`），右边是内容（`bodyLarge`，比标签大一档），
+/// 内容**向右对齐**：两行的右缘落在同一条竖线上，眼睛扫下来是一条直线
+/// （实机反馈："左小右大才好看，右边要对齐"）。
 ///
-/// 左右两栏都设了上限（标签 88、值占剩下的）：两栏加起来还有富余，值偏左紧挨标题，
-/// 不会像两端对齐那样在中间扯出一条缝；窄屏 / 大字体下值折行也只是行变高。
+/// 不用 `ListTile` 的理由：它两端各留 16 内边距，而这段已经在卡片里（卡片自己还有 12），
+/// 再叠一层会让标题与上面的「时间与任务」对不齐；这里自己排，侧边距与卡片一致。
 class _FactRow extends StatelessWidget {
   const _FactRow({
     required this.icon,
@@ -592,12 +596,14 @@ class _FactRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+          // 内容靠右：两行的右缘对齐（宽度由行分配，右对齐由 textAlign 完成）
           Expanded(
             child: Text(
               value,
+              textAlign: TextAlign.right,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyMedium?.copyWith(
+              style: theme.textTheme.bodyLarge?.copyWith(
                 color: valueColor ?? (highlighted ? null : theme.colorScheme.outline),
               ),
             ),
@@ -842,9 +848,10 @@ class _TaskLine extends StatelessWidget {
       tileColor: indent > 0
           ? theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35)
           : null,
-      // 行尾按 6 留边（原来顶到 0）：那一列是**到期日图标**，贴着行尾在实机上
-      // 看着像要掉出屏幕（实机反馈"贴得太边了"）。子任务行同理，一起往左挪。
-      contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 6),
+      // 行尾按 12 留边（原来顶到 0）：那一列是**到期日图标**，贴着行尾在实机上
+      // 看着像要掉出屏幕（实机反馈"贴得太边了"，先让 6 还不够，再加到 12）。
+      // 这个数还与顶部卡片里「时间与任务」的右缘对齐（那边是卡片 12 + 行 4 − 4）。
+      contentPadding: EdgeInsets.only(left: 4.0 + indent * 20, right: 12),
       leading: TaskStatusButton(app: app, task: task, blocked: blocked),
       // 子任务行有缩进 + 三道前缀（竖线/箭头/间距）约 23dp 的固定开销，
       // 1.6 倍字体下标题的"文字本身宽度 + 固定开销"会差出 2dp。
