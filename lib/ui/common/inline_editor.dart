@@ -41,7 +41,7 @@ class InlineTextField extends StatefulWidget {
     this.autofocus = false,
     this.onEditClosed,
     this.showEditIcon = true,
-    this.editorActions = false,
+    this.editorActions = true,
   });
 
   /// 当前值（外部真源）
@@ -73,10 +73,12 @@ class InlineTextField extends StatefulWidget {
   /// 再挂一个图标只是多一个看不出区别的记号（实机反馈）。
   final bool showEditIcon;
 
-  /// 编辑态右侧补上 **确认 / 取消** 两个按钮。
+  /// 编辑态右侧补上 **确认 / 取消** 两个按钮。**默认给**（Q33）。
   ///
-  /// 原来编辑态只有一个输入框：改完只能靠"点别处"或键盘的完成键提交，
-  /// 想放弃改动就只能自己改回去（实机反馈"没有确认和取消键"）。
+  /// 这个开关原来默认是关的，全仓只有清单条目那一处显式打开 ——
+  /// 于是项目重命名、灵感改内容、事件名、如何解决都只剩"点别处"和键盘完成键
+  /// 两条提交路径，想放弃改动还得自己改回去（实机反馈"没有确认和取消键"）。
+  /// 改成默认打开，一处生效；确实不该有的地方再显式关掉并写明理由。
   final bool editorActions;
 
   @override
@@ -223,8 +225,9 @@ class _InlineTextFieldState extends State<InlineTextField> {
 
 /// 行内编辑的 **确认 / 取消** 按钮：比 `IconButton` 小一圈。
 ///
-/// 它们长在一条本来就紧凑的行里（清单条目），默认 48×48 的触摸目标会把行撑高，
-/// 所以按 `compact` 密度收成 32×32 —— 仍然够点，也不抢文本的宽度。
+/// 它们长在一条本来就紧凑的行里（清单条目、项目名、事件名……），默认 48×48
+/// 的触摸目标会把行撑高、还会把文本宽度挤没，所以按 `compact` 密度收成 32×32 ——
+/// 仍然够点，也给输入框让出宽度（窄屏 + 1.6 倍字体的溢出用例守着这条线）。
 class _EditorAction extends StatelessWidget {
   const _EditorAction({
     required this.tooltip,

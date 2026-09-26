@@ -7,6 +7,8 @@ import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
 
+import 'scroll_finders.dart';
+
 /// 项目详情页的标题栏、目标 / 两套正文与文案（实机反馈 + Q1/Q2/Q4）：
 ///   · 标题旁立一根**标识色竖条**（没设色就是灰条），与项目树行首同一个控件；
 ///   · 正文里不再重复一个「名称」字段，改名收进标题右侧的三个点，
@@ -15,7 +17,8 @@ import 'package:guideline/ui/common/inline_editor.dart';
 ///     「还有 N 个子项目未处理」这类提示；
 ///   · **分类与目标两套正文**（Q2）：分类只有名字 / 标识色 / 下级 / 汇总，
 ///     不出现目的、清单、如何解决、日期，也没有灵感合并入口；
-///   · 字段改称「有什么问题 / 思路」与「如何解决」（Q4）。
+///   · 字段改称「有什么问题 / 思路」与「如何解决」（Q4）；
+///   · 字段的**就地编辑默认带确认 / 取消**（Q33），空态文案顺口一点（Q35）。
 void main() {
   late Directory tempDir;
 
@@ -134,6 +137,38 @@ void main() {
     expect(find.text('别弄丢我'), findsOneWidget);
   });
 
+  testWidgets('字段编辑态默认带确认 / 取消：点取消恢复原值，一个字节都不写盘（Q33）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '有思路的项目');
+    app.run(() => app.ws.updateProject(project.id, purpose: '原来的思路'));
+
+    await openProject(tester, app, '有思路的项目');
+
+    final store = File('${tempDir.path}${Platform.pathSeparator}guideline.json');
+    final before = store.readAsBytesSync();
+
+    // 空正文不会被收起，所以这一页有两个 `InlineTextField`（思路 + 如何解决）
+    await tester.tap(find.text('原来的思路'));
+    await tester.pumpAndSettle();
+
+    // `editorActions` 现在默认打开（Q33）：编辑态右侧就有这两个 32×32 的紧凑图标
+    expect(find.byTooltip('确认'), findsOneWidget);
+    expect(find.byTooltip('取消'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '改了一半的思路');
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findProject(project.id)!.purpose, '原来的思路');
+    expect(find.text('原来的思路'), findsOneWidget);
+    expect(find.text('改了一半的思路'), findsNothing);
+    expect(
+      store.readAsBytesSync(),
+      before,
+      reason: '取消 = 丢掉改动，不能因为点了两个键就白写一次盘',
+    );
+  });
+
   testWidgets('项目没有完成态：详情页没有状态胶囊，也没有"还有 N 个子项目未处理"', (tester) async {
     final app = await boot();
     final parent = app.ws.createProject(title: '父项目');
@@ -206,6 +241,23 @@ void main() {
     expect(find.text('移到其它分类'), findsOneWidget, reason: '分类的动作仍在菜单里');
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('空态文案：下级与灵感都顺口说一句"现在是什么情况"（Q35）', (tester) async {
+    final app = await boot();
+    app.ws.createProject(title: '光杆目标');
+
+    await openProject(tester, app, '光杆目标');
+
+    // 「没有下级 = 目标」这条口径本来就该让用户看到，比干巴巴一句"还没有下级项目"有用
+    expect(find.text('还没有下级 —— 现在它自己就是一个目标。'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('这个项目下没有待处理灵感。想到什么，去灵感页记一句。'),
+      150,
+      scrollable: verticalScrollable,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('这个项目下没有待处理灵感。想到什么，去灵感页记一句。'), findsOneWidget);
   });
 
   testWidgets('新建入口文案随层级：分类下是「新建目标」（复用 InlineComposer）', (tester) async {

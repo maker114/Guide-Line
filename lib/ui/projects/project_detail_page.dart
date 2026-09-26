@@ -10,6 +10,7 @@ import '../common/dialogs.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../inspiration/merge_editor_page.dart';
+import '../theme/shape_tokens.dart';
 import 'handoff_preview_page.dart';
 import 'project_actions.dart';
 import 'project_checklist.dart';
@@ -208,12 +209,41 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                 // 两者都套在与「有什么问题 / 思路」同一个 `_FieldCard` 里，一页只留一种观感。
                 _FieldCard(
                   title: '实现清单',
-                  trailing: project.items.isEmpty
-                      ? null
-                      : Text(
+                  // 进度与「重拆 / 清空」入口共用标题行右侧（Q32）：
+                  // 一个数字 + 一枚胶囊，加起来比原来那个"独占一整行的更多按钮"省地方。
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      if (project.items.isNotEmpty) ...<Widget>[
+                        Text(
                           '${project.itemsDoneCount}/${project.items.length}',
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
+                        const SizedBox(width: 8),
+                      ],
+                      // 清空 / 按正文重拆这两件事平时不用，但"拆错了想重来"时
+                      // 必须找得到 —— 上一批把它们藏进长按里，用户就再也看不到了。
+                      Tooltip(
+                        message: '清单：按正文重拆 / 清空',
+                        child: TextButton.icon(
+                          onPressed: () => _showChecklistActions(context, project),
+                          icon: const Icon(Icons.tune, size: 18),
+                          label: const Text('重拆 / 清空'),
+                          style: TextButton.styleFrom(
+                            // 能点的用胶囊（《界面规范》§1）；次要入口不加底色
+                            shape: AppShapes.pill,
+                            // 不用强调色：这里进去的是**危险动作**（清空 / 覆盖现有条目），
+                            // 规范要求危险动作别做成醒目的按钮，实际的门在确认框上
+                            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            minimumSize: const Size(0, 32),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   child: ProjectChecklist(
                     app: app,
                     project: project,
@@ -270,6 +300,90 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     );
   }
 
+  /// 清单区的**整理入口**（Q32）：把"按正文重拆 / 清空清单"这两件平时不用、
+  /// 但拆错了必须找得到的事收在一处，入口挂在清单卡片的标题行上。
+  ///
+  /// 两件事都**只动清单、一个字都不动正文**（《定义与边界》§2.1：清单不参与
+  /// 完成判定，也与事件里的任务零联动）。入口本身也顺带说明"长按条目能做什么"——
+  /// 那是条目级操作唯一的入口，不说就没人知道。
+  Future<void> _showChecklistActions(BuildContext context, Project project) async {
+    final items = project.items;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Text('整理清单', style: theme.textTheme.titleMedium),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  items.isEmpty ? '清单现在是空的。' : '长按某一条，可以上移、下移、删除。',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.splitscreen_outlined),
+                title: const Text('按正文重拆'),
+                // 说清代价：怎么拆是猜的，而且会顶掉现有条目 —— 不可逆
+                subtitle: const Text('按行拆开「如何解决」；正文不动，怎么拆是猜的'),
+                enabled: project.implementation.trim().isNotEmpty,
+                onTap: () => Navigator.of(sheetContext).pop('split'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.playlist_remove),
+                title: const Text('清空清单'),
+                subtitle: Text(
+                  items.isEmpty ? '现在就没有条目' : '会删掉这 ${items.length} 条；正文不受影响',
+                ),
+                enabled: items.isNotEmpty,
+                onTap: () => Navigator.of(sheetContext).pop('clear'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == null || !context.mounted) return;
+    if (action == 'clear') {
+      await _clearItems(context, project);
+      return;
+    }
+    await _splitIntoItems(context, project);
+  }
+
+  /// 清空清单（**只清条目，正文一个字都不动**）。
+  ///
+  /// 二次确认是必须的：条目本身没有回收站，删掉就只能靠正文重新拆一次
+  /// —— 而"怎么拆"本来就是猜的，等于找不回来。
+  Future<void> _clearItems(BuildContext context, Project project) async {
+    final count = project.items.length;
+    if (count == 0) return;
+
+    final ok = await confirmAction(
+      context,
+      title: '清空清单',
+      message: '会删掉现在这 $count 条条目。\n'
+          '正文（「如何解决」）不受影响，还在原地。',
+      confirmLabel: '清空',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+
+    final error = app.run(() => app.ws.clearProjectItems(project.id));
+    if (error != null) {
+      if (context.mounted) showToast(context, error, error: true);
+      return;
+    }
+    if (context.mounted) showToast(context, '已清空 $count 条，正文未改动');
+  }
+
   /// 把「实现」正文按行拆成清单条目（**显式动作**）。
   ///
   /// 不在读取时自动拆：把一段中文按行拆开是不可逆的猜测，自动拆等于
@@ -285,7 +399,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       final ok = await confirmAction(
         context,
         title: '从正文重拆',
-        message: '会先清空现在这 ${project.items.length} 条，再按正文重新拆成 ${lines.length} 条。\n'
+        message: '会先清空现在这 ${project.items.length} 条，再按正文重新拆成 ${lines.length} 条'
+            ' —— 怎么拆是猜的，拆错了只能一条条改回来。\n'
             '正文本身不会动。',
         confirmLabel: '重拆',
         danger: true,
@@ -303,7 +418,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       if (context.mounted) showToast(context, error, error: true);
       return;
     }
-    if (context.mounted) showToast(context, '已拆成 ${lines.length} 条');
+    if (context.mounted) {
+      showToast(context, '已拆成 ${lines.length} 条。不合意就点「重拆 / 清空」再来一次');
+    }
   }
 }
 
@@ -624,6 +741,7 @@ class _FieldCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final trailingWidget = trailing;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Card(
@@ -636,9 +754,20 @@ class _FieldCard extends StatelessWidget {
             children: <Widget>[
               Row(
                 children: <Widget>[
-                  Text(title, style: theme.textTheme.labelLarge),
-                  const Spacer(),
-                  ?trailing,
+                  // 标题让位给右侧的进度 / 入口：`Row` 里的非弹性子节点拿的是
+                  // **无界宽度**，标题若是纯 `Text`，右侧一宽就会整行溢出。
+                  // 交给 `Expanded` + 省略号，窄屏 + 1.6 倍字体也压得住。
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: theme.textTheme.labelLarge,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (trailingWidget != null) ...<Widget>[
+                    const SizedBox(width: 8),
+                    trailingWidget,
+                  ],
                 ],
               ),
               const SizedBox(height: 4),
@@ -713,7 +842,12 @@ class _ChildrenField extends StatelessWidget {
         if (children.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Text('还没有下级项目', style: theme.textTheme.bodySmall),
+            // 「没有下级 = 目标」这条口径（§2.1）顺带说给用户听，
+            // 比干巴巴一句"还没有下级项目"有用
+            child: Text(
+              '还没有下级 —— 现在它自己就是一个目标。',
+              style: theme.textTheme.bodySmall,
+            ),
           )
         else
           for (final child in children)
@@ -727,7 +861,7 @@ class _ChildrenField extends StatelessWidget {
               minLeadingWidth: 18,
               leading: ProjectMarker(color: child.color, size: 12),
               title: Text(child.title, style: theme.textTheme.bodyMedium),
-              subtitle: childSubtitle(theme, child),
+              subtitle: _childSubtitle(theme, child),
               trailing: const Icon(Icons.chevron_right, size: 18),
               onTap: () => Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
@@ -763,7 +897,9 @@ class _ChildrenField extends StatelessWidget {
 ///
 /// 原来固定写「未设置日期」，每条都多一行字，既占地方又没信息量；
 /// 现在项目也没有状态可写（Q1），所以这里只剩日期一项。
-Text? childSubtitle(ThemeData theme, Project child) {
+///
+/// 私有（Q41）：全仓只有这一页的下级行用它，公开出去只是给"零调用"留口子。
+Text? _childSubtitle(ThemeData theme, Project child) {
   if (child.date == null) return null;
   return Text(
     describeDate(child.date),
@@ -797,7 +933,10 @@ class _InspirationsField extends StatelessWidget {
         if (inspirations.isEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Text('这个项目下没有待处理灵感', style: theme.textTheme.bodySmall),
+            child: Text(
+              '这个项目下没有待处理灵感。想到什么，去灵感页记一句。',
+              style: theme.textTheme.bodySmall,
+            ),
           )
         else ...<Widget>[
           // 点一条**直接进合并编辑器**（灵感整理第 9 条）。

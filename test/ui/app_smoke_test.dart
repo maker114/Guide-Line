@@ -7,6 +7,7 @@ import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
+import 'package:guideline/ui/more/task_grouping.dart';
 
 import 'scroll_finders.dart';
 
@@ -238,8 +239,10 @@ void main() {
         ));
     app.run(() => app.ws.createTask(eventId: event.id, title: '没有到期日的事'));
 
+    // Q19 之后"到期"只有一处口径：`AppController.overdueCount` →
+    // `Workspace.overdueTasks()`（"N 天内到期"那个 getter 与它背后的函数已删掉，
+    // 所以这里不再另断一个数）
     expect(app.overdueCount, 1, reason: '只算逾期的，不算没设到期日的');
-    expect(app.dueCount, 1);
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
@@ -259,6 +262,15 @@ void main() {
     expect(find.text('接下来的任务'), findsOneWidget);
     expect(find.text('早就该做的事'), findsOneWidget);
     expect(find.text('已逾期'), findsOneWidget, reason: '逾期是紧迫度里的第一档');
+    // 三处同源（Q19）：页面上「已逾期」那一组的**组数据**就是 `overdueTasks()` ——
+    // 横幅说 1 条，那一组里也只该有 1 条（不能只比文案里的数字：
+    // 「没有到期日」那一档也是一条，屏上会有两个"1 条"）
+    final overdueGroup = groupByUrgency(
+      app.ws.openTasks(),
+      overdueTaskIds: app.ws.overdueTasks().map((t) => t.id).toSet(),
+    ).firstWhere((g) => g.label == '已逾期');
+    expect(overdueGroup.tasks.length, app.overdueCount);
+    expect(overdueGroup.tasks.single.title, '早就该做的事');
     expect(
       find.text('没有到期日的事'),
       findsOneWidget,
@@ -303,6 +315,8 @@ void main() {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final project = app.ws.createProject(title: '一个名字相当长的项目名');
     app.run(() => app.ws.updateProject(project.id, purpose: '一句相当长的目的说明，用来撑满一行'));
+    // 清单里留一条：标题行要同时摆下进度数字与「重拆 / 清空」胶囊（Q32）
+    app.run(() => app.ws.addProjectItem(project.id, '一条相当长的清单条目，用来撑一撑卡片的宽度'));
     final event = app.ws.createEvent(name: '一个名字相当长的事件名');
     final task = app.ws.createTask(eventId: event.id, title: '一条名字相当长的主线任务');
     app.run(() => app.ws.createTask(
@@ -329,6 +343,36 @@ void main() {
     // 详情页的标题栏也在这条线上：标识色竖条 + 项目名 + 三个点，外加改名时的输入框
     await tester.tap(find.text('一个名字相当长的项目名').first);
     await tester.pumpAndSettle();
+
+    // 字段编辑态：右侧多出两个 32×32 的确认 / 取消，输入框不能被挤没（Q33）。
+    // 先做这一步：思路字段在清单卡片**上面**，等滚到清单再回头找它就得往回滚
+    await tester.scrollUntilVisible(
+      find.textContaining('一句相当长的目的说明'),
+      -150,
+      scrollable: verticalScrollable,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('一句相当长的目的说明'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('确认'), findsOneWidget);
+    expect(find.byTooltip('取消'), findsOneWidget);
+    await tester.tap(find.byTooltip('取消'));
+    await tester.pumpAndSettle();
+
+    // 清单标题行：进度 n/m + 「重拆 / 清空」胶囊，1.6 倍字体下最容易挤爆（Q32）
+    await tester.scrollUntilVisible(
+      find.text('重拆 / 清空'),
+      150,
+      scrollable: verticalScrollable,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('长按条目可以上移、下移、删除'), findsOneWidget);
+    await tester.tap(find.text('重拆 / 清空'));
+    await tester.pumpAndSettle();
+    expect(find.text('整理清单'), findsOneWidget, reason: '面板本身也不能在放大字体下溢出');
+    await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉面板
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('重命名'));

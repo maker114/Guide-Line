@@ -17,6 +17,9 @@ import 'ai_preview_page.dart';
 ///   · **与事件里的任务没有联动** —— 这里勾了不代表任务线那边动了；
 ///   · 条目是轻量内容：删除**不弹二次确认**（误删重打一句就好，
 ///     弹确认反而烦），编辑是点一下原地改。
+///
+/// 清单区的标题行在 `_FieldCard`（项目详情页）那边：进度 `n/m` 与
+/// 「重拆 / 清空」的胶囊入口都挂在那里（Q32），这里不重复一个标题工具栏。
 class ProjectChecklist extends StatelessWidget {
   const ProjectChecklist({
     super.key,
@@ -39,17 +42,17 @@ class ProjectChecklist extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // 这里**没有**自己的标题工具栏：标题与进度由外面的 `_FieldCard` 给
-        // （那里显示 n/m）。原来这里还挂着一个「清单操作」的更多按钮，
-        // 它一个人占一整行、又只有"重拆 / 清空"两件事（实机反馈：影响美观、
-        // 没什么用），整个去掉了。想重来就长按条目删掉，或直接改条目文字。
+        // 这里**没有**自己的标题工具栏：标题、进度 n/m 与「重拆 / 清空」入口
+        // 都由外面的 `_FieldCard` 给。上一批把那个入口整个删掉过（嫌它占一整行），
+        // 结果"拆错了想重来"就再没有路可走 —— 这一批按 Q32 把它恢复成
+        // 标题行里的一枚胶囊，不再独占一行。
         if (items.isEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('还没有条目。把「如何解决」拆成一条条清单，做起来更清楚。',
+                Text('还没有条目。把「如何解决」拆成一条条清单，开工时就不用一边做一边回忆了。',
                     style: theme.textTheme.bodySmall),
                 if (project.implementation.trim().isNotEmpty)
                   Align(
@@ -63,7 +66,12 @@ class ProjectChecklist extends StatelessWidget {
               ],
             ),
           )
-        else
+        else ...<Widget>[
+          // 上移 / 下移 / 删除**只有长按这一条路**，不说一句用户永远不知道（Q32）。
+          Padding(
+            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
+            child: Text('长按条目可以上移、下移、删除', style: theme.textTheme.bodySmall),
+          ),
           for (var i = 0; i < items.length; i += 1)
             _ItemRow(
               app: app,
@@ -72,6 +80,7 @@ class ProjectChecklist extends StatelessWidget {
               isFirst: i == 0,
               isLast: i == items.length - 1,
             ),
+        ],
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
           child: InlineComposer(
@@ -126,9 +135,11 @@ class _ItemRow extends StatelessWidget {
     final theme = Theme.of(context);
     return InkWell(
       // 点文本**就地改**（与「有什么问题 / 思路」等字段一样用 `InlineTextField`），
-      // **长按**才弹出条目操作。行尾那个"重命名"小铅笔也去掉了（实机反馈）：
-      // 点这一行本身就是改名，再挂一个图标只是多一个看不出区别的记号。
-      // 编辑态自带**确认 / 取消**两个键 —— 改到一半想放弃时不用自己改回去。
+      // **长按**才弹出条目操作 —— 这条路上移 / 下移 / 删除都有，但它是隐藏的，
+      // 所以清单上方有一行说明兜着（Q32）。
+      // 行尾那个"重命名"小铅笔也去掉了（实机反馈）：点这一行本身就是改名，
+      // 再挂一个图标只是多一个看不出区别的记号。
+      // 编辑态自带**确认 / 取消**两个键（现在是 `InlineTextField` 的默认，Q33）。
       onLongPress: () => _showActions(context),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(4, 0, 8, 0),
@@ -149,7 +160,6 @@ class _ItemRow extends StatelessWidget {
                 hint: '这条要做什么',
                 maxLines: 3,
                 showEditIcon: false,
-                editorActions: true,
                 textStyle: item.done
                     ? theme.textTheme.bodyMedium?.copyWith(
                         decoration: TextDecoration.lineThrough,
@@ -173,6 +183,8 @@ class _ItemRow extends StatelessWidget {
 
   /// 条目操作：长按弹出（删除 / 上移 / 下移）。
   ///
+  /// 与清单上方的说明行、标题行的「重拆 / 清空」入口分工：这里管**单条**，
+  /// 那里管**整份清单**。
   /// 删除**不弹二次确认**：条目是轻量内容，误删重打一句就好。
   Future<void> _showActions(BuildContext context) async {
     final value = await showModalBottomSheet<String>(

@@ -13,7 +13,8 @@ import 'scroll_finders.dart';
 ///   · 清单与正文并存，两块的入口都在项目详情页；
 ///   · 加条目、打勾、删条目都真的改了数据；
 ///   · 「从正文拆成条目」把正文按行拆开，且正文本身不动；
-///   · 清单块自己**不再挂「更多」按钮**，条目**点一下就改**（带确认 / 取消）。
+///   · 清单卡片的**标题行**挂着「重拆 / 清空」入口 + 进度 n/m（Q32：
+///     上一批把这个入口删了，拆错了就没法重来）；条目**点一下就改**（带确认 / 取消）。
 void main() {
   late Directory tempDir;
 
@@ -59,7 +60,11 @@ void main() {
 
     await scrollTo(tester, find.text('实现清单'));
     expect(find.text('实现清单'), findsOneWidget);
-    expect(find.textContaining('还没有条目'), findsOneWidget);
+    // Q35：空态可以把话说得轻一点，但仍要给出下一步
+    expect(
+      find.text('还没有条目。把「如何解决」拆成一条条清单，开工时就不用一边做一边回忆了。'),
+      findsOneWidget,
+    );
     expect(find.text('从正文拆成条目'), findsOneWidget, reason: '正文非空时才给这个入口');
   });
 
@@ -182,24 +187,96 @@ void main() {
     expect(find.text('改了一半'), findsNothing);
   });
 
-  testWidgets('清单块不再自带「更多」按钮（重拆 / 清空两件事已去掉）', (tester) async {
+  testWidgets('清单标题行有「重拆 / 清空」入口，并说明长按条目能做什么（Q32）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目壬');
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
 
     await openProject(tester, app, '清单项目壬');
-    await scrollTo(tester, find.text('一条条目'));
+    await scrollTo(tester, find.text('重拆 / 清空'));
 
-    expect(
-      find.byWidgetPredicate(
-        (w) => w is PopupMenuButton<String> && w.tooltip == '清单操作',
-      ),
-      findsNothing,
-      reason: '它一个人占一整行又不常用 —— 整个去掉',
-    );
-    expect(find.text('清空清单'), findsNothing);
+    // 入口必须**看得见**：上一批把「重拆 / 清空」整个删掉，拆错了就再没有重来入口
+    expect(find.text('重拆 / 清空'), findsOneWidget);
+    expect(find.byTooltip('清单：按正文重拆 / 清空'), findsOneWidget);
+    // 上移 / 下移 / 删除只有长按这一条路，界面上得有一句说明
+    expect(find.text('长按条目可以上移、下移、删除'), findsOneWidget);
+
+    await tester.tap(find.text('重拆 / 清空'));
+    await tester.pumpAndSettle();
+    expect(find.text('整理清单'), findsOneWidget);
+    expect(find.text('按正文重拆'), findsOneWidget);
+    expect(find.text('清空清单'), findsOneWidget);
+
     // 详情页标题栏的「更多」（交接导出等）不受影响，仍在
     expect(find.byTooltip('更多'), findsOneWidget);
+  });
+
+  testWidgets('清空清单：二次确认说清正文不受影响；取消不动、确认才清（Q32）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目癸');
+    app.run(() => app.ws.updateProject(project.id, implementation: '- 第一步\n- 第二步'));
+    app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
+
+    await openProject(tester, app, '清单项目癸');
+    await scrollTo(tester, find.text('重拆 / 清空'));
+    await tester.tap(find.text('重拆 / 清空'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清空清单'));
+    await tester.pumpAndSettle();
+
+    // 二次确认：说清删几条、正文一个字都不动
+    expect(find.textContaining('会删掉现在这 1 条条目'), findsOneWidget);
+    expect(find.textContaining('正文（「如何解决」）不受影响'), findsOneWidget);
+
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(app.ws.findProject(project.id)!.items, hasLength(1), reason: '取消就一条都不该动');
+
+    await tester.tap(find.text('重拆 / 清空'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清空清单'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清空'));
+    await tester.pumpAndSettle();
+
+    final reloaded = app.ws.findProject(project.id)!;
+    expect(reloaded.items, isEmpty);
+    expect(
+      reloaded.implementation,
+      '- 第一步\n- 第二步',
+      reason: '清空清单只清条目，正文（「如何解决」）不受影响',
+    );
+    expect(find.text('一条条目'), findsNothing);
+  });
+
+  testWidgets('按正文重拆：从入口进，说清会替换现有条目，拆完正文不动（Q32）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目丑');
+    app.run(() => app.ws.updateProject(project.id, implementation: '- 甲\n- 乙\n- 丙'));
+    app.run(() => app.ws.addProjectItem(project.id, '旧的条目'));
+
+    await openProject(tester, app, '清单项目丑');
+    await scrollTo(tester, find.text('重拆 / 清空'));
+    await tester.tap(find.text('重拆 / 清空'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('按正文重拆'));
+    await tester.pumpAndSettle();
+
+    // "不可逆的猜测 + 替换现有条目"必须写在确认框里
+    expect(find.textContaining('会先清空现在这 1 条'), findsOneWidget);
+    expect(find.textContaining('怎么拆是猜的'), findsOneWidget);
+
+    await tester.tap(find.text('重拆'));
+    await tester.pumpAndSettle();
+
+    final reloaded = app.ws.findProject(project.id)!;
+    expect(reloaded.items.map((i) => i.text), <String>['甲', '乙', '丙']);
+    expect(
+      reloaded.implementation,
+      '- 甲\n- 乙\n- 丙',
+      reason: '重拆是"另存一份结构"，正文本身不该被改写',
+    );
+    expect(find.text('旧的条目'), findsNothing, reason: '重拆会替换掉现有条目');
   });
 
   testWidgets('长按条目弹出操作，删除不弹确认', (tester) async {
