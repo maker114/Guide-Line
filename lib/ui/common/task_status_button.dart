@@ -45,7 +45,7 @@ class TaskStatusButton extends StatelessWidget {
           final error = app.run(() => app.ws.setTaskStatus(task.id, next));
           if (error != null) showToast(context, error, error: true);
         },
-        onLongPress: blocked ? null : () => pickTaskStatus(context, app, task),
+        onLongPress: blocked ? null : () => _pickTaskStatus(context, app, task),
         child: Padding(
           padding: const EdgeInsets.all(8),
           // 状态切换时图标淡入淡出 + 轻微缩放：勾选是这一页最高频的操作，
@@ -80,7 +80,7 @@ class TaskStatusButton extends StatelessWidget {
 ///
 /// 内容是三项状态，所以外观统一走 [StatusPillSelector] ——
 /// 与项目详情页的「状态」是同一套观感（胶囊里套小胶囊、无分割线）。
-Future<void> pickTaskStatus(
+Future<void> _pickTaskStatus(
   BuildContext context,
   AppController app,
   Task task,
