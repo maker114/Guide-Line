@@ -184,8 +184,8 @@ void main() {
       reason: '「接下来」要写出当前节点的名字',
     );
 
-    // 左小右大 + 右侧右对齐：两行内容的右缘落在同一条竖线上，
-    // 且内容比标签大（实机反馈："左小右大很好看，右边要对齐"）。
+    // 左右一样大 + 右侧右对齐：两行内容的右缘落在同一条竖线上，且**左右字号相同**
+    // （实机反馈："我要左右一样大，包括图标"）。
     // 不去数值那串文字（日期文案会随"今天"变、任务名页面上还有一份），
     // 直接量两行**标题栏的右缘**：标题栏是定宽的，它的右缘就是内容区的右缘。
     double labelRight(String label) => tester
@@ -204,8 +204,21 @@ void main() {
         .style!;
     expect(
       valueStyle.fontSize,
-      greaterThan(labelStyle.fontSize!),
-      reason: '左小右大：内容要比标签大一档',
+      labelStyle.fontSize,
+      reason: '左右一样大：内容字号必须等于标签字号',
+    );
+    expect(
+      valueStyle.fontWeight,
+      labelStyle.fontWeight,
+      reason: '左右一样大：字重也要一样',
+    );
+    final nextIcon = tester.widget<Icon>(
+      find.descendant(of: facts, matching: find.byIcon(Icons.play_circle_outline)),
+    );
+    expect(
+      nextIcon.size,
+      greaterThanOrEqualTo(labelStyle.fontSize!),
+      reason: '图标也要一样大（不能比字小一圈）',
     );
   });
 

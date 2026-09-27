@@ -537,9 +537,11 @@ class _EventFacts extends StatelessWidget {
 
 /// 「时间与任务」里的一行字段：**左小右大 + 右侧右对齐**。
 ///
-/// 左边是图标 + 小标签（`labelSmall`），右边是内容（`bodyLarge`，比标签大一档），
-/// 内容**向右对齐**：两行的右缘落在同一条竖线上，眼睛扫下来是一条直线
-/// （实机反馈："左小右大才好看，右边要对齐"）。
+/// 左边是图标 + 标签，右边是内容：**两边的字号、字重、颜色规则完全一样**
+/// （都取 `bodyLarge`）—— 一行里只有"标题 / 内容"的分工，没有主次
+/// （实机反馈："我要左右一样大，包括图标"）。
+///
+/// 内容**向右对齐**：两行的右缘落在同一条竖线上，眼睛扫下来是一条直线。
 ///
 /// 不用 `ListTile` 的理由：它两端各留 16 内边距，而这段已经在卡片里（卡片自己还有 12），
 /// 再叠一层会让标题与上面的「时间与任务」对不齐；这里自己排，侧边距与卡片一致。
@@ -554,23 +556,28 @@ class _FactRow extends StatelessWidget {
 
   final IconData icon;
 
-  /// 这一行有没有内容（有则图标与值上主题色，没有则整体走次要色）
+  /// 这一行有没有内容（有则图标与内容上主题色，没有则整体走次要色）
   final bool highlighted;
 
   final String label;
   final String value;
 
-  /// 值的颜色；不给就按 `highlighted` 取主题色 / 次要色。
+  /// 内容的颜色；不给就按 `highlighted` 取主题色 / 次要色。
   final Color? valueColor;
 
   /// 标题那一栏的宽度上限。**必须留出上限**：不给的话「最近到期」在窄屏上会被
   /// 右边的日期挤到折行，而它只有四个字，怎么都不该折。
   static const double _labelWidth = 88;
 
+  /// 行的字号：**左右与图标共用这一个数**（图标直径 = 字号 + 2，视觉上与文字等高）。
+  static const double fontSize = 16;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = highlighted ? theme.colorScheme.primary : theme.colorScheme.outline;
+    // 左右同一套字：一行里只有"标题 / 内容"的分工，没有大小之分
+    final textStyle = theme.textTheme.bodyLarge;
     return Padding(
       padding: const EdgeInsets.only(left: 4),
       child: Row(
@@ -582,14 +589,14 @@ class _FactRow extends StatelessWidget {
             width: _labelWidth,
             child: Row(
               children: <Widget>[
-                Icon(icon, size: 16, color: accent),
+                Icon(icon, size: fontSize + 2, color: accent),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall,
+                    style: textStyle,
                   ),
                 ),
               ],
@@ -603,7 +610,7 @@ class _FactRow extends StatelessWidget {
               textAlign: TextAlign.right,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodyLarge?.copyWith(
+              style: textStyle?.copyWith(
                 color: valueColor ?? (highlighted ? null : theme.colorScheme.outline),
               ),
             ),
