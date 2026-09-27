@@ -417,7 +417,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       return;
     }
     if (context.mounted) {
-      showToast(context, '已拆成 ${lines.length} 条。不合意就点「重拆 / 清空」再来一次');
+      showToast(context, '已拆成 ${lines.length} 条');
     }
   }
 }

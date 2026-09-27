@@ -266,7 +266,7 @@ class _ItemRow extends StatelessWidget {
     final events =
         app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
     if (events.isEmpty) {
-      showToast(context, '先去「事件」里开一条线 —— 任务总得属于一条线');
+      showToast(context, '先去「事件」里开一条线');
       return;
     }
 

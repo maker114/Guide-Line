@@ -334,7 +334,7 @@ String _mergePreviewText(String fileName, int? exportedAt, MergeReport report) {
       '${_docLabel(name)}：${_mergeCountsText(report.of(name))}',
     '合计：${report.changeSummary}',
     '',
-    '合并是两份并成一份：两边各自独有的记录都会留下，同一条记录以较新的一方为准。',
+    // 只留"谁的改动会赢"这一句（数据风险）；"合并是两份并成一份"那类解释删掉
     '同一秒里的改动以本机为准 —— 对方在同一秒改的那条不会覆盖你手上的这份。',
   ];
   if (report.tombstones > 0) {
