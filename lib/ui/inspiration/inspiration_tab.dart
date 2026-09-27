@@ -91,6 +91,9 @@ class InspirationTabState extends State<InspirationTab> {
   }
 
   void _exitSelection() {
+    // 批量动作里有 `await`（确认框 / 合并编辑器），期间本页可能已经被 pop 掉（Q-2）。
+    // 内层函数里的 `context.mounted` 守的是弹层那条路由，查不出本 State 已 dispose。
+    if (!mounted) return;
     setState(() {
       _selecting = false;
       _selectedIds.clear();

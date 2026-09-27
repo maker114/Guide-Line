@@ -28,14 +28,24 @@ void main() {
   test('debug / profile 清单里的那条不算数（它们是给热重载用的）', () {
     // 这个断言是在说明"为什么不能只靠 debug 清单"：连它们在哪也说清楚，
     // 免得后来的人看到 debug 清单里有就以为够了。
+    //
+    // **必须至少检查到一个文件**（T-1）：早先 `if (!file.existsSync()) continue;`
+    // 后面没有这条守卫，两个清单都不在时整条用例零断言、静默通过。
+    var checked = 0;
     for (final variant in <String>['debug', 'profile']) {
       final file = File('android/app/src/$variant/AndroidManifest.xml');
       if (!file.existsSync()) continue;
+      checked += 1;
       expect(
         file.readAsStringSync(),
         contains('android.permission.INTERNET'),
         reason: '$variant 清单在 Flutter 模板里本来就带这条，用来热重载',
       );
     }
+    expect(
+      checked,
+      isPositive,
+      reason: '两个变体清单都不在，这条用例等于什么都没查 —— 路径变了？',
+    );
   });
 }

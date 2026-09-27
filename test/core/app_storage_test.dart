@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:guideline/core/json/canonical.dart';
 import 'package:guideline/core/json/document.dart';
 import 'package:guideline/core/json/store_file.dart';
 import 'package:guideline/core/models/entity.dart';
@@ -102,6 +103,75 @@ void main() {
       final report = storage.load();
       expect(report.store.documentOf(DocName.projects).projectItems.single.title, '知识库');
       expect(report.store.savedAt, day);
+    });
+
+    test('主文件版本高于本应用：绝不覆盖，且明确告警（P0-1）', () {
+      // 先写出真数据，再强制轮转一次，让磁盘上真的有一份备份可回退
+      // （首次保存时主文件还不存在，没有"上一份"可轮转）
+      storage.save(storeWith('旧的真数据'), nowMillis: day);
+      storage.save(storeWith('旧的真数据'), nowMillis: day, forceRotate: true);
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue, reason: '先要有一份备份可回退');
+      final backupsBefore = dir
+          .listSync()
+          .where((e) => e.uri.pathSegments.last.startsWith(AppPaths.backupPrefix))
+          .length;
+
+      // 主文件换成"未来版本"（用户降级安装 / 双端混用）
+      final future = StoreFile.parse(
+        storeWith('未来的数据').toCanonicalText(),
+        DecodeIssues(),
+      ).toJson();
+      future['schemaVersion'] = StoreFile.currentSchemaVersion + 1;
+      storage.paths.storeFile.writeAsStringSync(Canonical.documentText(future));
+
+      final report = storage.load(nowMillis: day + step);
+
+      // ① 不把"版本过高"当成功解析
+      expect(
+        report.storeLockedByNewerSchema,
+        isTrue,
+        reason: '版本高于本应用必须被识别出来，而不是当成一份合法的空数据',
+      );
+      // ② 主文件原样留在原地 —— 这是这条用例的核心
+      expect(
+        storage.paths.storeFile.readAsStringSync(),
+        contains('未来的数据'),
+        reason: '看不懂的文件也不能动它：一次启动就把用户数据换成空库是不可接受的',
+      );
+      // ③ 绝不写回空数据：任何滚动备份里都不该出现"备份.1 是空的"
+      for (var i = 1; i <= AppPaths.rollingBackupCount; i += 1) {
+        final file = storage.paths.rollingBackup(i);
+        if (!file.existsSync()) continue;
+        final parsed = StoreFile.parse(file.readAsStringSync(), DecodeIssues());
+        expect(
+          parsed.documentOf(DocName.projects).items,
+          isNotEmpty,
+          reason: '备份 $i 不该被空数据占掉',
+        );
+      }
+      // ④ 用户必须被告知（否则界面上只是一个空库）
+      expect(
+        report.issues.errors.any((e) => e.contains('高于')),
+        isTrue,
+        reason: '要有一条能直接显示给用户的告警',
+      );
+
+      // ⑤ 用户接着做任何动作都会触发保存 —— 那时也绝不能覆盖（写盘守卫）
+      storage.save(report.store, nowMillis: day + step * 2);
+      expect(
+        storage.paths.storeFile.readAsStringSync(),
+        contains('未来的数据'),
+        reason: '载入被锁住之后，任何一次保存都必须被拒绝',
+      );
+      final backupsAfter = dir
+          .listSync()
+          .where((e) => e.uri.pathSegments.last.startsWith(AppPaths.backupPrefix))
+          .length;
+      expect(
+        backupsAfter,
+        backupsBefore,
+        reason: '被锁住时保存直接返回，连备份轮转都不该发生',
+      );
     });
 
     test('保存后不留 .tmp 残留（原子替换）', () {
@@ -233,6 +303,32 @@ void main() {
       expect(rollingCount(), 2);
       expect(rollingTitle(1), 'v2', reason: '第二段会话的备份是"这段之前"的状态');
       expect(rollingTitle(2), 'v1');
+    });
+
+    test('卡住的会话会过期：不活动够久之后备份照常轮转（P1-6）', () {
+      storage.save(storeWith('v1'), nowMillis: day);
+
+      // 会话被"打开"却再也没配对关闭（predictive back 取消、路由被非对称移除……
+      // 真机上 App 切后台不重启进程，这个状态能持续好几天）
+      storage.beginEditSession();
+      storage.save(storeWith('v2'), nowMillis: day + 1000);
+      expect(rollingCount(), 1, reason: '会话内的第一笔写入会留一份');
+
+      // 会话内再改几笔：同会话不重复轮转
+      storage.save(storeWith('v3'), nowMillis: day + 2000);
+      expect(rollingCount(), 1);
+
+      // 隔了很久（远超会话不活动上限）之后再保存：
+      // 旧实现因为 _rotatedInSession 一直为真，这里会**永远不再轮转备份**
+      final muchLater = day + 2000 + AppStorage.editSessionIdleLimitMillis + step;
+      storage.save(storeWith('v4'), nowMillis: muchLater);
+
+      expect(
+        rollingCount(),
+        greaterThan(1),
+        reason: '卡住的会话不该让备份永远停更',
+      );
+      expect(storeTitle(), 'v4', reason: '主文件照旧每一笔都写');
     });
 
     test('不在会话中：按最小间隔节流（不足间隔的保存不轮转）', () {
@@ -467,6 +563,64 @@ void main() {
     });
   });
 
+  group('备份列表的口径（P1-8）', () {
+    test('没有记录的备份：标成"无法解析"，而且拒绝拿它恢复', () {
+      storage.save(storeWith('真数据'), nowMillis: day);
+      storage.save(storeWith('真数据'), nowMillis: day, forceRotate: true);
+      // 把那份备份换成"合法 JSON 但没有任何记录"的内容
+      final victim = storage.paths.rollingBackup(1);
+      victim.writeAsStringSync('[1,2,3]');
+
+      final entry = storage.listBackups().firstWhere((b) => b.path == victim.path);
+      expect(
+        entry.recordCount,
+        isNull,
+        reason: '数不出记录要报 null —— 写成"0 条"看起来像一份空但合法的备份，比不写还误导',
+      );
+      expect(entry.label, contains('无法解析'));
+
+      expect(
+        () => storage.restoreFromBackup(victim.path, nowMillis: day + step),
+        throwsA(isA<StateError>()),
+        reason: '拿一份空备份恢复等于把主文件换成空数据，必须拦住',
+      );
+    });
+  });
+
+  group('备份时间口径（P1-10）', () {
+    test('文件名日期在未来，也不该被当成最新而挤掉真正最近的', () {
+      AppPaths(dir).ensureDirectories();
+
+      // 不通过 save 造，直接写两份日快照：一份"未来日期"但更旧，一份更早的日期但更新
+      final fake = AppPaths(dir).dailyBackup('20991231');
+      fake.writeAsStringSync(storeWith('未来日期的假快照').toCanonicalText());
+      fake.setLastModifiedSync(DateTime.fromMillisecondsSinceEpoch(day));
+
+      final real = AppPaths(dir).dailyBackup('20260901');
+      real.writeAsStringSync(storeWith('上个月的真快照').toCanonicalText());
+      real.setLastModifiedSync(DateTime.fromMillisecondsSinceEpoch(day + step));
+
+      // 主文件不在 → 走"从最新的备份恢复"这条路
+      final report = storage.load(nowMillis: day + 2 * step);
+
+      expect(
+        report.recoveredFromBackup,
+        isNotNull,
+        reason: '有可用备份就该恢复',
+      );
+      final titles = report.store
+          .documentOf(DocName.projects)
+          .projectItems
+          .map((p) => p.title)
+          .toList();
+      expect(
+        titles,
+        contains('上个月的真快照'),
+        reason: '按修改时间选最新的那份；按文件名字符串排会选中"20991231"那份（P1-10），实际=$titles',
+      );
+    });
+  });
+
   group('损坏与恢复', () {
     test('主文件损坏 → 隔离现场 + 从备份自动恢复', () {
       storage.save(storeWith('完好版本'), nowMillis: day);
@@ -553,6 +707,71 @@ void main() {
       expect(report.issues.errors, isNotEmpty);
     });
 
+    test('主文件不是合法 UTF-8 → 不崩，按损坏隔离并从备份恢复（P1-2）', () {
+      // 先落到磁盘一份真数据；第二次强制轮转才会真的留下备份
+      // （首次保存时主文件还不存在，没有"上一份"可轮转）
+      storage.save(storeWith('真数据'), nowMillis: day);
+      storage.save(storeWith('真数据'), nowMillis: day, forceRotate: true);
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue);
+
+      // 主文件写成一串非法 UTF-8 —— 掉电后半截写入的典型产物。
+      // 旧实现里 `readAsStringSync` 裸调，异常直接冒到 main，用户看到的是启动崩溃。
+      storage.paths.storeFile.writeAsBytesSync(<int>[0xFF, 0xFE, 0x00, 0x01, 0xC3, 0x28]);
+
+      late LoadReport report;
+      expect(
+        () => report = storage.load(nowMillis: day + step),
+        returnsNormally,
+        reason: '读不出来也只是"损坏"的一种，绝不能让启动崩掉',
+      );
+      expect(report.quarantinedPaths, hasLength(1), reason: '现场要隔离保留');
+      final titles = report.store
+          .documentOf(DocName.projects)
+          .projectItems
+          .map((p) => p.title)
+          .toList();
+      expect(
+        titles.contains('真数据'),
+        isTrue,
+        reason: '主文件读不了时应当能从备份（滚动备份或日快照）恢复出真数据，实际=$titles',
+      );
+    });
+
+    test('主文件损坏 + 备份也没有可用记录 → 不用空数据覆盖（P0-2）', () {
+      // 主文件损坏：不是合法 JSON
+      storage.paths.ensureDirectories();
+      storage.paths.storeFile.writeAsStringSync('{"broken": ');
+
+      // 唯一的滚动备份是"能被 parse 收下、但里面没有任何记录"的内容。
+      // 这正是原来的漏洞：守门条件 `documents.isNotEmpty` 恒为真，
+      // 于是这份垃圾会被当成恢复来源，用空数据盖掉刚隔离走的主文件，
+      // 还向用户报"已从备份恢复"—— 用户以为救回来了，其实什么都没了。
+      storage.paths.rollingBackup(1).writeAsStringSync('[1,2,3]');
+      // 日快照也放一份同样没记录的（否则它会被当成合法的恢复来源）
+      final d = DateTime.fromMillisecondsSinceEpoch(day);
+      String two(int v) => v.toString().padLeft(2, '0');
+      storage.paths
+          .dailyBackup('${d.year}${two(d.month)}${two(d.day)}')
+          .writeAsStringSync('{"schemaVersion":3,"savedAt":1,"collections":{}}');
+
+      final report = storage.load(nowMillis: day + step);
+
+      expect(
+        report.recoveredFromBackup,
+        isNull,
+        reason: '一份没有记录的"备份"不是恢复来源',
+      );
+      expect(
+        storage.paths.storeFile.existsSync() &&
+            storage.paths.storeFile.readAsStringSync() == '[1,2,3]',
+        isFalse,
+        reason: '绝不能拿空数据把主文件换掉（损坏的主文件应被隔离走，而不是被垃圾覆盖）',
+      );
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue,
+          reason: '那份坏备份不该被删掉 —— 留着现场才有诊断余地');
+      expect(report.store.documentOf(DocName.projects).items, isEmpty);
+    });
+
     test('从备份恢复：能把指定备份写回主文件，且当前数据先被轮转走', () {
       storage.save(storeWith('要保留的旧数据'), nowMillis: day);
       storage.save(storeWith('误操作后的数据'), nowMillis: day + step);
@@ -613,6 +832,9 @@ void main() {
       storage.save(storeWith('项目'), nowMillis: day);
       storage.save(storeWith('项目·再改'), nowMillis: day + step);
       final backupsBefore = storage.listBackups().map((b) => b.sizeBytes).toList();
+      // 前置：列表必须非空（T-5）—— 否则下面"列表没变"与 `every(...)` 在空集合上恒真，
+      // 用例名承诺的"不进备份"根本没被验证过。
+      expect(backupsBefore, isNotEmpty, reason: '先要真的有备份，才谈得上"没被动过"');
 
       storage.saveImplementationSnapshot('p-项目', '一段很长很长很长的旧正文');
 

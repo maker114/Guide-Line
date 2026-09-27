@@ -1,18 +1,13 @@
 {
   // 按 F5 时的运行配置。
-  // `deviceId` 是手机在 `flutter devices` / `adb devices` 里的 id ——
-  // 换手机或重插线后如果对不上，把下面两处 deviceId 改成新的（或整行删掉，
-  // 运行时再从右下角状态栏选设备）。
+  //
+  // ⚠️ **刻意不写 `deviceId`**：手机 id 是每台设备都可能不同的（原来写死 `51dabb34`）。
+  //    放进版本控制会让别人拿到一个用不了的配置，也把自己的设备标识带进了公开仓库（S-7）。
+  //    运行时从右下角状态栏选设备即可；真要固定，配在**用户级**的 launch 配置里。
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "GuideLine（调试 · 我的手机）",
-      "request": "launch",
-      "type": "dart",
-      "deviceId": "51dabb34"
-    },
-    {
-      "name": "GuideLine（调试 · 让我选设备）",
+      "name": "GuideLine（调试）",
       "request": "launch",
       "type": "dart"
     },
@@ -21,8 +16,7 @@
       "name": "GuideLine（profile）",
       "request": "launch",
       "type": "dart",
-      "flutterMode": "profile",
-      "deviceId": "51dabb34"
+      "flutterMode": "profile"
     }
   ]
 }

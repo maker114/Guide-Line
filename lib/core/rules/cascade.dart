@@ -99,12 +99,17 @@ class MoveCheck {
   final String? reason;
 }
 
+/// 能否把 [nodeId] 挂到 [newParentId] 下面。
+///
+/// 「跨事件移动必须归零父引用」这条**不在这里**：调用方在跨事件时就把
+/// `newParentId` 直接置成 `null`（见 `Workspace.moveTask`），所以这里收不到
+/// "跨事件却还留着原父节点"的组合。这份代码早先挂着 `crossEvent` 参数和一条
+/// 对应的拒绝分支，但两个生产调用点都传 `false` —— 是一段永远走不到的死分支（Q-3）。
 MoveCheck checkMove({
   required TreeIndex index,
   required String nodeId,
   required String? newParentId,
   required int maxDepth,
-  required bool crossEvent,
 }) {
   if (nodeId == newParentId) {
     return const MoveCheck(allowed: false, reason: '不能移动到自身下面');
@@ -114,9 +119,6 @@ MoveCheck checkMove({
   }
   if (!index.fitsDepthLimit(nodeId, newParentId, maxDepth)) {
     return MoveCheck(allowed: false, reason: '会超过 $maxDepth 层上限');
-  }
-  if (crossEvent) {
-    return const MoveCheck(allowed: false, reason: '跨事件移动后必须归零父引用，不能保留原父节点');
   }
   return const MoveCheck(allowed: true, reason: null);
 }

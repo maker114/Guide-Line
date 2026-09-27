@@ -1,10 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/core/models/enums.dart';
-import 'package:guideline/core/models/event.dart';
 import 'package:guideline/core/models/inspiration.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/models/project_item.dart';
-import 'package:guideline/core/models/task.dart';
 import 'package:guideline/core/rules/handoff_export.dart';
 
 /// 交接说明（设计文档 §3）：给电脑上的 AI 读的 Markdown。
@@ -42,45 +40,6 @@ void main() {
     );
   }
 
-  Task task(
-    String id, {
-    required String eventId,
-    required String title,
-    String? parentId,
-    TaskType type = TaskType.standard,
-    NodeStatus status = NodeStatus.pending,
-    int order = 1000,
-    String? dueAt,
-  }) {
-    return Task(
-      id: id,
-      eventId: eventId,
-      parentTaskId: parentId,
-      taskType: type,
-      title: title,
-      dueAt: dueAt,
-      status: status,
-      archived: false,
-      order: order,
-      completedAt: null,
-      createdAt: 0,
-      updatedAt: 0,
-      deleted: false,
-    );
-  }
-
-  Event event(String id, String name, {int order = 1000}) => Event(
-        id: id,
-        name: name,
-        status: NodeStatus.pending,
-        archived: false,
-        order: order,
-        completedAt: null,
-        createdAt: 0,
-        updatedAt: 0,
-        deleted: false,
-      );
-
   Inspiration inspiration(
     String id,
     String text, {
@@ -102,16 +61,16 @@ void main() {
     );
   }
 
-  /// `events` / `tasks` 仍然收着，但**不传给导出** —— 有几个用例专门用它们断言
-  /// "事件与任务线不该出现在交接说明里"。
+  /// `HandoffExport.build` **只接项目与灵感** —— 它的签名里根本没有事件 / 任务参数。
+  ///
+  /// 早先这个 helper 还收着 `events` / `tasks` 再用 `// ignore: unused_local_variable`
+  /// 丢掉（T-1）：于是"交接说明里不出现事件与任务线"那几条 `isNot(contains(...))`
+  /// **永远不可能失败**，看名字以为守住了，其实什么都没证明。
+  /// 现在直接不接收它们 —— "事件与任务线进不了交接说明"是**编译期事实**，不是断言。
   String build({
     Project? p,
-    List<Event> events = const <Event>[],
-    List<Task> tasks = const <Task>[],
     List<Inspiration> inspirations = const <Inspiration>[],
   }) {
-    // ignore: unused_local_variable
-    final ignored = (events, tasks);
     return HandoffExport.build(
       project: p ?? project(),
       inspirations: inspirations,
@@ -200,33 +159,19 @@ void main() {
     expect(text, isNot(contains('工作 / 生活')));
   });
 
-  test('交接说明里**不再**出现事件与任务线（实机反馈）', () {
-    final text = build(
-      p: project(title: '重构知识库'),
-      events: <Event>[
-        event('e-1', '上线准备'),
-        event('e-2', '搬家'),
-      ],
-      tasks: <Task>[
-        task('t-1', eventId: 'e-1', title: '第一条主线', status: NodeStatus.done),
-        task('t-2', eventId: 'e-1', title: '第二条主线', order: 2000),
-        task(
-          't-1a',
-          eventId: 'e-1',
-          title: '子任务',
-          parentId: 't-1',
-          type: TaskType.subtask,
-        ),
-      ],
-    );
+  test('交接说明不含事件与任务线 —— 这是接口层面的保证，不是运行时行为（T-1）', () {
+    // 这份 helper 的签名里就没有 events / tasks（见顶部说明）：
+    // "事件与任务线进不了交接说明"由 `HandoffExport.build` 的参数表决定，
+    // 所以这里能验的只有"项目自己的内容照常写出来"，
+    // 以及"说明里不含那几个只可能来自事件 / 任务线的词"。
+    final text = build(p: project(title: '重构知识库'));
 
-    expect(text, isNot(contains('相关事件与任务线')));
-    expect(text, isNot(contains('上线准备')));
-    expect(text, isNot(contains('搬家')));
-    expect(text, isNot(contains('第一条主线')));
-    expect(text, isNot(contains('子任务')));
-    // 项目自己的内容照旧
     expect(text, contains('# 项目：重构知识库'));
+    expect(text, isNot(contains('相关事件与任务线')));
+    // 这些词只可能来自事件名或任务标题：确认正文里没有夹带
+    for (final word in <String>['上线准备', '搬家', '第一条主线', '子任务']) {
+      expect(text, isNot(contains(word)), reason: '「$word」不该出现在交接说明里');
+    }
   });
 
   test('条目里的换行被单行化（否则会把 Markdown 列表拆散）', () {

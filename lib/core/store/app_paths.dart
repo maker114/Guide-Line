@@ -23,6 +23,12 @@ class AppPaths {
   static const String dailyPrefix = 'guideline.daily.';
   static const int dailyBackupCount = 7;
 
+  /// 损坏现场的隔离文件（`<名>.corrupt.<时间戳>`）最多留几份。
+  ///
+  /// 隔离区是"最后一道人工求救通道"，但也不能无限堆积 —— 早先的实现只加不清，
+  /// 长期占用应用私有目录，而用户在设置页里看不到也删不掉（P1-7）。
+  static const int quarantineKeepCount = 5;
+
   static const String exportsDirName = 'exports';
 
   /// 背景图：从相册选进来的那张会被拷到这里，

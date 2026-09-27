@@ -1,0 +1,88 @@
+# 验收线：**analyze 0 问题、test 全绿**。
+#
+# 这份工作流的存在本身就是一条修复：在此之前那两个要求完全靠人肉执行 ——
+# 而 2026-09-27 的审计发现账已经在退化（进度表 11 行状态错、spec 里 12 条陈述与代码相反、
+# `demo_verify.dart` 悄悄烂掉没人发现）。机器能查的事不该靠记性。
+#
+# 测试只要十几秒，所以这里**跑全量**，不做拆分或缓存优化：
+# 「少跑点测试」在这个体量下省不下什么（见 docs/开发节奏.md 的实测数字）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: analyze + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show toolchain versions
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 验收线第一条：0 问题（连 warning / info 都不放过）
+      - name: Analyze
+        run: flutter analyze --no-pub
+
+      # 验收线第二条：全绿
+      - name: Test
+        run: flutter test --no-pub
+
+  build:
+    name: build apk (release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # release 包目前用 debug 签名（见 docs/构建与发布.md §7），这里只验证"能出包"，
+    # 产物不作为发行物使用
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # **显式给版本号**：`android/local.properties` 会缓存 versionName / versionCode，
+      # 不指定就可能打出一个与界面显示不一致的包（docs/构建与发布.md 记过这个坑）
+      - name: Build release APK
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+          NAME=${VERSION%%+*}
+          CODE=${VERSION##*+}
+          flutter build apk --release --build-name="$NAME" --build-number="$CODE"
+
+      - name: Upload APK for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: guideline-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7

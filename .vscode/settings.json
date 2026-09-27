@@ -1,6 +1,7 @@
 {
-  // Flutter SDK 的位置（本机装在 E:\flutter）。如果 VS Code 已经认出来，这一行可以删。
-  "dart.flutterSdkPath": "E:\\flutter",
+  // ⚠️ 这里**刻意不写** `"dart.flutterSdkPath"`：它是本机路径（原来写死 `E:\flutter`），
+  //    入库之后别人 clone 下来 IDE 会指向一个不存在的目录（S-7）。
+  //    需要时配在**用户级设置**里；VS Code 一般也能自己认出来。
 
   // Dart 文件保存时自动格式化：改完不用手动排版，也避免手写缩进把结构弄乱
   "[dart]": {

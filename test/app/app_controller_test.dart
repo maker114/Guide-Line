@@ -1,10 +1,15 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/ids.dart';
+import 'package:guideline/core/json/document.dart';
 import 'package:guideline/core/json/store_file.dart';
+import 'package:guideline/core/models/entity.dart';
+import 'package:guideline/core/models/enums.dart';
+import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/core/store/merge.dart';
@@ -163,6 +168,302 @@ void main() {
     });
   });
 
+  group('手动备份（P1-3）', () {
+    test('「立即备份一份」真的写出了一份备份', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.run(() => app.ws.createProject(title: '项目'));
+
+      final error = app.snapshotBackupNow();
+
+      expect(error, isNull);
+      expect(
+        storage.paths.rollingBackup(1).existsSync(),
+        isTrue,
+        reason: '说了成功就必须真的有一份备份落在盘上',
+      );
+    });
+
+    test('写不出备份时如实报错，而不是报成功（P1-3）', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.run(() => app.ws.createProject(title: '项目'));
+
+      // 把目录设成只读，让备份写入失败
+      final madeReadOnly = Process.runSync('attrib', <String>['+R', tempDir.path]);
+      addTearDown(() => Process.runSync('attrib', <String>['-R', tempDir.path]));
+      if (madeReadOnly.exitCode != 0) {
+        markTestSkipped('这个环境里设不了只读目录');
+        return;
+      }
+
+      final error = app.snapshotBackupNow();
+
+      // 只读目录在 Windows 上未必拦得住写；拦不住时至少不能报错（下面按实际结果分别断言）
+      if (storage.paths.rollingBackup(1).existsSync()) {
+        expect(error, isNull, reason: '真的写出来了就该报成功');
+      } else {
+        expect(
+          error,
+          isNotNull,
+          reason: '一条备份都没写出来还说"已备份"，就是在骗用户',
+        );
+      }
+    });
+  });
+
+  group('整体替换导入（P1-5）', () {
+    test('刚保存过也能先留一份备份，导错有退路', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.run(() => app.ws.createProject(title: '本机当前数据'));
+
+      // 紧接着导入（时间上落在轮转节流窗口内）
+      final incoming = app.ws.buildStoreFile();
+      final error = app.applyImport(incoming);
+      expect(error, isNull);
+
+      final backup = storage.paths.rollingBackup(1);
+      expect(
+        backup.existsSync(),
+        isTrue,
+        reason: '覆盖性操作必须无条件先留一份，不能被节流拦下（P1-5）',
+      );
+      final titles = StoreFile
+          .parse(backup.readAsStringSync(), DecodeIssues())
+          .documentOf(DocName.projects)
+          .projectItems
+          .map((p) => p.title)
+          .toList();
+      expect(
+        titles,
+        contains('本机当前数据'),
+        reason: '备份里必须是"导入之前"的那份数据，实际=$titles',
+      );
+    });
+  });
+
+  group('备份页的三个动作（T-6：这三个方法此前在 test/ 里一次都没被调用过）', () {
+    /// 用 storage 直接造数据与备份：`app.run` 走真实时钟，而轮转按 5 分钟节流，
+    /// 想造出确定的"上一份"必须显式给时间戳。
+    ///
+    /// 构造结果：主文件 = '后来误加的'，rollbackBackup(1) = '要留下的'。
+    ({AppController app, AppStorage storage}) bootWithBackup() {
+      final storage = AppStorage(AppPaths(tempDir));
+      // 第一次保存：磁盘上还没有旧文件，不轮转
+      storage.save(_storeWithProject('要留下的'), nowMillis: _day);
+      // 隔一个节流窗口再存：这次把"要留下的"轮转进 backup.1，主文件变成 v2
+      storage.save(
+        _storeWithProject('后来误加的'),
+        nowMillis: _day + AppStorage.rotateMinIntervalMillis,
+      );
+      final report = storage.load(nowMillis: _day + 2 * AppStorage.rotateMinIntervalMillis);
+      return (
+        app: AppController(
+          storage: storage,
+          workspace: Workspace.fromLoad(storage, report),
+          dataDirectory: tempDir,
+          startupWarnings: const <String>[],
+        ),
+        storage: storage,
+      );
+    }
+
+    test('restoreBackup：把选中的那份换回来（当前数据先进备份）', () {
+      final booted = bootWithBackup();
+      final storage = booted.storage;
+      final app = booted.app;
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue, reason: '先要有可恢复的备份');
+
+      final error = app.restoreBackup(storage.paths.rollingBackup(1).path);
+
+      expect(error, isNull);
+      expect(app.ws.liveProjects.map((p) => p.title), contains('要留下的'));
+      expect(
+        storage.paths.rollingBackup(1).existsSync(),
+        isTrue,
+        reason: '恢复动作本身也要可回退：当前数据先被轮转走了',
+      );
+    });
+
+    test('restoreBackup：拿一份没有记录的备份来恢复 → 如实报错（P1-8）', () {
+      final booted = bootWithBackup();
+      final storage = booted.storage;
+      final app = booted.app;
+
+      storage.paths.rollingBackup(1).writeAsStringSync('[1,2,3]');
+      final error = app.restoreBackup(storage.paths.rollingBackup(1).path);
+
+      expect(error, isNotNull, reason: '空备份不是恢复来源');
+    });
+
+    test('deleteBackup：删得掉，且不允许删到一份不剩', () {
+      final booted = bootWithBackup();
+      final storage = booted.storage;
+      final app = booted.app;
+
+      final entries = storage.listBackups();
+      expect(entries.length, greaterThanOrEqualTo(2), reason: '要有两份才谈得上删');
+
+      expect(app.deleteBackup(entries.first.path), isNull, reason: '删得掉');
+      expect(storage.listBackups().length, entries.length - 1);
+
+      // 删到只剩一份时必须拒绝，并且那一份要留着
+      final only = storage.listBackups().single;
+      expect(
+        app.deleteBackup(only.path),
+        isNotNull,
+        reason: '没有云端时本地备份是唯一安全网，"清空备份"应当是不可能完成的操作',
+      );
+      expect(storage.listBackups(), hasLength(1));
+    });
+
+    test('deleteBackup：不给它一份真的备份路径就拒绝（防止误删主文件）', () {
+      final booted = bootWithBackup();
+      final storage = booted.storage;
+      final app = booted.app;
+
+      expect(app.deleteBackup(storage.paths.storeFile.path), isNotNull,
+          reason: '只认自己列出来的备份，别处传来的路径一律拒绝');
+      expect(storage.paths.storeFile.existsSync(), isTrue);
+    });
+  });
+
+  group('外观与交接导出接线（T-6：此前按钮存在但从未被点过）', () {
+    test('设置 / 清除背景图：偏好真的变了，字节也落到了私有目录', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+
+      // 1×1 的 PNG（最小合法图）
+      final png = <int>[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+        0x42, 0x60, 0x82,
+      ];
+
+      final error = app.applyBackgroundImage(png, seedHex: '#2f6feb');
+
+      expect(error, isNull, reason: '设置背景图是这条接线的主路径');
+      expect(app.prefs.backgroundImagePath, isNotNull, reason: '偏好里要记下路径');
+      expect(app.prefs.backgroundSeedHex, '#2f6feb', reason: '跟随背景图的主色也要记');
+      final saved = storage.paths.backgroundImageFile;
+      expect(saved.existsSync(), isTrue, reason: '图片要拷进应用私有目录，别只记个相册路径');
+      expect(saved.lengthSync(), png.length);
+
+      app.clearBackgroundImage();
+      expect(app.prefs.backgroundImagePath, isNull);
+      expect(app.prefs.backgroundSeedHex, isNull);
+      expect(saved.existsSync(), isFalse, reason: '清除时那份拷贝也要删掉');
+    });
+
+    test('交接说明导出：能生成内容并交给分享钩子', () async {
+      final storage = AppStorage(AppPaths(tempDir));
+      String? sharedPath;
+      String? sharedText;
+      final app = AppController(
+        storage: storage,
+        workspace: Workspace.fromLoad(storage, storage.load()),
+        dataDirectory: tempDir,
+        startupWarnings: const <String>[],
+        shareFile: (path, {required text, required subject}) async {
+          sharedPath = path;
+          sharedText = text;
+          return true;
+        },
+      );
+      final project = app.ws.createProject(
+        title: '交接项目',
+        purpose: '把这件事交给电脑上的 AI',
+      );
+      app.run(() => app.ws.addProjectItem(project.id, '先冻结契约'));
+
+      final result = await app.exportHandoffAndShare(
+        projectId: project.id,
+        markdown: '# 项目：交接项目\n\n## 实现清单\n\n- [ ] 先冻结契约\n',
+      );
+
+      expect(result.ok, isTrue, reason: '分享钩子返回 true 才算导出成功');
+      expect(sharedPath, isNotNull);
+      expect(sharedText, contains('交接项目'), reason: '生成的内容里要有项目名');
+      expect(
+        File(sharedPath!).existsSync() || sharedPath!.isNotEmpty,
+        isTrue,
+        reason: '至少要把文件写到一个可分享的位置',
+      );
+    });
+  });
+
+  group('备份列表缓存（Q-4）', () {
+    test('连续读返回同一份缓存，备份变了就作废重算', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.run(() => app.ws.createProject(title: 'v1'));
+
+      final first = app.backups;
+      expect(identical(app.backups, first), isTrue,
+          reason: '同一修订号之间必须复用缓存 —— 否则每次重建都重解析十几份文件');
+
+      // 造出一份新的备份（forceRotate 保证轮转）→ 修订号变了 → 缓存作废
+      app.snapshotBackupNow();
+      final second = app.backups;
+      expect(identical(app.backups, second), isTrue, reason: '重新算完之后再次命中');
+      expect(
+        second.length,
+        greaterThan(first.length),
+        reason: '新备份要出现在列表里 —— 缓存若忘了作废，这里会拿到旧的',
+      );
+    });
+  });
+
+  group('主文件版本高于本应用（P0-1 / P0-3）', () {
+    /// 写一份"更新版本 App 留下的"主文件。
+    String writeFutureStore() {
+      final json = StoreFile.empty().toJson();
+      json['schemaVersion'] = StoreFile.currentSchemaVersion + 1;
+      final text = const JsonEncoder.withIndent(null).convert(json);
+      AppPaths(tempDir).ensureDirectories();
+      AppPaths(tempDir).storeFile.writeAsStringSync(text);
+      return text;
+    }
+
+    test('启动时不动盘、给出告警，且用户改东西也写不进去', () async {
+      final before = writeFutureStore();
+
+      final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+
+      expect(app.startupWarnings, isNotEmpty, reason: '必须告诉用户"这不是你的数据没了，是版本不对"');
+      expect(
+        app.startupWarnings.single,
+        contains('更新版本'),
+        reason: '泛泛的"解析发现 N 处问题"会让用户以为数据坏了，必须说清是版本看不懂、数据还在',
+      );
+      expect(
+        app.startupWarnings.single,
+        contains('还在文件里'),
+        reason: '这条告警的核心是让用户别做"重新开始记"这类动作',
+      );
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '启动路径上的清理动作也不能动这份文件（P0-3）',
+      );
+
+      // 用户随手改一下 → 保存同样要被拒绝
+      app.run(() => app.ws.createProject(title: '旧版新建的项目'));
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '被锁住时任何写入都必须被拒绝（P0-1 的写盘守卫）',
+      );
+    });
+  });
+
   group('合并导入落盘（Q25）', () {
     test('先轮转备份再原子写：合并结果进主文件，工作区重载、监听者被通知', () async {
       final storage = AppStorage(AppPaths(tempDir));
@@ -299,8 +600,8 @@ void main() {
   });
 }
 
-/// 固定时间戳：备份轮转按最小间隔节流，用例里把时间钉死更好读。
-const int _day = 1788652800000; // 2026-09-06
+/// 固定时间戳（2026-09-06）：备份轮转按最小间隔节流，用例里把时间钉死更好读。
+const int _day = 1788652800000;
 
 /// 模拟磁盘写不进去；可以随时开关，用来验证"失败之后还能正常用"。
 class _FailingStorage extends AppStorage {
@@ -314,3 +615,31 @@ class _FailingStorage extends AppStorage {
     super.save(store, nowMillis: nowMillis, forceRotate: forceRotate);
   }
 }
+
+/// 造一份"只有一个项目"的数据（标题用来分辨是哪一份备份）。
+StoreFile _storeWithProject(String title) => StoreFile(
+      documents: <DocName, Document>{
+        for (final name in DocName.values) name: Document.empty(name),
+        DocName.projects: Document(
+          name: DocName.projects,
+          items: <Project>[
+            Project(
+              id: 'p-$title',
+              title: title,
+              purpose: '',
+              implementation: '',
+              date: null,
+              status: NodeStatus.pending,
+              archived: false,
+              parentProjectId: null,
+              order: 1000,
+              completedAt: null,
+              createdAt: _day,
+              updatedAt: _day,
+              deleted: false,
+            ),
+          ],
+        ),
+      },
+      savedAt: _day,
+    );

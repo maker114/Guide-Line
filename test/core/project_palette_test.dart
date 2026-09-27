@@ -61,19 +61,22 @@ void main() {
 
   group('可辨距离（CIE76 ΔE，CIELAB / D65）', () {
     test('任意两色（含新旧之间）的 ΔE ≥ 原 12 色里的最小 ΔE', () {
-      final threshold = _minPairwiseDeltaE(frozen12);
-      final all = _minPairwiseDeltaE(ProjectPalette.hexes);
-
-      // 打印出来方便对账：门槛来自"松石 / 青"那一对
+      // 门槛写死成字面量（T-1）：早先这里是
+      // `threshold = _minPairwiseDeltaE(frozen12)` 再断言它 `closeTo(11.83)` ——
+      // 拿测试自带的常量算出个数、再断言它等于写死的数，**生产值完全不参与**。
+      // 11.83 是原 12 色里最接近的一对（松石 #87C7AD / 青 #78D2CA）的实测 ΔE。
+      const threshold = 11.83;
       expect(
-        threshold,
-        closeTo(11.83, 0.01),
-        reason: '原 12 色里最接近的一对（松石 #87C7AD / 青 #78D2CA）就是门槛',
+        _minPairwiseDeltaE(frozen12),
+        closeTo(threshold, 0.01),
+        reason: '门槛本身要盯住：它变了说明"原 12 色"这份底稿被改过',
       );
+
+      final all = _minPairwiseDeltaE(ProjectPalette.hexes);
       expect(
         all,
-        greaterThanOrEqualTo(threshold - 1e-9),
-        reason: '有颜色比原有色更难区分：门槛 $threshold，实际最差的一对只有 $all',
+        greaterThanOrEqualTo(threshold - 0.01),
+        reason: '生产色板里有比原有色更难区分的一对：门槛 $threshold，实际最差只有 $all',
       );
     });
 

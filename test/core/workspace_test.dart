@@ -1029,7 +1029,9 @@ void main() {
       expect(textsOf(), <String>['乙']);
       expect(() => ws.removeProjectItem(project.id, '不存在的-id'), throwsA(isA<RuleViolation>()));
       expect(textsOf(), <String>['乙'], reason: '失败不能改动清单');
-      expect(b.id, isNotEmpty);
+      // 这条断言证明不了什么：id 由 Ids.uuidV4() 生成，必然非空（T-3）
+      // ignore: unused_local_variable
+      () => b;
     });
 
     test('上移 / 下移：换位正确，到两端是空操作', () {
@@ -1395,7 +1397,9 @@ void main() {
       expect(ws.isTaskBlocked(parent.id), isTrue, reason: '留着的那个还没处理');
       ws.setTaskStatus(keptSub.id, NodeStatus.done);
       expect(ws.isTaskBlocked(parent.id), isFalse, reason: '归档的子任务不阻塞父任务');
-      expect(kept.id, isNotEmpty);
+      // 这条断言证明不了什么：id 由 Ids.uuidV4() 生成，必然非空（T-3）
+      // ignore: unused_local_variable
+      () => kept;
     });
 
     test('子任务未终态时父任务不可完成；完成后子任务退回会连带父任务退回', () {
@@ -1779,7 +1783,9 @@ void main() {
 
       // 只有"活着的项目 + 活着的事件 + 活着的任务 + 待处理的灵感"这 4 条
       expect(ws.searchableContentCount, 4);
-      expect(project.id, isNotEmpty);
+      // 这条断言证明不了什么：id 由 Ids.uuidV4() 生成，必然非空（T-3）
+      // ignore: unused_local_variable
+      () => project;
     });
 
     test('归档项目遮住的灵感：灵感箱与归档区用同一个数（Q10）', () {
@@ -1972,7 +1978,9 @@ void main() {
         reason: '节流窗口（${AppStorage.rotateMinIntervalMillis ~/ 60000} 分钟）内不再按次数轮转 '
             '—— 原来"每次保存都轮转"会把十份备份在连续编辑一分钟里挤光',
       );
-      expect(first.id, isNotEmpty);
+      // 这条断言证明不了什么：id 由 Ids.uuidV4() 生成，必然非空（T-3）
+      // ignore: unused_local_variable
+      () => first;
     });
 
     test('显式留档（snapshotNow）不受节流限制：强制轮转出"操作之前"的那一份', () {

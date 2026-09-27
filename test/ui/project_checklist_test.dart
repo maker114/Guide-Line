@@ -393,7 +393,6 @@ void main() {
     final controller = tester.widget<TextField>(field).controller!;
     expect(controller.text, '# 只留这一行\n');
     expect(controller.text, isNot(contains('不想给出去')));
-    expect(project.id, isNotEmpty);
   });
 
   testWidgets('建成任务：选一个事件 → 任务真的建出，条目与正文一个字都没动（Q24）', (tester) async {

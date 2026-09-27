@@ -138,12 +138,18 @@ class _ExportPageState extends State<ExportPage> {
   }
 
   Future<void> _export(BuildContext context) async {
+    // 只靠 `onTap: _busy ? null : ...` 挡不住重入（Q-7）：那只是把按钮关掉，
+    // 无障碍焦点 / 热键仍可能再次进来。函数自己也要认 `_busy`。
+    if (_busy) return;
     setState(() => _busy = true);
-    final result = await widget.app.exportAndShare();
-    if (!mounted) return;
-    setState(() => _busy = false);
-    if (!context.mounted) return;
-    showToast(context, result.message, error: !result.ok);
+    try {
+      final result = await widget.app.exportAndShare();
+      if (!mounted) return;
+      if (!context.mounted) return;
+      showToast(context, result.message, error: !result.ok);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   /// 选文件 → 解码（「从文件导入」与「合并导入」共用这一条路）。
@@ -154,30 +160,35 @@ class _ExportPageState extends State<ExportPage> {
     BuildContext context, {
     required String dialogTitle,
   }) async {
+    if (_busy) return null;
     setState(() => _busy = true);
-    PickedTransferFile? picked;
+    // `_busy` 必须**覆盖到解码结束**（Q-7）：早先在文件选择器一返回就把它清掉了，
+    // 于是"解码中"这段窗口里界面已经解禁，两个流程可以交错、各写一次盘。
     try {
-      final pick = widget.pickImportFile ??
-          () => DataTransferPlatform.pickFile(dialogTitle: dialogTitle);
-      picked = await pick();
-    } catch (error) {
-      if (!mounted) return null;
-      setState(() => _busy = false);
-      if (context.mounted) showToast(context, '打开文件选择器失败：$error', error: true);
-      return null;
-    }
-    if (!mounted) return null;
-    setState(() => _busy = false);
-    if (picked == null || !context.mounted) return null;
+      PickedTransferFile? picked;
+      try {
+        final pick = widget.pickImportFile ??
+            () => DataTransferPlatform.pickFile(dialogTitle: dialogTitle);
+        picked = await pick();
+      } catch (error) {
+        if (mounted && context.mounted) {
+          showToast(context, '打开文件选择器失败：$error', error: true);
+        }
+        return null;
+      }
+      if (!mounted || picked == null || !context.mounted) return null;
 
-    final issues = DecodeIssues();
-    final payload = ExportCodec.decode(picked.bytes, issues);
-    if (!payload.readable) {
-      final reason = issues.errors.isEmpty ? '结构不完整' : issues.errors.first;
-      showToast(context, '这个文件里读不出 Guide Line 数据：$reason', error: true);
-      return null;
+      final issues = DecodeIssues();
+      final payload = ExportCodec.decode(picked.bytes, issues);
+      if (!payload.readable) {
+        final reason = issues.errors.isEmpty ? '结构不完整' : issues.errors.first;
+        showToast(context, '这个文件里读不出 Guide Line 数据：$reason', error: true);
+        return null;
+      }
+      return (file: picked, payload: payload);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    return (file: picked, payload: payload);
   }
 
   Future<void> _import(BuildContext context) async {

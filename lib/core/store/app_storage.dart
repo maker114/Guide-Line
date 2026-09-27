@@ -19,6 +19,7 @@ class LoadReport {
     required this.issues,
     required this.quarantinedPaths,
     this.recoveredFromBackup,
+    this.storeLockedByNewerSchema = false,
   });
 
   final StoreFile store;
@@ -30,6 +31,12 @@ class LoadReport {
 
   /// 若主文件损坏、自动用备份恢复，这里是所用备份的路径
   final String? recoveredFromBackup;
+
+  /// 主文件的 `schemaVersion` **高于本应用支持的版本**。
+  ///
+  /// 这种文件只是"看不懂"，**不是损坏**：绝不能隔离它、更不能拿空数据把它换掉。
+  /// 出现这个标记时 [AppStorage.save] 会拒绝写盘，直到用户装上支持的版本。
+  final bool storeLockedByNewerSchema;
 
   bool get hasProblems => quarantinedPaths.isNotEmpty || issues.errors.isNotEmpty;
 }
@@ -61,6 +68,7 @@ class AppStorage {
 
     var store = StoreFile.empty();
     String? recoveredFrom;
+    var lockedByNewerSchema = false;
 
     final file = paths.storeFile;
     if (!file.existsSync()) {
@@ -75,14 +83,37 @@ class AppStorage {
         _writeBackRecovered(store, stamp, issues);
       }
     } else {
-      final text = file.readAsStringSync(encoding: utf8);
-      final parsed = _tryParse(text, issues);
-      if (parsed != null) {
-        store = parsed;
+      // 读取本身也可能失败：**非法 UTF-8**（掉电 / 半截写入的典型产物）、I/O 错误、
+      // 目标被同名目录占位。旧实现里这里是裸调，异常会一路冒到 main，用户看到的是
+      // 启动崩溃 —— 连设置页都进不去，更别说从备份恢复。读不出来也只是"损坏"的一种。
+      String? text;
+      try {
+        text = file.readAsStringSync(encoding: utf8);
+      } catch (error) {
+        issues.error('主数据文件读取失败：$error');
+      }
+
+      final parsed = text == null
+          ? (store: null, lockedByNewerSchema: false)
+          : _tryParse(text, issues);
+
+      if (parsed.lockedByNewerSchema) {
+        // **不是损坏，是"看不懂"**：这份文件可能来自更新版本的 App（或双端混用）。
+        // 隔离它、或用空数据盖掉它，都是不可逆的数据丢失 —— 用户的真数据就在里面。
+        // 所以这里什么都不动：主文件留在原地，只把情况告诉用户。
+        issues.error(
+          '主数据文件由更新版本的 App 写入 —— 已保持原样未改动。'
+          '请升级 App 后再打开，否则这次看到的会是空数据。',
+        );
+        lockedByNewerSchema = true;
+        _lockedByNewerSchema = true;
+      } else if (parsed.store != null) {
+        store = parsed.store!;
       } else {
-        // 主文件读不了 → 隔离现场，然后尝试最近的备份
+        // 主文件读不出来 / 读不了 → 隔离现场，然后尝试最近的备份
         issues.error('主数据文件无法解析 —— 已隔离保留现场');
         quarantined.add(AtomicFile(file).quarantine(stamp));
+        _pruneQuarantine();
         final recovery = _loadNewestBackup(issues);
         if (recovery != null) {
           store = recovery.store;
@@ -99,8 +130,70 @@ class AppStorage {
       issues: issues,
       quarantinedPaths: quarantined,
       recoveredFromBackup: recoveredFrom,
+      storeLockedByNewerSchema: lockedByNewerSchema,
     );
   }
+
+  /// 主文件是"更新版本写的"吗？（本次 [`load`] 里发现，或 [`save`] 时在磁盘上发现）
+  ///
+  /// 一旦为真就**不再写盘**：那种文件属于更高版本的 App，这边一写就等于把
+  /// 用户在新版里的数据换成一份旧形态的空壳。
+  bool _lockedByNewerSchema = false;
+
+  /// 磁盘上的主文件是不是"更新版本写的"。**[save] 的最后一道防线。**
+  ///
+  /// 为什么不能只靠 [load] 记的标记：用户可能在旧版里打开（看到告警）、把进程留在后台，
+  /// 期间用新版写了数据，回到旧版界面继续编辑 —— 这时内存里的标记是过期的，
+  /// 而盘上的文件已经变新了。所以每次写盘之前现读一眼。
+  ///
+  /// 只在文件开头找 `schemaVersion`（它是第一个键），不做完整解析。
+  bool _diskLockedByNewerSchema() {
+    try {
+      final file = paths.storeFile;
+      if (!file.existsSync()) return false;
+      final raf = file.openSync();
+      try {
+        final head = utf8.decode(
+          raf.readSync(1024),
+          allowMalformed: true,
+        );
+        final match = RegExp(r'"schemaVersion"\s*:\s*(\d+)').firstMatch(head);
+        if (match == null) return false;
+        final version = int.tryParse(match.group(1)!);
+        return version != null && version > StoreFile.currentSchemaVersion;
+      } finally {
+        raf.closeSync();
+      }
+    } catch (_) {
+      // 读不出来时不拦：那属于"损坏"那条路，交给 load 的隔离与恢复处理
+      return false;
+    }
+  }
+
+  /// 尝试解析；**区分"解析不了"与"版本高于本应用"**。
+  ///
+  /// 返回值里 `store != null` 才算成功。这个区分是 P0-1 的核心：
+  /// [StoreFile.parse] 对"版本过高"只记一条 error 并返回空 store，如果把它当成功，
+  /// 上层就会拿着一份空库继续跑，第一次保存就把用户的真数据覆盖掉。
+  ({StoreFile? store, bool lockedByNewerSchema}) _tryParse(String text, DecodeIssues issues) {
+    try {
+      Canonical.decode(text);
+    } catch (_) {
+      return (store: null, lockedByNewerSchema: false);
+    }
+    final parsed = StoreFile.parse(text, issues);
+    return (
+      store: parsed,
+      lockedByNewerSchema: _isNewerSchema(issues),
+    );
+  }
+
+  /// [StoreFile.parse] 的"版本过高"分支留下的那条 error。
+  ///
+  /// 按文案匹配不理想，但 `StoreFile.parse` 在那一支里只返回空 store、没有别的出口；
+  /// 这条文案同时也是给用户看的，改动它会被 `app_storage_test.dart` 的 P0-1 用例拦下。
+  bool _isNewerSchema(DecodeIssues issues) =>
+      issues.errors.any((e) => e.contains('高于本应用支持的'));
 
   /// 把恢复出来的数据**立刻写回主文件**。
   ///
@@ -118,45 +211,50 @@ class AppStorage {
     }
   }
 
-  StoreFile? _tryParse(String text, DecodeIssues issues) {
-    try {
-      Canonical.decode(text);
-    } catch (_) {
-      return null;
-    }
-    final parsed = StoreFile.parse(text, issues);
-    // 解析成功但字段全空时，视为"空数据"而不是损坏（新装应用的文件可能是空壳）
-    return parsed;
-  }
-
   ({StoreFile store, String path})? _loadNewestBackup(DecodeIssues issues) {
     final candidates = <File>[
       for (var i = 1; i <= AppPaths.rollingBackupCount; i += 1) paths.rollingBackup(i),
       ..._dailyBackups(),
     ].where((f) => f.existsSync()).toList();
 
-    // 越新的排在前面：滚动备份 1 最新；日快照按文件名倒序
+    // 越新的排在前面：滚动备份 1 最新；日快照按修改时间倒序（同 [_newestFirst]）
     candidates.sort((a, b) {
       final aRolling = _rollingIndex(a);
       final bRolling = _rollingIndex(b);
       if (aRolling != null && bRolling != null) return aRolling.compareTo(bRolling);
       if (aRolling != null) return -1;
       if (bRolling != null) return 1;
-      return b.path.compareTo(a.path);
+      return _newestFirst(a, b);
     });
 
     for (final candidate in candidates) {
       try {
         final text = candidate.readAsStringSync(encoding: utf8);
-        final parsed = StoreFile.parse(text, DecodeIssues());
-        if (parsed.documents.isNotEmpty) {
-          return (store: parsed, path: candidate.path);
+        final issues = DecodeIssues();
+        final parsed = _tryParse(text, issues);
+        // **不能只判 `documents.isNotEmpty`**：`StoreFile.parse` 对四个集合永远赋值，
+        // 那个条件恒为真 —— 于是任何"能被 parse 收下的文本"（`[1,2,3]`、版本过高的、
+        // 记录全坏的）都会被当成恢复来源，用空数据把主文件换掉，还向用户报"已从备份恢复"。
+        // 真正的判据是"它里面有记录"。
+        if (parsed.store != null && _hasAnyRecord(parsed.store!)) {
+          return (store: parsed.store!, path: candidate.path);
         }
       } catch (_) {
         continue;
       }
     }
     return null;
+  }
+
+  /// 这份 store 里**真的有记录**吗。
+  ///
+  /// 用来区分"一份可用的备份"与"一份解析得动、但内容是空壳的文件"——
+  /// 后者在 [StoreFile.parse] 眼里同样"成功"，拿它恢复等于用空数据覆盖真数据。
+  static bool _hasAnyRecord(StoreFile store) {
+    for (final name in DocName.values) {
+      if (store.documentOf(name).items.isNotEmpty) return true;
+    }
+    return false;
   }
 
   int? _rollingIndex(File file) {
@@ -175,8 +273,21 @@ class AppStorage {
         .whereType<File>()
         .where((f) => f.uri.pathSegments.last.startsWith(AppPaths.dailyPrefix))
         .toList(growable: false);
-    files.sort((a, b) => b.path.compareTo(a.path));
+    files.sort(_newestFirst);
     return files;
+  }
+
+  /// 按**文件修改时间**倒序（新的在前）。
+  ///
+  /// 刻意不按文件名字符串排（P1-10）：日快照的名字是"生成那一刻的设备日期"，
+  /// 设备时钟被往后改（或跨时区）就会产出一个未来日期的文件名，按名字排会把它
+  /// 当成"最新"而挤掉真正最近的那几份。mtime 是文件系统给的，不做这种假设。
+  static int _newestFirst(File a, File b) {
+    final at = a.lastModifiedSync().millisecondsSinceEpoch;
+    final bt = b.lastModifiedSync().millisecondsSinceEpoch;
+    if (at != bt) return bt.compareTo(at);
+    // 同一毫秒（罕见）时用名字兜底，保证排序稳定
+    return b.path.compareTo(a.path);
   }
 
   // ---------------------------------------------------------------- 写
@@ -188,6 +299,12 @@ class AppStorage {
   /// 这段时间里留一份就够回退；而 5 分钟又短到"随手改改"也不至于整天不落后备。
   static const int rotateMinIntervalMillis = 5 * 60 * 1000;
 
+  /// 会话"不活动"多久就视为已结束（P1-6）。
+  ///
+  /// 比 [rotateMinIntervalMillis] 长一档：正常的连续编辑不会跨这么久，
+  /// 而卡住的会话必须有个上限 —— 否则备份会整个进程生命周期停更。
+  static const int editSessionIdleLimitMillis = 30 * 60 * 1000;
+
   /// 是否正处在一段编辑会话里（进编辑页面 → 离开）。
   bool get inEditSession => _inEditSession;
 
@@ -198,6 +315,9 @@ class AppStorage {
 
   /// 上次轮转的时刻；非会话期间的节流以它为基准（`null` = 还没轮转过）。
   int? _lastRotateAt;
+
+  /// 上次保存的时刻 —— 判断会话是否已经"不活动"用（P1-6）。
+  int? _lastSaveAt;
 
   /// 进入编辑会话：**只置标记**，不写盘、也不轮转。
   ///
@@ -236,20 +356,46 @@ class AppStorage {
   void save(StoreFile store, {int? nowMillis, bool forceRotate = false}) {
     paths.ensureDirectories();
     final now = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
+
+    // **看不懂的文件不覆盖**（P0-1）：盘上的主文件若由更新版本的 App 写入，
+    // 这一写就等于把用户在新版里的数据换成一份旧形态的空壳，而且不可恢复。
+    // 本次 load 已经发现、或期间文件被新版改过，都在这里拦下。
+    if (_lockedByNewerSchema || _diskLockedByNewerSchema()) {
+      _lockedByNewerSchema = true;
+      return;
+    }
+
     final stamped = store.copyWith(savedAt: now);
 
     if (forceRotate) {
       _rotateNow(now);
-    } else if (_inEditSession) {
+    } else if (_inEditSession && !_editSessionExpired(now)) {
       if (!_rotatedInSession) _rotateNow(now);
     } else if (_rotateDue(now)) {
+      // 会话卡住时也走到这里：备份不会因为一根没配对的标志永远停更（P1-6）
       _rotateNow(now);
     }
 
     AtomicFile(paths.storeFile).writeText(stamped.toCanonicalText());
+    _lastSaveAt = now;
   }
 
+  /// 与"备份文件集合"有关的修订号：轮转、删备份、写回恢复结果时 +1。
+  ///
+  /// 给上层做缓存用（Q-4）：[listBackups] 要解析每一份备份才能报出条数，
+  /// 而界面在**每次重建**时都会读它 —— 不加缓存的话，一条通知就重解析十几份文件。
+  /// 上层记住"这份缓存对应哪个修订号"，只有变了才重新算。
+  int get backupsRevision => _backupsRevision;
+  int _backupsRevision = 0;
+
   /// 非会话期间该不该轮转：从没轮转过，或距上次已超过最小间隔。
+  ///
+  /// **会话保护会过期**（P1-6）：`_inEditSession` 是一根全局标志（`begin` / `end`
+  /// 必须严格配对），一旦 predict-back 手势取消、路由被非对称移除之类的情况让它卡在
+  /// "打开"状态，`_rotatedInSession` 早在第一笔写入时就被置真 —— 此后**整个进程生命周期
+  /// 都不会再轮转备份**，而 App 切后台再回来是不重启进程的，这个状态能持续好几天。
+  /// 所以超过 [editSessionIdleLimitMillis] 没有任何保存时，视为会话已结束，
+  /// 让节流路径接管，备份不至于永远停更。
   bool _rotateDue(int now) {
     final last = _lastRotateAt;
     if (last == null) return true;
@@ -258,11 +404,35 @@ class AppStorage {
     return (now - last).abs() >= rotateMinIntervalMillis;
   }
 
+  /// 会话是否已经"不活动"到不该再拦住轮转。
+  bool _editSessionExpired(int now) {
+    final last = _lastSaveAt;
+    if (last == null) return false;
+    return (now - last).abs() >= editSessionIdleLimitMillis;
+  }
+
   /// 轮转一次并记账（会话内 / 非会话 / 强制三条路都收敛到这里）。
+  ///
+  /// **只有真的写出至少一份备份才记"已轮转"**（P1-3）：旧实现无条件记账，
+  /// 于是磁盘满 / 权限异常时会出现"主文件在写、一份备份都没有，而且本会话不再重试"，
+  /// 界面上「立即备份一份」还会报成功 —— 用户以为有存档，其实一份都没有。
   void _rotateNow(int now) {
-    _rotateBackups(now);
+    if (!paths.storeFile.existsSync()) {
+      // 没有"上一份"可轮转（刚装、或主文件被外部删了）：这不是失败，只是没事可做。
+      // 记账照旧 —— 否则这一段操作里的每一笔写入都会白跑一次轮转。
+      _lastRotateAt = now;
+      _rotatedInSession = true;
+      return;
+    }
+    final wrote = _rotateBackups(now);
+    if (!wrote) {
+      // 有东西可轮转却一份都没写出来（磁盘满 / 权限）：**不记账**，
+      // 让下一次保存继续重试，而不是整个会话都不再留备份。
+      return;
+    }
     _lastRotateAt = now;
     _rotatedInSession = true;
+    _backupsRevision += 1; // 备份集合变了，上层缓存作废（Q-4）
   }
 
   void savePrefs(UiPrefs prefs) {
@@ -271,15 +441,19 @@ class AppStorage {
   }
 
   /// 滚动备份 + 日快照（**纯机械部分**：该不该轮转由调用方决定，见 [save]）。
-  void _rotateBackups(int now) {
+  ///
+  /// 返回"这一轮有没有真的写出一份备份"，由 [_rotateNow] 决定要不要记账。
+  bool _rotateBackups(int now) {
     final store = paths.storeFile;
-    if (!store.existsSync()) return;
+    if (!store.existsSync()) return false;
+
+    var wroteAny = false;
 
     // 日快照：今天还没有快照时先留一份（在轮转之前，保证是"今天开始时的状态"）
     final today = _yyyymmdd(now);
     final todayFile = paths.dailyBackup(today);
     if (!todayFile.existsSync()) {
-      _copyFile(store, todayFile);
+      if (_copyFile(store, todayFile)) wroteAny = true;
       _pruneDaily();
     }
 
@@ -294,18 +468,34 @@ class AppStorage {
       _shiftFile(from, paths.rollingBackup(i + 1));
     }
     // 最后一步必须是复制：主文件还要留着
-    _copyFile(store, paths.rollingBackup(1));
+    if (_copyFile(store, paths.rollingBackup(1))) wroteAny = true;
+    return wroteAny;
   }
 
   /// 备份移位：优先改名（O(1)），不行再退回复制。
   ///
-  /// 备份永远不该阻断主流程，所以两条路都失败也只是这一次少一份备份。
-  void _shiftFile(File from, File to) {
+  /// 备份永远不该阻断主流程，所以两条路都失败也只是这一次少一份备份 ——
+  /// 但要**如实告诉调用方**（返回值），否则"这份操作有存档"会变成一句空话。
+  bool _shiftFile(File from, File to) {
     try {
       if (to.existsSync()) to.deleteSync();
       from.renameSync(to.path);
+      return true;
     } catch (_) {
-      _copyFile(from, to);
+      return _copyFile(from, to);
+    }
+  }
+
+  /// 隔离区只留最近几份（P1-7）：它是求救通道，但也不能无限堆积 ——
+  /// 用户在设置页里看不到这些文件，只加不清就成了无声的空间占用。
+  void _pruneQuarantine() {
+    final files = AtomicFile.quarantineFilesIn(paths.directory);
+    for (var i = AppPaths.quarantineKeepCount; i < files.length; i += 1) {
+      try {
+        files[i].deleteSync();
+      } catch (_) {
+        // 清理失败不影响正确性
+      }
     }
   }
 
@@ -320,12 +510,21 @@ class AppStorage {
     }
   }
 
-  void _copyFile(File from, File to) {
+  /// 复制一份文件当备份。
+  ///
+  /// 用文件系统级拷贝（`File.copySync`）而不是"读成字节数组再写"：
+  /// 后者每次轮转都要把整份数据读进 Dart 堆，数据到几 MB 时在低端机上会 OOM，
+  /// 而 OOM 是 `Error` 不是 `FileSystemException`，会绕过上层 `run()` 的兜底（P1-9）。
+  ///
+  /// 返回是否真的写成功 —— 让调用方（[_rotateNow] / [snapshotBackupNow]）
+  /// 能诚实回答"这次到底有没有留下存档"。
+  bool _copyFile(File from, File to) {
     try {
-      final bytes = from.readAsBytesSync();
-      AtomicFile(to).writeBytes(bytes);
+      from.copySync(to.path);
+      return true;
     } catch (_) {
       // 备份失败不能阻断主流程（主文件仍会被原子写入）
+      return false;
     }
   }
 
@@ -388,24 +587,25 @@ class AppStorage {
     return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
   }
 
-  static String _countSuffix(int? count) => count == null ? '' : ' · $count 条';
+  static String _countSuffix(int? count) =>
+      count == null ? ' · 无法解析' : ' · $count 条';
 
   /// 备份文件里 `items` 的总条数（含墓碑 / 归档，就是文件里实实在在的条数）。
   ///
-  /// 解析不了返回 `null`：**这一份仍然要列出来、仍然能恢复**，只是少一条信息 ——
-  /// 备份可能来自旧版本，因为"数不出条数"就把它藏起来是最糟的选择。
-  int? _recordCountOf(File file) {
+  /// **一份"0 条"的备份不算可用备份，返回 `null`**（P1-8）：
+  /// 早先这里对 `[1,2,3]`、`schemaVersion` 过高、记录全坏这类文件都返回 `0`，
+  /// 于是标签写成"日快照 20260906 · 0 条"——看起来像一份"空但合法"的备份，
+  /// 用户点恢复就会把主文件换成空数据。注释本来就写着"不写成 0，那样比不写还误导"，
+  /// 但实现没做到；现在做到了，并与 [_hasAnyRecord] / [_loadNewestBackup] 同一套判据。
+  static int? _recordCountOf(File file) {
     try {
       final text = file.readAsStringSync(encoding: utf8);
-      // 先确认是合法 JSON：坏文件会被 StoreFile.parse 静默读成空数据，
-      // 那样标签会写成"0 条"，比不写还误导
-      Canonical.decode(text);
       final parsed = StoreFile.parse(text, DecodeIssues());
       var total = 0;
       for (final name in DocName.values) {
         total += parsed.documentOf(name).items.length;
       }
-      return total;
+      return total == 0 ? null : total;
     } catch (_) {
       return null;
     }
@@ -422,12 +622,14 @@ class AppStorage {
       throw StateError('备份不存在：$backupPath');
     }
     final issues = DecodeIssues();
-    final parsed = StoreFile.parse(backup.readAsStringSync(encoding: utf8), issues);
-    if (parsed.documents.isEmpty) {
-      throw StateError('备份内容无法解析：$backupPath');
+    final parsed = _tryParse(backup.readAsStringSync(encoding: utf8), issues);
+    // **不能判 `documents.isEmpty`**：`StoreFile.parse` 对四个集合永远赋值，条件恒假，
+    // 于是"恢复一份空备份"不会被拦下，用户点一下就把主文件换成空数据（P1-8）。
+    if (parsed.store == null || !_hasAnyRecord(parsed.store!)) {
+      throw StateError('这份备份里没有可恢复的记录：$backupPath');
     }
-    save(parsed, nowMillis: nowMillis, forceRotate: true);
-    return parsed;
+    save(parsed.store!, nowMillis: nowMillis, forceRotate: true);
+    return parsed.store!;
   }
 
   /// 删掉某一份备份。
@@ -450,6 +652,7 @@ class AppStorage {
     }
     final file = File(backupPath);
     if (file.existsSync()) file.deleteSync();
+    _backupsRevision += 1; // 备份集合变了，上层缓存作废（Q-4）
     return null;
   }
 

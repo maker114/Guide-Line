@@ -19,13 +19,36 @@ import 'upcoming_page.dart';
 ///
 /// 「灵感 / 项目 / 事件」三个 Tab 只放最高频的操作，
 /// 聚合视图（到期、全部任务、搜索、归档区）与数据安全都收在这里。
-class MoreTab extends StatelessWidget {
+class MoreTab extends StatefulWidget {
   const MoreTab({super.key, required this.app});
 
   final AppController app;
 
   @override
+  State<MoreTab> createState() => _MoreTabState();
+}
+
+class _MoreTabState extends State<MoreTab> {
+  late final AppController app = widget.app;
+
+  /// AI 配置读起来要打平台通道（Keystore 是慢操作），所以**缓存这一份 Future**。
+  ///
+  /// 早先这里写在 `FutureBuilder(future: app.readAiConfig())` 里（Q-5）：
+  /// 这一页被保活、而任何一次保存 / 勾选 / 改偏好都会通知重建，
+  /// 于是每帧都重打一次平台通道，`FutureBuilder` 还会回落成 waiting、
+  /// 把副标题闪回默认文案。
+  late Future<AiConfig> _aiConfig = app.readAiConfig();
+
+  /// 这份缓存对应的是哪一版配置 —— 设置页保存后 `aiConfigRevision` 会 +1，
+  /// 下次重建时发现对不上就重读（不能只在 initState 读一次，那样改完配置副标题不会变）。
+  late int _aiRevision = app.aiConfigRevision;
+
+  @override
   Widget build(BuildContext context) {
+    if (_aiRevision != app.aiConfigRevision) {
+      _aiRevision = app.aiConfigRevision;
+      _aiConfig = app.readAiConfig();
+    }
     final ws = app.ws;
     // 「接下来的任务」：还开着的任务（未完成、未搁置、不在已搁置事件下），
     // 含没排期的 —— 与那个页面的列表同一口径
@@ -140,7 +163,7 @@ class MoreTab extends StatelessWidget {
       return Text('已关闭 · 项目里不再显示 AI 整理入口', style: Theme.of(context).textTheme.bodySmall);
     }
     return FutureBuilder<AiConfig>(
-      future: app.readAiConfig(),
+      future: _aiConfig,
       builder: (context, snapshot) {
         final config = snapshot.data;
         final String text;

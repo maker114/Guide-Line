@@ -1,5 +1,4 @@
 import '../json/canonical.dart';
-import '../models/enums.dart';
 
 /// 界面偏好（**不是数据**）：折叠状态、外观、上次打开的页签等。
 ///
@@ -236,16 +235,6 @@ class UiPrefs {
   }
 
   String toCanonicalText() => Canonical.documentText(toJson());
-
-  /// 便于设置页显示"上次打开的页签"（枚举顺序与 DocName 无关，仅供展示）。
-  static String describeTab(int index) {
-    const labels = <String>['灵感', '项目', '事件', '更多'];
-    if (index < 0 || index >= labels.length) return labels.first;
-    return labels[index];
-  }
-
-  /// 未使用但保留：枚举 → 集合名（供将来把偏好扩展到"上次打开的集合"）。
-  static String collectionLabel(DocName name) => name.key;
 }
 
 const Object _unset = Object();

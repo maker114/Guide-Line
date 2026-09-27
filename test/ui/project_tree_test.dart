@@ -382,7 +382,7 @@ void main() {
 
   testWidgets('没有副标题的项目：标题竖直居中，不留一截空占位', (tester) async {
     final app = await boot(tester);
-    final plain = app.ws.liveProjects.firstWhere(
+    final _ = app.ws.liveProjects.firstWhere(
       (p) => p.title == '没颜色没子项目',
     );
 
@@ -407,7 +407,6 @@ void main() {
       lessThan(2),
       reason: '标题该在这一行里竖直居中（行 ${row.height}）',
     );
-    expect(plain.id, isNotEmpty);
   });
 
   testWidgets('根层的新建入口文案是「新建分类」（Q2：文案随层级走）', (tester) async {

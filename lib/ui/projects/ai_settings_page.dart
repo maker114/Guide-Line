@@ -69,7 +69,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
         title: const Text('AI 整理'),
         actions: <Widget>[
           TextButton(
-            onPressed: _loading ? null : _save,
+            // 测试连接期间**不许保存**（Q-8）：`_save` 会先改偏好再 await 写安全存储，
+            // 而 `_testConnection` 是"读偏好 + 读 Key"，两条路交错就会测到
+            // "新地址 + 旧 Key"这种并不存在的组合，结果与实际保存后的行为对不上。
+            onPressed: (_loading || _testing) ? null : _save,
             child: const Text('保存'),
           ),
         ],

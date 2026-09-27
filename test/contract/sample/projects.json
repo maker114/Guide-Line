@@ -82,6 +82,49 @@
       "id": "5d0f2b47-8e60-4c94-bf35-60819d2e4f55",
       "deleted": true,
       "purged_at": 1788566400000
+    },
+    {
+      "id": "p-only-color",
+      "title": "只有标识色",
+      "purpose": "",
+      "implementation": "",
+      "date": null,
+      "status": "pending",
+      "archived": false,
+      "parent_project_id": null,
+      "order": 5000,
+      "completed_at": null,
+      "created_at": 1788652800000,
+      "updated_at": 1788652800000,
+      "deleted": false,
+      "color": "#2f6feb"
+    },
+    {
+      "id": "p-only-items",
+      "title": "只有实现清单",
+      "purpose": "",
+      "implementation": "",
+      "date": null,
+      "status": "pending",
+      "archived": false,
+      "parent_project_id": null,
+      "order": 5000,
+      "completed_at": null,
+      "created_at": 1788652800000,
+      "updated_at": 1788652800000,
+      "deleted": false,
+      "items": [
+        {
+          "id": "i-1",
+          "text": "先冻结契约",
+          "done": false
+        },
+        {
+          "id": "i-2",
+          "text": "再写回归",
+          "done": true
+        }
+      ]
     }
   ]
 }

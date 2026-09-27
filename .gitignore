@@ -21,6 +21,9 @@ build/
 
 # ---------- Android ----------
 **/android/.gradle/
+**/android/.kotlin/
+**/android/app/.cxx/
+# Kotlin 编译缓存（构建中断后可能残留，别入库）
 **/android/captures/
 **/android/local.properties
 **/android/key.properties

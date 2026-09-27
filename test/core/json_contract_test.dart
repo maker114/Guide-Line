@@ -156,8 +156,40 @@ void main() {
       }
     });
 
-    test('任务样本覆盖三类 task_type 与三层结构', () {
+    test('项目样本覆盖"可省字段"的单独出现（T-10）', () {
+      // `color` 与 `items` 都是"未设置即省略"的可省字段，位置追加在末尾。
+      // 逐字节回归只对**样本里出现过的组合**有效，所以样本必须同时包含：
+      // 只有 color 的、只有 items 的、两者都有、两者都无 —— 否则那几种写出形态没人守。
       final issues = DecodeIssues();
+      final projects = Document.parse(
+        DocName.projects,
+        File('$sampleDir/projects.json').readAsStringSync(),
+        issues,
+      ).projectItems;
+
+      expect(
+        projects.where((p) => p.color != null && p.items.isEmpty),
+        isNotEmpty,
+        reason: '要有一条"只设了标识色、没有清单"的项目',
+      );
+      expect(
+        projects.where((p) => p.color == null && p.items.isNotEmpty),
+        isNotEmpty,
+        reason: '要有一条"只有清单、没设标识色"的项目',
+      );
+      expect(
+        projects.where((p) => p.color != null && p.items.isNotEmpty),
+        isNotEmpty,
+        reason: '要有一条两者都有的（字段顺序：color 在 items 之前）',
+      );
+      expect(
+        projects.where((p) => p.color == null && p.items.isEmpty),
+        isNotEmpty,
+        reason: '要有一条两者都没有的（这两个键都不该写出来）',
+      );
+    });
+
+    test('任务样本覆盖三类 task_type 与三层结构', () {      final issues = DecodeIssues();
       final document = Document.parse(
         DocName.tasks,
         File('$sampleDir/tasks.json').readAsStringSync(),

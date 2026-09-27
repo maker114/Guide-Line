@@ -151,39 +151,44 @@ class _AppearancePageState extends State<AppearancePage> {
   }
 
   Future<void> _pickBackground(BuildContext context) async {
+    // 函数自身也要认 `_busy`（Q-7）：`onTap` 上那个判断只关掉了按钮，
+    // 挡不住无障碍焦点 / 热键再进来一次。
+    if (_busy) return;
     setState(() => _busy = true);
-    PickedTransferFile? picked;
-    String? seedHex;
     try {
-      picked = await DataTransferPlatform.pickFile(
-        dialogTitle: '选择一张背景图',
-        imagesOnly: true,
-      );
-      if (picked != null) {
-        // 取主色是"跟随背景图"主题要用的；取不到也不影响设背景
-        final seed = await seedColorFromImageBytes(Uint8List.fromList(picked.bytes));
-        if (seed != null) seedHex = toHexColor(seed);
+      PickedTransferFile? picked;
+      String? seedHex;
+      try {
+        picked = await DataTransferPlatform.pickFile(
+          dialogTitle: '选择一张背景图',
+          imagesOnly: true,
+        );
+        if (picked != null) {
+          // 取主色是"跟随背景图"主题要用的；取不到也不影响设背景
+          final seed = await seedColorFromImageBytes(Uint8List.fromList(picked.bytes));
+          if (seed != null) seedHex = toHexColor(seed);
+        }
+      } catch (error) {
+        if (mounted && context.mounted) {
+          showToast(context, '选择失败：$error', error: true);
+        }
+        return;
       }
-    } catch (error) {
-      if (!mounted) return;
-      setState(() => _busy = false);
-      if (context.mounted) showToast(context, '选择失败：$error', error: true);
-      return;
-    }
-    if (!mounted) return;
-    setState(() => _busy = false);
-    if (picked == null || !context.mounted) return;
+      if (!mounted || picked == null || !context.mounted) return;
 
-    final error = _app.applyBackgroundImage(picked.bytes, seedHex: seedHex);
-    if (!context.mounted) return;
-    if (error != null) {
-      showToast(context, error, error: true);
-      return;
+      final error = _app.applyBackgroundImage(picked.bytes, seedHex: seedHex);
+      if (!context.mounted) return;
+      if (error != null) {
+        showToast(context, error, error: true);
+        return;
+      }
+      showToast(
+        context,
+        seedHex == null ? '已设置背景图，没能取到主色' : '已设置背景图，主色 $seedHex',
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    showToast(
-      context,
-      seedHex == null ? '已设置背景图，没能取到主色' : '已设置背景图，主色 $seedHex',
-    );
   }
 }
 

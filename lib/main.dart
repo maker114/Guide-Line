@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 
 import 'app/app_controller.dart';
 import 'platform/data_directory.dart';
+import 'platform/file_durability_platform.dart';
 import 'ui/app_shell.dart';
 import 'ui/theme/app_theme.dart';
 import 'ui/theme/background_layer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // **在任何写盘之前**把落盘钩子接上（P1-4）：core 保持纯 Dart，
+  // 真正的 `fsync` 由平台层走方法通道完成。非 Android 平台静默跳过。
+  FileDurabilityPlatform.bind();
   try {
     final controller = await AppController.bootstrap();
     runApp(GuidelineApp(controller: controller));

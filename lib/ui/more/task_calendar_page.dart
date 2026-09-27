@@ -31,8 +31,16 @@ class TaskCalendarPage extends StatefulWidget {
 class _TaskCalendarPageState extends State<TaskCalendarPage> {
   /// 当前显示的月份（只用到年 / 月，固定取 1 号）
   late DateTime _month;
-  /// 选中的日期（`YYYY-MM-DD`），默认今天
-  late String _selected = todayDateString();
+
+  /// 用户手动点选的日期（`YYYY-MM-DD`）；**没点过就是 `null`**。
+  ///
+  /// 不缓存"今天"（Q-10）：原来初值写死 `todayDateString()`，页面停在后台跨过午夜之后
+  /// 仍然高亮昨天，而 `isToday` 是现算的 —— 同一屏上两个"今天"对不上。
+  /// 现在往下取的是 [selected]，没点过时每次现算。
+  String? _pickedDate;
+
+  /// 选中的日期：没手动点过就是"此刻的今天"。
+  String get _selected => _pickedDate ?? todayDateString();
 
   @override
   void initState() {
@@ -68,7 +76,7 @@ class _TaskCalendarPageState extends State<TaskCalendarPage> {
                 onToday: () => setState(() {
                   final now = DateTime.now();
                   _month = DateTime(now.year, now.month);
-                  _selected = todayDateString();
+                  _pickedDate = todayDateString();
                 }),
               ),
               const _WeekdayHeader(),
@@ -76,7 +84,7 @@ class _TaskCalendarPageState extends State<TaskCalendarPage> {
                 month: _month,
                 marks: marks,
                 selected: _selected,
-                onSelect: (date) => setState(() => _selected = date),
+                onSelect: (date) => setState(() => _pickedDate = date),
               ),
               const SizedBox(height: 8),
               const Divider(height: 1),

@@ -73,7 +73,11 @@ class AppController extends ChangeNotifier {
       credentialStore: credentialStore,
       shareFile: shareFile,
     ).._loadBackgroundBytes();
-    controller._purgeExpiredTrash();
+    // 有事故时**不动磁盘**：清理过期墓碑会写盘，而"载入过程中发现问题"这一刻
+    // 最不该再往盘上写东西（P0-3）。数据没问题的正常路径照旧清理。
+    if (!report.hasProblems && !report.storeLockedByNewerSchema) {
+      controller._purgeExpiredTrash();
+    }
     controller._remindExportAfterIncident(report);
     return controller;
   }
@@ -209,7 +213,19 @@ class AppController extends ChangeNotifier {
   /// 现在入口与搜索页调的是 `Workspace.searchableContentCount` 同一个口径。
   int get searchableCount => workspace.searchableContentCount;
 
-  List<BackupEntry> get backups => storage.listBackups();
+  /// 备份列表。**带缓存**（Q-4）：[AppStorage.listBackups] 要解析每一份备份才能报出条数，
+  /// 而界面（「更多」页 + 备份页）在每次重建时都会读它 —— 一条通知就重解析十几份文件。
+  /// 缓存用 `backupsRevision` 判新旧：轮转一次就换一茬，所以只在真的变了时才重算。
+  List<BackupEntry> get backups {
+    if (_backupsCacheRevision != storage.backupsRevision) {
+      _backupsCache = storage.listBackups();
+      _backupsCacheRevision = storage.backupsRevision;
+    }
+    return _backupsCache;
+  }
+
+  List<BackupEntry> _backupsCache = const <BackupEntry>[];
+  int _backupsCacheRevision = -1;
 
   int? get lastExportedAt => workspace.lastExportedAt;
 
@@ -320,6 +336,8 @@ class AppController extends ChangeNotifier {
   String? restoreBackup(String path) {
     try {
       final restored = storage.restoreFromBackup(path);
+      // 恢复会把主文件换掉、并把恢复前的那份轮转走 —— 备份集合变了，缓存必须作废（Q-4）
+      _backupsCacheRevision = -1;
       workspace = Workspace.fromLoad(
         storage,
         LoadReport(
@@ -341,7 +359,10 @@ class AppController extends ChangeNotifier {
   /// 安全线（至少留一份、只认自己列的备份）在存储层，这里只负责转发与刷新。
   String? deleteBackup(String path) {
     final error = storage.deleteBackup(path);
-    if (error == null) notifyListeners();
+    if (error == null) {
+      _backupsCacheRevision = -1; // 删掉一份，缓存作废（Q-4）
+      notifyListeners();
+    }
     return error;
   }
 
@@ -353,11 +374,17 @@ class AppController extends ChangeNotifier {
   String? snapshotBackupNow() {
     try {
       storage.save(workspace.buildStoreFile(), forceRotate: true);
-      notifyListeners();
-      return null;
     } on FileSystemException catch (error) {
       return '保存失败，这次备份没有写进磁盘（${error.message}）。请检查存储空间后重试。';
     }
+    // 主文件写成功 ≠ 备份写成功：**盘上真有这一份才算成功**（P1-3）。
+    // 旧实现只据此返回 null；磁盘满时备份一份都没写出，界面却报"已备份一份"。
+    if (!storage.paths.rollingBackup(1).existsSync()) {
+      return '备份没有写进磁盘 —— 最近这一份没能留下，'
+          '请检查存储空间或权限后重试（主数据文件本身已保存）。';
+    }
+    notifyListeners();
+    return null;
   }
 
   // ------------------------------------------------------------ 实现计划的历史正文
@@ -489,11 +516,12 @@ class AppController extends ChangeNotifier {
 
   /// 用导入的数据**整体替换**当前数据。
   ///
-  /// 替换前 [AppStorage.save] 会先把当前数据轮转进滚动备份，
-  /// 所以"导错了文件"也能从「备份与恢复」里退回来。
+  /// 这是**覆盖性**操作，所以必须 `forceRotate`：先无条件把当前数据轮转进滚动备份，
+  /// 「导错了文件」才有退路。不能用普通 `save`——那会被 5 分钟节流拦下，
+  /// 用户在刚保存过之后导入，就等于直接覆盖、没有退路（P1-5）。
   String? applyImport(StoreFile store) {
     try {
-      storage.save(store);
+      storage.save(store, forceRotate: true);
       workspace = Workspace.fromLoad(
         storage,
         LoadReport(
@@ -554,12 +582,18 @@ class AppController extends ChangeNotifier {
       } else {
         await credentials.writeApiKey(normalized.apiKey);
       }
+      // 配置改了就推进版本号：`MoreTab` 的副标题据此决定要不要重读一次
+      // （它把 Future 缓存住了，见 Q-5）
+      aiConfigRevision += 1;
       notifyListeners();
       return null;
     } catch (error) {
       return '保存失败：$error';
     }
   }
+
+  /// AI 配置的版本号：每保存一次 +1。缓存了 [readAiConfig] 结果的界面用它判新旧。
+  int aiConfigRevision = 0;
 
   /// 真发一次请求做连通性测试（设置页的「测试连接」）。
   ///
@@ -634,6 +668,16 @@ class AppController extends ChangeNotifier {
   /// 启动告警：把加载报告翻译成人能看懂的话。
   static List<String> buildWarnings(LoadReport report) {
     final warnings = <String>[];
+    if (report.storeLockedByNewerSchema) {
+      // 这条必须独占一句、而且要把"数据没丢"说清楚：
+      // 用户看到的会是一个空库（本应用读不懂那份文件），最容易误判成"数据全没了"，
+      // 从而做出"重新开始记"或"重新导入"这类会真正造成损失的动作。
+      warnings.add(
+        '数据文件由更新版本的 App 写入，本版本读不懂，已保持原样未改动 —— '
+        '你的数据还在文件里，升级 App 后即可看到；在此之前本版本的改动不会被保存。',
+      );
+      return warnings;
+    }
     if (report.recoveredFromBackup != null) {
       warnings.add('主数据文件损坏，已从备份自动恢复');
     }

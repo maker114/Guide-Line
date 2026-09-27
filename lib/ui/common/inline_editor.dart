@@ -95,7 +95,10 @@ class _InlineTextFieldState extends State<InlineTextField> {
     super.initState();
     _focus.addListener(_onFocusChanged);
     if (widget.autofocus) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _startEditing());
+      // 闭包持有 State，帧回调可能在销毁之后才跑到 —— 与项目其它地方同一个规矩（Q-10）
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startEditing();
+      });
     }
   }
 

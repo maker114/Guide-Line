@@ -12,6 +12,7 @@ import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/core/store/export_codec.dart';
+import 'package:guideline/core/store/ui_prefs.dart';
 
 /// 导出 / 导入的编解码与文件轮转。
 ///
@@ -60,6 +61,27 @@ void main() {
           ),
         },
       );
+
+  group('对外常量用字面量钉住（T-2）', () {
+    // 这几个值有一个共同点：**改了它们，一次 `flutter test` 都不会红**。
+    // 原来的断言写的是 `expect(map['app'], ExportCodec.appName)` —— 拿常量断言常量，
+    // 自指、恒真。可它们是**对外格式的一部分**（导出文件被别的程序读、被别的版本读），
+    // 属于"一旦改了就是破坏性变更"，所以用字面量钉死。
+    test('导出文件的 app / kind 字面量', () {
+      expect(ExportCodec.appName, 'GuideLine');
+      expect(ExportCodec.fullExportKind, 'full-export');
+    });
+
+    test('导出保留份数字面量', () {
+      // 用例名里一直写着"只保留最近 5 份"，但值本身从未被钉住
+      expect(AppStorage.exportKeepCount, 5);
+    });
+
+    test('界面偏好：背景不透明度的默认值', () {
+      // 界面上的滑杆初值依赖它；改了不会有任何测试失败
+      expect(UiPrefs.defaultBackgroundOpacity, 0.30);
+    });
+  });
 
   group('导出编码', () {
     test('编码结果是 gzip，解出来是自描述 JSON', () {
@@ -185,7 +207,14 @@ void main() {
     test('导出不会碰主数据文件与备份', () {
       final storage = AppStorage(AppPaths(tempDir));
       storage.save(sampleStore(), nowMillis: 1788652800000);
+      // 造出一份备份（T-5）：用例名承诺"与备份"，而原来正文一次都没调 listBackups()
+      storage.save(sampleStore(), nowMillis: 1788652800000, forceRotate: true);
       final before = storage.paths.storeFile.readAsStringSync();
+      final backupsBefore = storage
+          .listBackups()
+          .map((b) => <Object?>[b.path, b.sizeBytes, b.recordCount])
+          .toList();
+      expect(backupsBefore, isNotEmpty, reason: '先要真的有备份可断言');
 
       storage.writeExport(
         ExportCodec.encode(sampleStore(), exportedAt: Ids.nowMillis()),
@@ -193,6 +222,14 @@ void main() {
       );
 
       expect(storage.paths.storeFile.readAsStringSync(), before);
+      expect(
+        storage
+            .listBackups()
+            .map((b) => <Object?>[b.path, b.sizeBytes, b.recordCount])
+            .toList(),
+        backupsBefore,
+        reason: '导出只在私有目录里多一个文件，不该动数据、也不该动备份',
+      );
     });
   });
 }

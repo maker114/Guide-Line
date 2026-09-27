@@ -236,8 +236,9 @@ void main() {
     await tester.tap(find.text('第二步'));
     await tester.pumpAndSettle();
     expect(find.text('下级 0/1'), findsOneWidget, reason: '分母只算留着的那个子任务');
-    expect(keptSub.id, isNotEmpty);
-    expect(archivedSub.id, isNotEmpty);
+    // 这条断言证明不了什么：id 由 Ids.uuidV4() 生成，必然非空（T-3）
+    // ignore: unused_local_variable
+    () => archivedSub;
 
     // 留着的子任务做完 → 锁消失、父任务可以勾
     await tester.tap(find.byIcon(Icons.radio_button_unchecked).last);

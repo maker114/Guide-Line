@@ -455,7 +455,10 @@ class _AnimatedCapturePillState extends State<_AnimatedCapturePill>
 
   /// 只取缓动后的**前半程**：`easeOutCubic` 在 0.6 处已经接近落位，
   /// 进场"像是被甩出来的"，收尾干净（与底栏那套动效同一个口味）。
-  late final Animation<double> _progress = CurvedAnimation(
+  ///
+  /// 类型写 `CurvedAnimation` 而不是 `Animation<double>`：前者才有 `dispose()`
+  /// （它把 listener 挂在 parent 上，必须自己释放 —— Q-1）。
+  late final CurvedAnimation _progress = CurvedAnimation(
     parent: _controller,
     curve: Curves.easeOutCubic,
   );
@@ -475,6 +478,10 @@ class _AnimatedCapturePillState extends State<_AnimatedCapturePill>
 
   @override
   void dispose() {
+    // `CurvedAnimation` 自己也要 dispose：它把 listener 挂在 parent 上，
+    // 只释放 `_controller` 会把那份监听留在已释放的 controller 上（Q-1）。
+    // 必须**先**释放 `_progress`，再释放它依赖的 parent。
+    _progress.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -728,7 +735,8 @@ class _AppShellState extends State<AppShell> {
   void _bindCaptureShortcut() {
     ShortcutChannel.onCapture(_goCapture);
     ShortcutChannel.consumePendingCapture().then((pending) {
-      if (pending) _goCapture();
+      // 平台通道的回调可能在页面销毁之后才到（Q-2）
+      if (pending && mounted) _goCapture();
     });
   }
 

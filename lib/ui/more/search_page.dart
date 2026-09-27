@@ -57,6 +57,9 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _exitSelection() {
+    // 批量动作里有 `await`（确认框 / 日期选择器），期间本页可能已经被 pop 掉（Q-2）。
+    // 内层函数里的 `context.mounted` 守的是弹窗那条路由，查不出本 State 已 dispose。
+    if (!mounted) return;
     setState(() {
       _selecting = false;
       _selectedIds.clear();
@@ -105,8 +108,13 @@ class _SearchPageState extends State<SearchPage> {
           ..clear()
           ..addAll(visibleTaskIds);
         if (_selecting && _visibleIds.isEmpty) {
-          _selecting = false;
-          _selectedIds.clear();
+          // **不在 build 里改状态**（Q-6）：这里原来直接 `_selecting = false`，
+          // 靠"反正马上要重建"侥幸成立；一旦上层加了 `const` 优化或提前 return，
+          // 界面就会停在"动作条还画着、_selecting 已经是 false"的不一致态。
+          // 挪到帧后统一应用，行为一样但不再依赖 build 的副作用。
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _exitSelection();
+          });
         }
 
         return Scaffold(

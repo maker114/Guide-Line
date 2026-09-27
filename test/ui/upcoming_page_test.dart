@@ -136,13 +136,13 @@ void main() {
 
     await openCalendar(tester, app);
 
-    final date = dateOffset(1);
-    final marks = taskMarksByDate(
-      app.ws.openTasks(),
-      (task) => app.ws.findEvent(task.eventId)?.color,
-      const Color(0xFF000000),
-    );
-    expect(marks.containsKey(date), isFalse, reason: '已完成不画环');
+    // 关键断言必须看**渲染结果**（T-4）：原来这里在本地调 `taskMarksByDate(openTasks())`
+    // 重算一遍 —— 那等于用生产函数自证，日历有没有真的接上 `openTasks()` 无人验证。
+    // 改成数圆环：那天只有一条"已完成"，所以那一格不该有环。
+    final rings = tester.widgetList<DayRing>(find.byType(DayRing));
+    final withRing = rings.where((r) => r.colors.isNotEmpty).length;
+    expect(withRing, 0, reason: '已完成的任务不画环（日历真的按"还开着"过滤了）');
+
     expect(find.textContaining('另有 1 条没排期'), findsOneWidget);
   });
 

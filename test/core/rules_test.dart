@@ -129,7 +129,6 @@ void main() {
         nodeId: 'root',
         newParentId: 'grand',
         maxDepth: 3,
-        crossEvent: false,
       );
       expect(check.allowed, isFalse);
     });

@@ -501,7 +501,6 @@ class Workspace {
         nodeId: id,
         newParentId: target,
         maxDepth: maxProjectDepth,
-        crossEvent: false,
       );
       if (!check.allowed) throw RuleViolation(check.reason ?? '不能移动');
     }
@@ -1717,7 +1716,6 @@ class Workspace {
       nodeId: id,
       newParentId: parent,
       maxDepth: maxTaskDepth,
-      crossEvent: false,
     );
     if (!check.allowed) throw RuleViolation(check.reason ?? '不能移动');
 

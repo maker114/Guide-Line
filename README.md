@@ -3,7 +3,7 @@
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
 当前形态是 **Android 单机版**，用 Flutter 写，数据全部留在你自己的手机上。
 
-当前版本 **1.5.1+25** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases)
+当前版本 **1.5.2+26** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 [它是什么](#它是什么) · [设计原则](#设计原则) · [功能](#功能) · [技术](#技术) · [快速开始](#快速开始) · [开发](#开发) · [文档](#文档)
 
@@ -187,6 +187,11 @@ flutter build apk --release # 产物 build/app/outputs/flutter-apk/app-release.a
 
 三份已完成的中间产物（《修改计划总表》《修改计划-已选定》《软件编辑-灵感整理》）
 已于 2026-09-27 从工作区移出，内容仍在 git 历史里，落点与状态已并入《决策索引》。
+
+## 许可
+
+[MIT](LICENSE) —— 可以自由使用、修改、分发，只需保留版权声明。
+Copyright (c) 2026 Maker114。
 
 ## 不做什么
 
