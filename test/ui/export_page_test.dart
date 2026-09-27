@@ -171,7 +171,7 @@ void main() {
 
     await openImportDialog(tester, app, bytes);
 
-    expect(find.textContaining('条数相当（前后都是 1 条）'), findsOneWidget);
+    expect(find.textContaining('条数相当，前后都是 1 条'), findsOneWidget);
   });
 
   testWidgets('整体替换的确认框指向「合并导入」入口，并给出替代做法', (tester) async {

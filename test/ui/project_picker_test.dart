@@ -65,7 +65,7 @@ void main() {
     await openPicker(tester, app, requireTarget: true);
 
     // 分类行明说"这里不装灵感"
-    expect(find.text('分类（不装灵感）'), findsOneWidget);
+    expect(find.text('分类，这里不装灵感'), findsOneWidget);
     expect(find.text('工作'), findsOneWidget);
     expect(find.text('发布 v1'), findsOneWidget);
 
@@ -85,7 +85,7 @@ void main() {
     final app = await boot();
     await openPicker(tester, app, requireTarget: false);
 
-    expect(find.text('分类（不装灵感）'), findsNothing, reason: '移动侧不拦分类');
+    expect(find.text('分类，这里不装灵感'), findsNothing, reason: '移动侧不拦分类');
 
     await tester.tap(find.text('工作'));
     await tester.pumpAndSettle();

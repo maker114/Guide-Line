@@ -74,8 +74,8 @@ void main() {
     await openMergeEditor(tester, app, '项目甲', '这条灵感要合并');
 
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
-    expect(find.text('如何解决（可编辑）'), findsOneWidget);
-    expect(find.text('实现计划（可编辑）'), findsNothing, reason: 'Q4：字段改称「如何解决」');
+    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
+    expect(find.text('实现计划 · 可编辑'), findsNothing, reason: 'Q4：字段改称「如何解决」');
     expect(editorText(tester), '已有的计划\n第二行');
   });
 
@@ -189,7 +189,7 @@ void main() {
       findsOneWidget,
     );
     // 留在这一页、不写盘、灵感仍是待处理 —— 不能"报成功却什么都没多"
-    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
     expect(app.ws.findProject(project.id)!.implementation, '原封不动的计划');
     expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
     expect(app.ws.archiveZone.mergedInspirations, isEmpty);
@@ -270,7 +270,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 三个选择都在，且没有溢出（溢出会以 FlutterError 的形式让这条用例失败）
-    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
     expect(find.text('追加原文'), findsOneWidget);
     expect(find.text('作为清单条目'), findsOneWidget);
   });
@@ -293,7 +293,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // "这次并的是哪几条"：条数写进标题、原文按顺序列出来，多条默认展开
-    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
+    expect(find.text('灵感原文 · 参考 2 条'), findsOneWidget);
     expect(find.text('第一条原文'), findsOneWidget);
     expect(find.text('第二条原文'), findsOneWidget);
     expect(
@@ -314,7 +314,7 @@ void main() {
   });
 
   testWidgets('多条 + 深色 + 1.6 倍字体、窄屏下这一页也不溢出（Q37）', (tester) async {
-    // 多条一起并时「灵感原文（参考）」默认展开（多一块固定高度），最容易挤爆布局
+    // 多条一起并时「灵感原文 · 参考」默认展开（多一块固定高度），最容易挤爆布局
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
@@ -342,10 +342,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
     expect(find.text('追加原文'), findsOneWidget);
     expect(find.text('作为清单条目'), findsOneWidget);
-    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
+    expect(find.text('灵感原文 · 参考 2 条'), findsOneWidget);
   });
 
   testWidgets('分类不装灵感：给分类打开这一页时不给任何合并动作，只说明原因', (tester) async {
@@ -370,7 +370,7 @@ void main() {
     expect(find.text('追加原文'), findsNothing);
     expect(find.text('作为清单条目'), findsNothing, reason: '分类也没有实现清单');
     // 原文还是要看得到：用户得知道自己手上这条是什么
-    expect(find.text('灵感原文（参考）'), findsOneWidget);
+    expect(find.text('灵感原文 · 参考'), findsOneWidget);
   });
 
   testWidgets('落盘那一步也挡分类：applyMergeResult 不会把灵感并进分类', (tester) async {

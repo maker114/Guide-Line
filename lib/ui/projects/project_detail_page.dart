@@ -614,7 +614,7 @@ class _IconActions extends StatelessWidget {
         _ClearableIcon(
           tooltip: color == null
               ? '标识色：点一下选'
-              : '标识色 ${project.color}（长按清除）',
+              : '标识色 ${project.color}，长按可清除',
           icon: Icons.palette_outlined,
           color: color ?? theme.colorScheme.onSurfaceVariant,
           hasValue: color != null,
@@ -625,7 +625,7 @@ class _IconActions extends StatelessWidget {
           _ClearableIcon(
             tooltip: !hasDate
                 ? '日期：点一下选'
-                : '日期 ${describeDateWithDays(project.date)}（长按清除）',
+                : '日期 ${describeDateWithDays(project.date)}，长按可清除',
             icon: hasDate ? Icons.event_available_outlined : Icons.event_outlined,
             color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
             hasValue: hasDate,

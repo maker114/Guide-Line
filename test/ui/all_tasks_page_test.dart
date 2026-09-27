@@ -47,7 +47,7 @@ void main() {
     expect(find.text('按完成度'), findsOneWidget);
     expect(find.text('按事件'), findsOneWidget);
     expect(find.text('按紧迫度'), findsOneWidget);
-    expect(find.text('共 1 条（含子任务）'), findsOneWidget);
+    expect(find.text('共 1 条，含子任务'), findsOneWidget);
   });
 
   testWidgets('任务行：完成圆钮在左，到期日靠右在第二行，第一行只有任务名，没有箭头', (tester) async {

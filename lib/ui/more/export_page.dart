@@ -68,7 +68,7 @@ class _ExportPageState extends State<ExportPage> {
                             child: Text(
                               last == null
                                   ? '还没有导出过'
-                                  : '上次导出：${formatTimestamp(last)}（${relativeTime(last)}）',
+                                  : '上次导出：${formatTimestamp(last)}，${relativeTime(last)}',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: app.exportOverdue ? theme.colorScheme.error : null,
                               ),
@@ -91,7 +91,7 @@ class _ExportPageState extends State<ExportPage> {
               ListTile(
                 leading: const Icon(Icons.ios_share),
                 title: const Text('导出并分享'),
-                subtitle: const Text('导出为 .json.gz 后交给系统分享（微信 / 邮件 / 网盘 / 电脑）'),
+                subtitle: const Text('导出为 .json.gz，再交给系统分享：微信 / 邮件 / 网盘 / 电脑'),
                 enabled: !_busy,
                 onTap: _busy ? null : () => _export(context),
               ),
@@ -119,7 +119,7 @@ class _ExportPageState extends State<ExportPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Text('说明', style: theme.textTheme.labelLarge),
               ),
-              const _Bullet('导出内容是全部四类记录（含已归档与回收站），不含界面偏好。'),
+              const _Bullet('导出内容是全部四类记录，含已归档与回收站；不含界面偏好。'),
               const _Bullet('文件名形如 guideline-20260923-134500.json.gz，gzip 压缩的 JSON，'
                   '每条记录的字段与《数据契约》完全一致。'),
               const _Bullet('「从文件导入」是整体替换：文件里有什么，这台手机就变成什么；'
@@ -129,7 +129,7 @@ class _ExportPageState extends State<ExportPage> {
                   '合并前同样会先留一份备份。'),
               const _Bullet('导出文件只写在应用私有目录，分享时由系统按次授权给目标 App 读取，'
                   '不需要存储权限，也不会被别的 App 扫到。'),
-              const _Bullet('电脑端导出的旧格式（v1 四文档信封）也能直接导入。'),
+              const _Bullet('电脑端导出的旧格式也能直接导入，指 v1 的四文档信封。'),
             ],
           ),
         );
@@ -247,7 +247,7 @@ class _ExportPageState extends State<ExportPage> {
 
     final ok = await confirmAction(
       context,
-      title: '合并导入（两份并成一份）',
+      title: '合并导入：两份并成一份',
       message: _mergePreviewText(picked.file.name, picked.payload.exportedAt, report),
       confirmLabel: '合并',
       danger: true,
@@ -303,11 +303,11 @@ String _countsText(_LiveCounts counts) =>
 /// 净变化那一句 —— 用户最需要的其实是"会不会少东西"。
 String _netChangeText(int currentTotal, int incomingTotal) {
   final delta = incomingTotal - currentTotal;
-  if (delta == 0) return '条数相当（前后都是 $currentTotal 条）';
+  if (delta == 0) return '条数相当，前后都是 $currentTotal 条';
   if (delta < 0) {
-    return '总条数将减少 ${-delta} 条（$currentTotal → $incomingTotal）';
+    return '总条数将减少 ${-delta} 条：$currentTotal → $incomingTotal';
   }
-  return '总条数将增加 $delta 条（$currentTotal → $incomingTotal）';
+  return '总条数将增加 $delta 条：$currentTotal → $incomingTotal';
 }
 
 /// 「合并导入」预览正文 —— 用户点确认之前能看到的**全部**信息就是它。
@@ -345,7 +345,7 @@ String _mergePreviewText(String fileName, int? exportedAt, MergeReport report) {
   if (report.duplicatesCollapsed > 0) {
     lines.add('文件里有 ${report.duplicatesCollapsed} 条同 id 的重复记录，已折叠，只认第一条。');
   }
-  lines.add('合并前当前数据会先整体轮转进备份（滚动只留 10 份），想退回要尽快。');
+  lines.add('合并前当前数据会先整体轮转进备份，滚动只留 10 份，想退回要尽快。');
   return lines.join('\n');
 }
 

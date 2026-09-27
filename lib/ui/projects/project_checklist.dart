@@ -306,7 +306,7 @@ class _ItemRow extends StatelessWidget {
     if (messenger == null) return;
     messenger.showSnackBar(
       SnackBar(
-        content: Text('已建成任务：$eventName（清单条目留着）'),
+        content: Text('已建成任务：$eventName，清单条目留着'),
         action: SnackBarAction(
           label: '去看看',
           onPressed: () {

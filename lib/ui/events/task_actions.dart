@@ -158,7 +158,7 @@ Future<void> changeTaskParentAction(
     showToast(context, error, error: true);
     return;
   }
-  showToast(context, parentId == null ? '已提到主线（排在末尾）' : '已挂到节点下');
+  showToast(context, parentId == null ? '已提到主线，排在末尾' : '已挂到节点下');
 }
 
 /// "提到主线"在面板里的返回值。事件 id 是 UUID，不会与它撞上。
@@ -226,7 +226,7 @@ Future<bool> batchArchiveTasksAction(
     showToast(context, error, error: true);
     return false;
   }
-  showToast(context, '已归档 ${impact.length} 条（含子任务）');
+  showToast(context, '已归档 ${impact.length} 条，子任务一并归档');
   return true;
 }
 
@@ -344,7 +344,7 @@ Future<void> archiveTaskAction(
     showToast(context, error, error: true);
     return;
   }
-  showToast(context, archived ? '已归档（级联子任务）' : '已取消归档');
+  showToast(context, archived ? '已归档，子任务一并归档' : '已取消归档');
 }
 
 Future<void> deleteTaskAction(

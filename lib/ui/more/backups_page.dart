@@ -42,7 +42,7 @@ class BackupsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.backup_outlined),
                 title: const Text('立即备份一份'),
-                subtitle: const Text('把当前数据写入主文件，并立刻轮转出一份备份（不等最小间隔）'),
+                subtitle: const Text('把当前数据写入主文件，并立刻轮转出一份备份，不等最小间隔'),
                 onTap: () => _snapshot(context),
               ),
               Padding(

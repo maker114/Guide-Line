@@ -133,7 +133,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                   children: <Widget>[
                     Text(
                       // 多选状态**统一写「已选 N 条」**（《界面规范》§7）
-                      _selecting ? '已选 ${_selectedIds.length} 条' : '共 ${tasks.length} 条（含子任务）',
+                      _selecting ? '已选 ${_selectedIds.length} 条' : '共 ${tasks.length} 条，含子任务',
                       style: theme.textTheme.labelSmall,
                     ),
                     const Spacer(),
@@ -228,7 +228,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
         groups = groupByEvent(
           tasks,
           app.ws.liveEvents,
-          (eventId) => app.ws.findEvent(eventId)?.name ?? '（事件已删除）',
+          (eventId) => app.ws.findEvent(eventId)?.name ?? '事件已删除',
         );
       case TaskGrouping.urgency:
         groups = groupByUrgency(tasks);

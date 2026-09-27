@@ -252,7 +252,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     IconButton(
                       tooltip: event.color == null
                           ? '标识色：点一下选'
-                          : '标识色 ${event.color}（长按清除）',
+                          : '标识色 ${event.color}，长按可清除',
                       icon: Icon(
                         Icons.palette_outlined,
                         color: colorOfHex(event.color) ?? Theme.of(context).colorScheme.onSurfaceVariant,
@@ -292,11 +292,11 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         ),
                         PopupMenuItem<String>(
                           value: 'archive',
-                          child: Text('归档（含任务线）'),
+                          child: Text('归档整条任务线'),
                         ),
                         PopupMenuItem<String>(
                           value: 'delete',
-                          child: Text('删除（含任务线）'),
+                          child: Text('删除整条任务线'),
                         ),
                       ],
                     ),
@@ -377,7 +377,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
       title: '删除事件',
       message: taskCount == 0
           ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
-          : '「${event.name}」及其整条任务线（$taskCount 个任务）会被一起删除。'
+          : '「${event.name}」及其整条任务线共 $taskCount 个任务会被一起删除。'
                 '可在「更多 → 归档区 → 回收站」恢复。',
       confirmLabel: '删除',
       danger: true,
@@ -426,7 +426,7 @@ class _EventHeader extends StatelessWidget {
               completion.judgedChildCount == 0
                   ? '主线还没有可判定的任务'
                   : '主线 $done/${completion.judgedChildCount} 已完成'
-                        '${completion.canComplete ? '（可以标记事件完成）' : ''}',
+                        '${completion.canComplete ? '，可以标记事件完成了' : ''}',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 8),
@@ -781,7 +781,7 @@ class _TaskLine extends StatelessWidget {
           _TaskIcon(
             tooltip: task.dueAt == null
                 ? '设到期日'
-                : '到期 ${task.dueAt}（长按清除）',
+                : '到期 ${task.dueAt}，长按可清除',
             icon: task.dueAt == null ? Icons.event_outlined : Icons.event_available_outlined,
             color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
             clearable: task.dueAt != null,
@@ -983,8 +983,8 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
   actions.add(
     task.archived
         ? const TaskAction('unarchive', '取消归档', Icons.unarchive_outlined)
-        : const TaskAction('archive', '归档（含子任务）', Icons.archive_outlined),
+        : const TaskAction('archive', '归档这条及其子任务', Icons.archive_outlined),
   );
-  actions.add(const TaskAction('delete', '删除（含子任务）', Icons.delete_outline));
+  actions.add(const TaskAction('delete', '删除这条及其子任务', Icons.delete_outline));
   return actions;
 }

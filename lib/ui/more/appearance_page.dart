@@ -70,7 +70,7 @@ class _AppearancePageState extends State<AppearancePage> {
                     : null,
               ),
 
-              const SectionHeader('背景图（实验性）'),
+              const SectionHeader('背景图 · 实验性'),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text(
@@ -182,7 +182,7 @@ class _AppearancePageState extends State<AppearancePage> {
     }
     showToast(
       context,
-      seedHex == null ? '已设置背景图（没能取到主色）' : '已设置背景图，主色 $seedHex',
+      seedHex == null ? '已设置背景图，没能取到主色' : '已设置背景图，主色 $seedHex',
     );
   }
 }

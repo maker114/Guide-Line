@@ -69,7 +69,7 @@ void main() {
 
     expect(find.text('删除项目'), findsWidgets);
     expect(
-      find.textContaining('这 2 条未处理灵感（含已经丢弃、还没恢复的）会被永久删除'),
+      find.textContaining('这 2 条未处理灵感会被永久删除，含已经丢弃、还没恢复的那些'),
       findsOneWidget,
       reason: '丢弃过的那条同样是"未处理"，也留不下来',
     );

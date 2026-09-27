@@ -932,7 +932,7 @@ class _AppShellState extends State<AppShell> {
       applicationName: AppInfo.displayName,
       applicationVersion: AppInfo.versionLabel,
       children: <Widget>[
-        const Text('本地优先的个人生活管理工具（单机版）。'),
+        const Text('本地优先的个人生活管理工具，Android 单机版。'),
         const SizedBox(height: 8),
         Text('数据目录：${widget.app.dataDirectory.path}'),
       ],

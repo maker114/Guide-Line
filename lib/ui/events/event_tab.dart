@@ -179,7 +179,7 @@ class _EventTabState extends State<EventTab> {
           padding: const EdgeInsets.fromLTRB(40, 0, 12, 10),
           child: Text(
             archivedCount > 0
-                ? '主线节点都归档了（$archivedCount 个）—— 显示与判定同一套取数，'
+                ? '主线节点都归档了，共 $archivedCount 个 —— 显示与判定同一套取数，'
                     '已归档的不画在任务线上；去「更多 → 归档区 → 已归档」取消归档'
                 : '还没有主线任务 —— 点开这条事件去加第一个节点',
             style: Theme.of(context).textTheme.labelSmall,
@@ -358,7 +358,7 @@ class _EventCardHeader extends StatelessWidget {
               if (!context.mounted) return;
               showToast(
                 context,
-                error ?? '已归档，整条任务线一起归档（可在「归档区」找回）',
+                error ?? '已归档，整条任务线一起归档；可在「归档区」找回',
                 error: error != null,
               );
               break;
@@ -373,8 +373,8 @@ class _EventCardHeader extends StatelessWidget {
           // 与任务侧的"往上 / 往下挪一格"是同一件事、同一套叫法（交换相邻 order）。
           PopupMenuItem<String>(value: 'moveUp', child: Text('往上挪一格')),
           PopupMenuItem<String>(value: 'moveDown', child: Text('往下挪一格')),
-          PopupMenuItem<String>(value: 'archive', child: Text('归档（含任务线）')),
-          PopupMenuItem<String>(value: 'delete', child: Text('删除（含任务线）')),
+          PopupMenuItem<String>(value: 'archive', child: Text('归档整条任务线')),
+          PopupMenuItem<String>(value: 'delete', child: Text('删除整条任务线')),
         ],
       ),
       onTap: () => Navigator.of(context).push<void>(
@@ -405,7 +405,7 @@ class _EventCardHeader extends StatelessWidget {
       title: '删除事件',
       message: taskCount == 0
           ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
-          : '「${event.name}」及其整条任务线（$taskCount 个任务）会被一起删除。'
+          : '「${event.name}」及其整条任务线共 $taskCount 个任务会被一起删除。'
                 '可在「更多 → 归档区 → 回收站」恢复。',
       confirmLabel: '删除',
       danger: true,

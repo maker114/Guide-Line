@@ -132,7 +132,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
     final text = _implementation.text.trim();
     if (text.isEmpty) {
       // 空正文会把「如何解决」清没，业务层同样会拒；提示留在这一页更近
-      showToast(context, '正文不能是空的（想只留清单条目就用「作为清单条目」）', error: true);
+      showToast(context, '正文不能是空的；想只留清单条目就用「作为清单条目」', error: true);
       return;
     }
     if (text == widget.project.implementation.trim()) {
@@ -210,7 +210,17 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 6),
             child: Row(
               children: <Widget>[
-                Text('如何解决（可编辑）', style: theme.textTheme.labelLarge),
+                // 标题**必须能缩**（`Flexible` + 省略号）：「追加原文」是固定宽度的按钮，
+                // 标题一旦比剩余宽度长就会把整行顶出去 —— 深色 + 1.6 倍字体 + 窄屏下
+                // 实测溢出 19px（改文案时字数变多就会踩到，与文案好坏无关）。
+                Flexible(
+                  child: Text(
+                    '如何解决 · 可编辑',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelLarge,
+                  ),
+                ),
                 const Spacer(),
                 // 「追加原文」：不做润色、也不直接写盘 —— 用户还能在保存前再调一下
                 TextButton.icon(
@@ -263,10 +273,10 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
             child: Text(
               '「追加原文」和手改都走「保存」：保存后项目正文更新，$_subject从灵感箱消失。'
               '「作为清单条目」不碰正文，直接把原文追加成清单的新'
-              '${widget.inspirations.length > 1 ? '若干条（一条灵感一条）' : '一条'}'
-              '（上面没保存的改动不会写回）。'
+              '${widget.inspirations.length > 1 ? '若干条，一条灵感一条' : '一条'}'
+              '；上面没保存的改动不会写回。'
               '两种情况都能在「更多 → 归档区 → 已合并」里「恢复为待处理」—— '
-              '但项目里的内容不会退回（已经写进去的那一行 / 那条不会消失）。',
+              '但项目里的内容不会退回，已经写进去的那一行或那条不会消失。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -302,7 +312,7 @@ class _ReferencePanel extends StatelessWidget {
             leading: const Icon(Icons.lightbulb_outline, size: 18),
             // 多条时把条数写进标题：用户得先知道"这次并的是几条"
             title: Text(
-              many ? '灵感原文（参考 · ${texts.length} 条）' : '灵感原文（参考）',
+              many ? '灵感原文 · 参考 ${texts.length} 条' : '灵感原文 · 参考',
               style: theme.textTheme.labelLarge,
             ),
             trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),

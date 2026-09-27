@@ -228,7 +228,7 @@ class InspirationTabState extends State<InspirationTab> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '另有 $hiddenCount 条在已归档项目下（去归档区看）',
+                        '另有 $hiddenCount 条在已归档项目下，去归档区看',
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
                     ),
@@ -246,7 +246,7 @@ class InspirationTabState extends State<InspirationTab> {
                       // 全被归档项目遮住时，"空"是**算出来的空**：不说清楚，
                       // 用户会以为灵感没了（Q10）
                       hint: hiddenCount > 0
-                          ? '另有 $hiddenCount 条在已归档项目下（去归档区看）'
+                          ? '另有 $hiddenCount 条在已归档项目下，去归档区看'
                           : '上面那个框随手写一句就行 —— 归到哪个项目，是以后才要操心的事',
                     )
                   // 箱子不空、只是被筛掉了：必须说清"一共还有多少条"，
@@ -454,7 +454,7 @@ class InspirationTabState extends State<InspirationTab> {
       widget.app,
       title: '这条灵感归到哪个项目',
       allowNone: true,
-      noneLabel: '（不分配）',
+      noneLabel: '不分配项目',
     );
     if (picked == null || !mounted) return;
     setState(() => _captureProjectId = picked == pickNone ? null : picked);
@@ -649,7 +649,7 @@ class InspirationTabState extends State<InspirationTab> {
       widget.app,
       title: '分配到项目',
       allowNone: true,
-      noneLabel: '（解除分配）',
+      noneLabel: '解除分配',
     );
     if (picked == null || !context.mounted) return;
     final projectId = picked == pickNone ? null : picked;
@@ -775,7 +775,7 @@ class InspirationTabState extends State<InspirationTab> {
         _captureProjectId != _selectedProjectId;
     final hiddenByTag = _filterTag != null && !tags.contains(_filterTag);
     if ((hiddenByProject || hiddenByTag) && mounted) {
-      showToast(context, '已记下，但它不在当前筛选里（清除筛选就能看到）');
+      showToast(context, '已记下，但被当前筛选挡住了，清除筛选就能看到');
     }
   }
 }
@@ -940,7 +940,7 @@ class _InspirationTile extends StatelessWidget {
                   app,
                   title: '分配到项目',
                   allowNone: true,
-                  noneLabel: '（解除分配）',
+                  noneLabel: '解除分配',
                 );
                 if (picked == null || !context.mounted) return;
                 final projectId = picked == pickNone ? null : picked;

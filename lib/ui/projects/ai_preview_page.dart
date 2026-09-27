@@ -129,7 +129,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
               _applied
                   ? '已写入。写入前的那一版正文已留档，想反悔就点上面的「退回上一版」——'
                       '留档只值一次反悔，退回后即销掉。'
-                  : '写入会覆盖原来的「如何解决」（清单条目不动），写入前会自动留一份旧版。',
+                  : '写入会覆盖原来的「如何解决」，清单条目不动；写入前会自动留一份旧版。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -203,7 +203,7 @@ Future<void> startAiSummarize(
   // 总开关关着时不该走到这里（入口已经藏了），但别把"点了没反应"留成可能：
   // 真被调到就明说去哪儿打开。
   if (!app.aiEnabled) {
-    showToast(context, 'AI 整理已关闭（在「更多 → AI 整理」里打开）', error: true);
+    showToast(context, 'AI 整理已关闭，去「更多 → AI 整理」里打开', error: true);
     return;
   }
 
@@ -213,7 +213,7 @@ Future<void> startAiSummarize(
     final goSettings = await confirmAction(
       context,
       title: '还没配好 AI',
-      message: '$reason。\n\n去设置里填 API 地址与 Key？（Key 存在系统安全存储里，不会进备份或导出）',
+      message: '$reason。\n\n去设置里填 API 地址与 Key 吗？Key 存在系统安全存储里，不会进备份或导出',
       confirmLabel: '去设置',
     );
     if (goSettings && context.mounted) {

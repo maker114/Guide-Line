@@ -122,8 +122,8 @@ class _ArchivedPane extends StatelessWidget {
       // 「单独归档的子任务也能在这里找回」必须写出来（Q18）：任务线里现在
       // **不显示**已归档节点（显示与判定同一套取数），用户点进去会以为它没了；
       // 它还在，只是搬到了这里。归档的子任务若父节点还活着，它就是归档根，列在这儿。
-      note: '只列「归档根」——父节点也归档的不重复列出；取消归档会沿树级联恢复。'
-          '单独归档的子任务也能在这里找回（任务线里不再显示已归档的节点）。',
+      note: '只列「归档根」，父节点也归档的不重复列出；取消归档会沿树级联恢复。'
+          '单独归档的子任务也能在这里找回，任务线里不再显示已归档的节点。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -222,7 +222,7 @@ class _InspirationPane extends StatelessWidget {
                       showToast(context, error, error: true);
                       return;
                     }
-                    showToast(context, '已恢复为待处理（项目里的内容不会退回）');
+                    showToast(context, '已恢复为待处理，项目里的内容不会退回');
                   } else {
                     final error = app.run(() => app.ws.restoreInspiration(inspiration.id));
                     if (error != null) {
@@ -240,7 +240,7 @@ class _InspirationPane extends StatelessWidget {
                   value: 'restore',
                   // 名字里就把代价写出来（Q9）：这个动作**不回滚项目内容**，
                   // 只把灵感放回待处理。叫"撤销合并"会让人以为项目也一起退回去了。
-                  child: Text(merged ? '恢复为待处理（项目里的内容不会退回）' : '恢复为待处理'),
+                  child: Text(merged ? '恢复为待处理，项目内容不退回' : '恢复为待处理'),
                 ),
                 const PopupMenuItem<String>(value: 'purge', child: Text('彻底删除')),
               ],
@@ -279,9 +279,9 @@ class _TrashPane extends StatelessWidget {
     return _Pane(
       // 到期清理发生在**启动时**，不是"到点就删"：应用没运行时没有任何东西在跑。
       // 这句必须写出来，否则用户会以为"还有 3 天"是精确到秒的倒计时。
-      note: '只列「级联根」——恢复会连同被一起删掉的下级一起回来。'
-          '每条只保留 $trashRetentionDays 天，到期的条目会在下次启动时自动清除'
-          '（「彻底删除」不可撤销）。',
+      note: '只列「级联根」，恢复会连同被一起删掉的下级一起回来。'
+          '每条只保留 $trashRetentionDays 天，到期的条目会在下次启动时自动清除。'
+          '「彻底删除」不可撤销。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,
@@ -336,8 +336,8 @@ class _TrashPane extends StatelessWidget {
 String _restoreScopeLabel(Entity entity, DocName doc, int total) {
   final name = entityTitle(entity);
   if (total <= 1) return name;
-  if (doc == DocName.events) return '$name（含整条任务线，共 $total 条）';
-  return '$name（含下级，共 $total 条）';
+  if (doc == DocName.events) return '$name，含整条任务线共 $total 条';
+  return '$name，含下级共 $total 条';
 }
 
 // ---------------------------------------------------------------- 被隐藏

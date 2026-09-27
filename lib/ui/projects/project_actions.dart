@@ -89,8 +89,8 @@ Future<void> deleteProjectAction(
     // （`planProjectDeletion` 只看"是否已合并"，不看 discarded），
     // 所以文案必须把这一层说出来，否则用户会以为丢弃过的那些不受影响。
     lines.add(
-      '这 ${plan.inspirationIdsToDelete.length} 条未处理灵感（含已经丢弃、还没恢复的）'
-      '会被永久删除，不进回收站 —— 只能靠备份与历次导出找回。',
+      '这 ${plan.inspirationIdsToDelete.length} 条未处理灵感会被永久删除，'
+      '含已经丢弃、还没恢复的那些。它们不进回收站 —— 只能靠备份与历次导出找回。',
     );
   }
 

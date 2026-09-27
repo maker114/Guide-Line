@@ -148,7 +148,7 @@ void main() {
 
     expect(find.textContaining('已恢复：被删的事件'), findsOneWidget);
     expect(
-      find.textContaining('含整条任务线，共 3 条'),
+      find.textContaining('含整条任务线共 3 条'),
       findsOneWidget,
       reason: '只说一个名字，用户会以为两条任务还留在回收站里',
     );
@@ -173,7 +173,7 @@ void main() {
     expect(find.text('已恢复：孤单的项目'), findsOneWidget);
   });
 
-  testWidgets('「已合并」的动作叫「恢复为待处理（项目里的内容不会退回）」（Q9）', (tester) async {
+  testWidgets('「已合并」的动作叫「恢复为待处理，项目内容不退回」（Q9）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '目标项目');
     final inspiration = app.ws.captureInspiration('合并掉的灵感', projectId: project.id);
@@ -196,16 +196,16 @@ void main() {
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
     expect(
-      find.text('恢复为待处理（项目里的内容不会退回）'),
+      find.text('恢复为待处理，项目内容不退回'),
       findsOneWidget,
       reason: '叫"撤销合并"会让人以为项目里那条也一起退回去了',
     );
     expect(find.text('撤销合并'), findsNothing);
 
-    await tester.tap(find.text('恢复为待处理（项目里的内容不会退回）'));
+    await tester.tap(find.text('恢复为待处理，项目内容不退回'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('已恢复为待处理（项目里的内容不会退回）'), findsOneWidget);
+    expect(find.textContaining('已恢复为待处理，项目里的内容不会退回'), findsOneWidget);
     expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
     expect(
       app.ws.findProject(project.id)!.implementation,

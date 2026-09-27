@@ -42,19 +42,19 @@ class MoreTab extends StatelessWidget {
         _MoreItem(
           icon: Icons.upcoming_outlined,
           title: '接下来的任务',
-          subtitle: upcoming == 0 ? '现在没有待办' : '接下来 $upcoming 条待办（含没排期的）',
+          subtitle: upcoming == 0 ? '现在没有待办' : '接下来 $upcoming 条待办，含没排期的',
           page: UpcomingTasksPage(app: app),
         ),
         _MoreItem(
           icon: Icons.checklist_outlined,
           title: '全部任务',
-          subtitle: '当前 ${app.taskCount} 条（含子任务）',
+          subtitle: '当前 ${app.taskCount} 条，含子任务',
           page: AllTasksPage(app: app),
         ),
         _MoreItem(
           icon: Icons.search,
           title: '搜索',
-          subtitle: '$searchable 条内容可搜（不含已归档）',
+          subtitle: '$searchable 条内容可搜，不含已归档',
           page: SearchPage(app: app),
         ),
         _MoreItem(
@@ -81,7 +81,7 @@ class MoreTab extends StatelessWidget {
         _MoreItem(
           icon: Icons.history,
           title: '备份与恢复',
-          subtitle: '${backups.length} 份可用备份（滚动保留 10 份 + 日快照 7 天）',
+          subtitle: '${backups.length} 份可用备份，滚动留 10 份、日快照留 7 天',
           page: BackupsPage(app: app),
         ),
         _MoreItem(
@@ -100,7 +100,7 @@ class MoreTab extends StatelessWidget {
         const ListTile(
           leading: Icon(Icons.info_outline),
           title: Text('版本'),
-          subtitle: Text('${AppInfo.versionLabel}（Android 单机版）'),
+          subtitle: Text('${AppInfo.versionLabel} · Android 单机版'),
         ),
       ],
     );
@@ -150,7 +150,7 @@ class MoreTab extends StatelessWidget {
         } else if (config.isConfigured) {
           text = '已配置 · ${config.model}';
         } else {
-          text = '未配置（${config.validate()}）';
+          text = '未配置：${config.validate()}';
         }
         return Text(text, style: Theme.of(context).textTheme.bodySmall);
       },

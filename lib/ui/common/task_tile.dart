@@ -72,7 +72,7 @@ class TaskTile extends StatelessWidget {
                 const SizedBox(width: 5),
                 Flexible(
                   child: Text(
-                    event?.name ?? '（事件已删除）',
+                    event?.name ?? '事件已删除',
                     style: labelStyle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

@@ -30,7 +30,7 @@ Future<String?> pickProject(
   AppController app, {
   required String title,
   bool allowNone = false,
-  String noneLabel = '（不选 / 移到根）',
+  String noneLabel = '不选，或移到根层',
   String? excludeSubtreeOf,
   bool requireTarget = true,
 }) {
@@ -100,7 +100,7 @@ Future<String?> pickProject(
                       // 分类明说"这里不装灵感"，一眼能看出该往下选目标。
                       // **刻意不置 `enabled: false`**：禁用的行点不动，也就给不出
                       // "为什么不能选"的解释 —— 这里要让点它的人收到一句提示。
-                      subtitle: blocked(entry.key) ? const Text('分类（不装灵感）') : null,
+                      subtitle: blocked(entry.key) ? const Text('分类，这里不装灵感') : null,
                       onTap: () {
                         if (blocked(entry.key)) {
                           showToast(sheetContext, categoryNotForInspiration, error: true);

@@ -91,7 +91,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('启用 AI 整理'), findsOneWidget);
-    expect(find.text('已保存（重新输入可替换）'), findsOneWidget, reason: 'Key 已经存着');
+    expect(find.text('已保存，重新输入可替换'), findsOneWidget, reason: 'Key 已经存着');
 
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();

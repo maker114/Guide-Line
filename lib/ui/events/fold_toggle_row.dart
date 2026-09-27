@@ -50,7 +50,7 @@ class FoldToggleRow extends StatelessWidget {
               child: Text(
                 expanded
                     ? '收起已完成节点'
-                    : '另有 $hiddenCount 个已完成节点（点开看全过程）',
+                    : '另有 $hiddenCount 个已完成节点，点开看全过程',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.labelSmall?.copyWith(

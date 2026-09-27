@@ -88,7 +88,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   subtitle: Text(
                     widget.app.aiEnabled
                         ? '关掉后项目里不再出现 AI 整理入口；地址、模型与 Key 都保留'
-                        : '已关闭：项目里不显示 AI 整理入口（地址、模型与 Key 仍然保留）',
+                        : '已关闭：项目里不显示 AI 整理入口，地址、模型与 Key 仍然保留',
                     style: theme.textTheme.bodySmall,
                   ),
                   onChanged: (value) => setState(() => widget.app.setAiEnabled(value)),
@@ -110,7 +110,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   hint: AiConfig.defaultBaseUrl,
                   controller: _baseUrl,
                   helper: '填根地址即可，会自动补 /chat/completions；'
-                      '若已带路径也认得（含 /v1 这类版本前缀）',
+                      '带路径也认得，/v1 这类版本前缀可以留着',
                 ),
                 _Field(
                   label: '模型',
@@ -120,10 +120,10 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                 ),
                 _Field(
                   label: 'API Key',
-                  hint: _keyStored ? '已保存（重新输入可替换）' : '粘贴你的 Key',
+                  hint: _keyStored ? '已保存，重新输入可替换' : '粘贴你的 Key',
                   controller: _apiKey,
                   obscure: true,
-                  helper: '存在系统安全存储（Android Keystore）里，不进备份、不进导出',
+                  helper: '存在系统安全存储里，不进备份、不进导出',
                 ),
                 if (_keyStored)
                   Padding(
@@ -162,7 +162,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          '会真的发一次请求（只发一句测试文字，不含你的任何数据），'
+                          '会真的发一次请求，只发一句测试文字、不含你的任何数据；'
                           '但这一下不会保存 —— 存下来要按右上角「保存」',
                           style: theme.textTheme.labelSmall,
                         ),
@@ -198,7 +198,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       // 字段名三处一致（Q4）：项目详情页、这一页的说明、线上提示词
                       // （`ai_client.dart`）都写「有什么问题 / 思路」与「实现清单」。
                       _Bullet('项目名称、项目「有什么问题 / 思路」、清单里的条目文本与勾选状态'),
-                      _Bullet('还有一段固定的提示词（要求它只整理、不新增内容）'),
+                      _Bullet('还有一段固定的提示词，要求它只整理、不新增内容'),
                       const SizedBox(height: 12),
                       Text('不会发出去什么', style: theme.textTheme.labelLarge),
                       const SizedBox(height: 6),
@@ -286,7 +286,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       // 成功时补一句"还没保存"：不然用户会以为测通 = 存好了，
       // 关掉页面再回来发现地址还是旧的（这正是要避免的那类惊讶）。
       _testResult = result.ok
-          ? '${result.message}\n\n（这次只是试跑：上面的配置还没保存，按右上角「保存」才会写入）'
+          ? '${result.message}\n\n这次只是试跑：上面的配置还没保存，按右上角「保存」才会写入'
           : result.message;
     });
   }

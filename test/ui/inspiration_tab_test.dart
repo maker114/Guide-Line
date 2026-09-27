@@ -174,7 +174,7 @@ void main() {
 
     // 进了合并编辑器：标题带项目名，编辑框里**就是当前的「如何解决」**
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
-    expect(find.text('如何解决（可编辑）'), findsOneWidget);
+    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
     final field = tester.widget<TextField>(
       find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
     );
@@ -256,7 +256,7 @@ void main() {
 
     // 编辑器里要能看出"这次并的是哪几条"：多条按顺序列出来、默认展开
     expect(find.textContaining('合并进「目标项目」'), findsOneWidget);
-    expect(find.text('灵感原文（参考 · 2 条）'), findsOneWidget);
+    expect(find.text('灵感原文 · 参考 2 条'), findsOneWidget);
     expect(find.text(order[0]), findsOneWidget);
     expect(find.text(order[1]), findsOneWidget);
 
@@ -328,7 +328,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 分类行明说"不装灵感"：点它只给提示，不往下走
-    expect(find.text('分类（不装灵感）'), findsOneWidget);
+    expect(find.text('分类，这里不装灵感'), findsOneWidget);
     await tester.tap(find.text('工作').last);
     await tester.pumpAndSettle();
 

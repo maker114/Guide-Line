@@ -174,7 +174,7 @@ class _SearchPageState extends State<SearchPage> {
                             : shown.isEmpty
                                 ? '没有匹配的结果'
                                 : truncated
-                                    ? '命中 $searchHitLimit 条 · 只显示前 $searchHitLimit 条（还有更多）'
+                                    ? '命中 $searchHitLimit 条 · 只显示前 $searchHitLimit 条，还有更多'
                                     : '命中 ${shown.length} 条',
                         style: theme.textTheme.labelSmall,
                       ),
