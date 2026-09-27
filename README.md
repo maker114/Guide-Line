@@ -2,7 +2,7 @@
 
 本地优先的个人生活管理工具：**把「灵感」和「任务线」两条线管清楚**。
 当前形态是 **Android 单机版**，用 Flutter 写，数据全部留在你自己的手机上。
-当前版本 **1.5.0+24**，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)、发行包见
+当前版本 **1.5.1+25**，变更记录见 [`CHANGELOG.md`](CHANGELOG.md)、发行包见
 [Releases](https://github.com/maker114/Guide-Line/releases)。
 
 > 双端方案在服务器成本上卡住了，因此先把**单机体验**做扎实：
