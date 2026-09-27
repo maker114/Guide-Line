@@ -43,6 +43,12 @@ const double _navRadius = _navHeight / 2;
 /// 纵向让指示器与胶囊等高。
 const double _navOuterPadding = 0;
 
+/// 底栏距屏幕底边的空隙（`bottomNavigationBar` 那个 `Padding` 的下内边距）。
+///
+/// 速记胶囊要摆在底栏正上方，[导航栏][_navHeight] 与它两者共用这一个数
+/// —— 写两处迟早会漂。
+const double _navBottomPadding = 18;
+
 /// 底部导航条的**横向内边距**（左右各 20dp）。
 ///
 /// 右下角那个速记胶囊必须与底栏的一格**等宽**，所以它也得按同一个内边距算 ——
@@ -403,6 +409,94 @@ class AppBottomNav extends StatelessWidget {
   }
 }
 
+/// 速记胶囊**出现**的时长（2026-09-27 调整）。
+///
+/// 以前它挂在 `Scaffold.floatingActionButton` 槽位上，而 Scaffold 给 FAB 的入场是
+/// **写死的 250ms + `Curves.easeIn`，还会顺带转一下**（`_entranceTurnTween`；
+/// 那一下转动对**非圆形**的胶囊就是一次纵向压扁，实测高度会从 48 掉到 0.7 再弹回来）。
+/// 实机反馈"出现得太慢"，所以胶囊自己画、自己进场：短、只缩不放转、没有回弹。
+///
+/// 时长与底栏滑块（[_navSlideDuration] 220ms）的节奏对齐——**但只走前面一段**：
+/// 进场是"冒出来"，不该跟滑动一样长。
+const Duration _pillEntranceDuration = Duration(milliseconds: 130);
+
+/// 进场时从多小开始（1 = 原尺寸）。0.82 足够看出"冒出来"，又不会像弹窗。
+const double _pillEntranceScale = 0.82;
+
+/// 速记胶囊距**底栏顶边**的空隙（与 FAB 那个默认的 `kFloatingActionButtonMargin` 同值）。
+///
+/// 位置原来由 Scaffold 的 FAB 槽位算，现在自己摆，所以要自己把这个空隙加回去：
+/// 实测（360×780 逻辑屏）底栏顶边 y = 714、胶囊底边 y = 698，差正好 16。
+const double _pillMarginAboveNav = 16;
+
+/// 速记胶囊：按页号**自己进场**（见 [_pillEntranceDuration]）。
+///
+/// 为什么不留在 `Scaffold.floatingActionButton`：那个槽位的入场动画是写死的
+/// 250ms + 旋转（对胶囊就是把高度压一下再弹回来），无法从外面调速；
+/// 位置也不再由它算 —— 见 [_AppShellState] 里那个 `Positioned`。
+class _AnimatedCapturePill extends StatefulWidget {
+  const _AnimatedCapturePill({required this.visible, required this.onPressed});
+
+  final bool visible;
+  final VoidCallback onPressed;
+
+  @override
+  State<_AnimatedCapturePill> createState() => _AnimatedCapturePillState();
+}
+
+class _AnimatedCapturePillState extends State<_AnimatedCapturePill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _pillEntranceDuration,
+    reverseDuration: _pillEntranceDuration,
+    value: widget.visible ? 1 : 0,
+  );
+
+  /// 只取缓动后的**前半程**：`easeOutCubic` 在 0.6 处已经接近落位，
+  /// 进场"像是被甩出来的"，收尾干净（与底栏那套动效同一个口味）。
+  late final Animation<double> _progress = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutCubic,
+  );
+
+  @override
+  void didUpdateWidget(_AnimatedCapturePill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible == oldWidget.visible) return;
+    if (widget.visible) {
+      _controller.forward(from: 0);
+    } else {
+      // 退场**不播动画**：切到灵感页时这一页整个就是速记，再演一遍"收回去"
+      // 只是多一段要等的东西。
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !widget.visible,
+      child: FadeTransition(
+        opacity: _progress,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: _pillEntranceScale, end: 1).animate(_progress),
+          // 从**右下角**冒出来（它就在那个角），缩放锚点与位置一致才不"飘"
+          alignment: Alignment.bottomRight,
+          child: CapturePillButton(onPressed: widget.onPressed),
+        ),
+      ),
+    );
+  }
+}
+
+
 /// 右下角的**速记胶囊**（自绘，2026-09-26 批 B 第 ③ 项）。
 ///
 /// 形状尺寸与底栏那个"滑块"（`AppBottomNav` 的选中指示器）**一致**：
@@ -719,51 +813,70 @@ class _AppShellState extends State<AppShell> {
                 ),
             ],
           ),
-          body: Column(
+          body: Stack(
             children: <Widget>[
-              if (app.startupWarnings.isNotEmpty)
-                _WarningBanner(
-                  messages: app.startupWarnings,
-                  onTap: () => _showDataIncident(context, app),
-                ),
-              // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
-              // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
-              if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
-                _WarningBanner(
-                  messages: <String>[
-                    '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
-                  ],
-                  onDismiss: () => setState(() => _trashNoticeClosed = true),
-                ),
-              if (app.overdueCount > 0)
-                _DueBanner(count: app.overdueCount, app: app),
-              Expanded(
-                // 左右滑动切页：四个页签排成一排，滑动时底栏的胶囊跟着走。
-                // 每页包一层 `_KeepAlivePage`，切过去再切回来不丢状态
-                // （滚动位置、输入到一半的灵感、展开的项目/任务线）。
-                child: PageView(
-                  controller: _pages,
-                  onPageChanged: _onPageChanged,
-                  children: <Widget>[
-                    _KeepAlivePage(
-                      child: InspirationTab(key: _inspirationKey, app: app),
+              Column(
+                children: <Widget>[
+                  if (app.startupWarnings.isNotEmpty)
+                    _WarningBanner(
+                      messages: app.startupWarnings,
+                      onTap: () => _showDataIncident(context, app),
                     ),
-                    _KeepAlivePage(child: ProjectTab(app: app)),
-                    _KeepAlivePage(child: EventTab(app: app)),
-                    _KeepAlivePage(child: MoreTab(app: app)),
-                  ],
+                  // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
+                  // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
+                  if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
+                    _WarningBanner(
+                      messages: <String>[
+                        '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
+                      ],
+                      onDismiss: () => setState(() => _trashNoticeClosed = true),
+                    ),
+                  if (app.overdueCount > 0)
+                    _DueBanner(count: app.overdueCount, app: app),
+                  Expanded(
+                    // 左右滑动切页：四个页签排成一排，滑动时底栏的胶囊跟着走。
+                    // 每页包一层 `_KeepAlivePage`，切过去再切回来不丢状态
+                    // （滚动位置、输入到一半的灵感、展开的项目/任务线）。
+                    child: PageView(
+                      controller: _pages,
+                      onPageChanged: _onPageChanged,
+                      children: <Widget>[
+                        _KeepAlivePage(
+                          child: InspirationTab(key: _inspirationKey, app: app),
+                        ),
+                        _KeepAlivePage(child: ProjectTab(app: app)),
+                        _KeepAlivePage(child: EventTab(app: app)),
+                        _KeepAlivePage(child: MoreTab(app: app)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              // 速记按钮（2026-09-26 批 B 第 ③ 项）：**自绘的胶囊**，
+              // 形状尺寸与底栏的滑块一致（高 48、圆角 `_navRadius`、宽 = 一格）。
+              // 灵感页不显示（那一页整个就是速记）。
+              //
+              // 位置与入场动画**都自己来**（2026-09-27）：
+              //   · 位置：底栏顶边往上 [_pillMarginAboveNav]（原来交给 Scaffold 的
+              //     FAB 槽位算）。**body 的底边本来就在底栏顶边之上**（`Scaffold`
+              //     是这样摆 body 的），所以这里只需"底栏高度 + 底栏下缘 + 上边空隙"；
+              //     键盘弹起时 body 被再压上去，偏移里要加 `viewInsets.bottom`，
+              //     胶囊才不会落在键盘底下（FAB 槽位原本也是这个行为）。
+              //     **不要再减 `viewPadding.bottom`**：那一段是 `bottomNavigationBar`
+              //     自己避开的，body 已经不在它里面了 —— 减了会白抬一条系统栏的高度。
+              Positioned(
+                right: navHorizontalPadding,
+                bottom: MediaQuery.viewInsetsOf(context).bottom +
+                    _navHeight +
+                    _navBottomPadding +
+                    _pillMarginAboveNav,
+                child: _AnimatedCapturePill(
+                  visible: _index != 0,
+                  onPressed: _goCapture,
                 ),
               ),
             ],
           ),
-          // 速记按钮（2026-09-26 批 B 第 ③ 项）：**自绘的胶囊**，
-          // 形状尺寸与底栏的滑块一致（高 48、圆角 `_navRadius`、宽 = 一格）。
-          // 灵感页不显示（那一页整个就是速记）；位置与间距仍交给 `Scaffold`
-          // 的 `floatingActionButton` 槽位 —— 它本来就会把按钮抬到底栏**上方**，
-          // 不会压住底栏。点击行为不变：切到灵感页并聚焦速记框。
-          floatingActionButton: _index == 0
-              ? null
-              : CapturePillButton(onPressed: _goCapture),
           // 底部导航：**自绘的长条胶囊**。
           //
           // 为什么不用 `NavigationBar`（试过三版都不对）：
@@ -782,7 +895,7 @@ class _AppShellState extends State<AppShell> {
               navHorizontalPadding,
               0,
               navHorizontalPadding,
-              18,
+              _navBottomPadding,
             ),
             child: DecoratedBox(
               decoration: BoxDecoration(

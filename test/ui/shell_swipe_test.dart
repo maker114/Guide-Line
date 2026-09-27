@@ -240,6 +240,34 @@ void main() {
     );
   });
 
+  testWidgets('速记胶囊的出现要快、且不中途回弹（实机反馈"出现得太慢"）', (tester) async {
+    await boot(tester);
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+
+    // 每 20ms 量一次高度：进场途中**任何一帧都不许矮过头**。
+    // 挂在 Scaffold 的 FAB 槽位时它自带 250ms + 一次旋转（对胶囊就是纵向压扁），
+    // 实测高度会从 48 → 0.7 → 弹回 48，既慢又抖。
+    final heights = <double>[];
+    for (var i = 0; i < 8; i += 1) {
+      await tester.pump(const Duration(milliseconds: 20));
+      heights.add(tester.getRect(find.byType(CapturePillButton)).height);
+    }
+    expect(
+      heights.first,
+      greaterThan(24),
+      reason: '第一帧就该有实体（从 0 缩起来的"慢热"就是这次要修的）',
+    );
+    for (final h in heights) {
+      expect(h, greaterThan(24), reason: '进场途中不该出现"压扁"的帧：$heights');
+    }
+    expect(heights.last, closeTo(CapturePillButton.height, 0.5), reason: '160ms 内落位');
+
+    // 收尾（把动画跑完再退，免得测试框架说还有 ticker）
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('窄屏 + 1.6 倍字体：一格放不下就只画图标，但 tooltip 与语义标签仍是「速记」', (tester) async {
     // 360 × 780 逻辑像素（常见手机）；1.6 倍字体下一格只有 (360 − 40) / 4 = 80dp
     tester.view.physicalSize = const Size(1080, 2340);
