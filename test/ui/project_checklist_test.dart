@@ -10,7 +10,7 @@ import 'package:guideline/ui/projects/project_checklist.dart';
 
 import 'scroll_finders.dart';
 
-/// 项目「实现」清单的界面接线（设计文档 §1.3）：
+/// 项目「实现」清单的界面接线（《数据契约》§3.2.1）：
 ///   · 清单与正文并存，两块的入口都在项目详情页；
 ///   · 加条目、打勾、删条目都真的改了数据；
 ///   · 「从正文拆成条目」把正文按行拆开，且正文本身不动；

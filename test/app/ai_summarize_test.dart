@@ -42,7 +42,7 @@ class FakeCredentials implements AiCredentialStore {
   Future<void> clearApiKey() async => _value = null;
 }
 
-/// AI 整理的编排层（设计文档 §2.2）。
+/// AI 整理的编排层（《定义与边界》§10）。
 ///
 /// 全部用**假的平台实现**：不打真实网络，所以这些用例又快又稳。
 /// 重点验的是护栏，不是"能不能连上模型"：

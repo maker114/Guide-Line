@@ -5,7 +5,7 @@ import '../../core/models/ai_config.dart';
 import '../common/dialogs.dart';
 import '../theme/shape_tokens.dart';
 
-/// AI 设置（设计文档 §2.2）。
+/// AI 设置（《定义与边界》§10）。
 ///
 /// 这是全应用**唯一会联网**的功能，所以这一页要把边界讲清楚：
 ///   · 请求只发到你自己填的地址，没有硬编码的第三方服务器；

@@ -49,7 +49,7 @@ class InspirationTabState extends State<InspirationTab> {
   /// 按标签筛选（点条目上的标签进来）。`null` = 不筛。
   String? _filterTag;
 
-  /// 多选模式（灵感整理第 6 条）：长按任一条进入，之后点条目标即选中。
+  /// 多选模式：长按任一条进入，之后点条目标即选中。
   bool _selecting = false;
   final Set<String> _selectedIds = <String>{};
 

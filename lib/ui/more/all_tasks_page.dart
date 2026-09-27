@@ -183,7 +183,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
       // 多选态：整行变成"勾选行" —— 点它只切换选中，不再进事件详情。
       // 底色垫在 `Material` 上，而不是包一层 `DecoratedBox`：ListTile 的水波纹画在
       // 最近的 `Material` 上，中间夹一层有底色的 `DecoratedBox` 会让它报错
-      // （《界面规范》§6.2，事件页踩过同一个坑）。
+      // （《界面规范》§6 第 2 条，事件页踩过同一个坑）。
       final selected = _selectedIds.contains(task.id);
       tile = Material(
         type: selected ? MaterialType.canvas : MaterialType.transparency,

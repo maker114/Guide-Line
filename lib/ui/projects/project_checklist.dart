@@ -9,7 +9,7 @@ import '../common/inline_editor.dart';
 import '../events/event_detail_page.dart';
 import 'ai_preview_page.dart';
 
-/// 项目「实现」的**实现清单**（设计文档 §1.3）。
+/// 项目「实现」的**实现清单**（《数据契约》§3.2.1）。
 ///
 /// 口径用词（Q4）：项目里的叫「清单」/「实现清单」，**"待办"只指事件里的任务**。
 ///
@@ -90,7 +90,7 @@ class ProjectChecklist extends StatelessWidget {
             onCreate: (text) => _run(context, () => app.ws.addProjectItem(project.id, text)),
           ),
         ),
-        // AI 整理：把清单**反向压成**一段通顺的说明（设计文档 §2.1）。
+        // AI 整理：把清单**反向压成**一段通顺的说明（《定义与边界》§10）。
         // 只在有清单**且 AI 总开关开着**时才给入口 —— 关掉 AI 之后，
         // 项目里不该再出现任何"AI 整理"的字样（实机反馈）。
         if (items.isNotEmpty && app.aiEnabled)

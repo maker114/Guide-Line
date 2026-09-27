@@ -148,7 +148,7 @@ void main() {
     });
   });
 
-  group('完成规则（4.6 / ADR-054 / ADR-055）', () {
+  group('完成规则（ADR-054 / ADR-055）', () {
     test('所有参与判定的直接子节点终态才可完成', () {
       final index = TreeIndex(<EntityNode>[
         project('p'),
@@ -210,7 +210,7 @@ void main() {
     });
   });
 
-  group('级联（4.5 / 4.7 / ADR-051 / ADR-056）', () {
+  group('级联（ADR-051 / ADR-056）', () {
     final projectIndex = TreeIndex(<EntityNode>[
       project('a'),
       project('a1', parent: 'a'),
@@ -261,7 +261,7 @@ void main() {
     });
   });
 
-  group('归档区（4.10 / ADR-052）', () {
+  group('归档区（ADR-052）', () {
     final projects = <Project>[
       project('p1', status: NodeStatus.done),
       project('p2', archived: true),

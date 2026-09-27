@@ -20,7 +20,7 @@
 
 **没有云端、没有账号、没有同步、没有推送。** 数据是手机上的一份 JSON 文件，
 可以导出、可以备份。双端方案曾因服务器成本卡住，于是先把单机体验做扎实 ——
-来龙去脉见 [`docs/plan/mobile-v1-计划.md`](docs/plan/mobile-v1-计划.md)。
+来龙去脉见 [`CHANGELOG.md`](CHANGELOG.md) 的 `[1.0.0]` 一节。
 
 ## 设计原则
 
@@ -175,8 +175,6 @@ flutter build apk --release # 产物 build/app/outputs/flutter-apk/app-release.a
 | [`docs/spec/界面规范.md`](docs/spec/界面规范.md) | 形状规则（胶囊 / 圆角矩形 / 正圆）、版式骨架、数量口径 |
 | [`docs/构建与发布.md`](docs/构建与发布.md) | 环境、构建、图标、装真机、发布与推送流程 |
 | [`docs/开发节奏.md`](docs/开发节奏.md) | 实测耗时基线、验证手段选择表、每批的动作节奏与反模式清单 |
-| [`docs/plan/mobile-v1-计划.md`](docs/plan/mobile-v1-计划.md) | 手机端 v1.0 的范围、里程碑、待确认问题 |
-| [`docs/plan/桌面小组件-可行性结论.md`](docs/plan/桌面小组件-可行性结论.md) | 桌面小组件可行性调研的结论与踩过的坑（**别重做一遍**） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本规则与变更记录 |
 
 **README 与 pubspec、CHANGELOG 三者的版本号由测试盯着**：
@@ -202,6 +200,5 @@ Copyright (c) 2026 Maker114。
 - **电脑端**：那份归档工程已于 2026-09-24 从工作区移除，源码可从 git 历史取回
   （归档快照提交 `786b143`），省下约 263 MB
 - **桌面小组件**：技术链路已验证跑通，但小米 HyperOS 只收录商店包解析出来的小部件，
-  侧载 App 的原生卡片进不了桌面小部件中心。结论见
-  [`docs/plan/桌面小组件-可行性结论.md`](docs/plan/桌面小组件-可行性结论.md)
+  侧载 App 的原生卡片进不了桌面小部件中心 —— 这条路在小米上走不通，不必再试
 - **多语言**：暂时只有中文

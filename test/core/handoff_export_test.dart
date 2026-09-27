@@ -5,7 +5,7 @@ import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/models/project_item.dart';
 import 'package:guideline/core/rules/handoff_export.dart';
 
-/// 交接说明（设计文档 §3）：给电脑上的 AI 读的 Markdown。
+/// 交接说明（《定义与边界》§11）：给电脑上的 AI 读的 Markdown。
 ///
 /// 格式是逻辑不是外观，所以在这里逐行钉住：任务列表语法、空节省略、
 /// 已完成的也导、条目里的换行被单行化。

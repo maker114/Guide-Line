@@ -2,7 +2,7 @@ import '../models/entity.dart';
 import '../models/enums.dart';
 import '../tree/tree_index.dart';
 
-/// 完成规则（设计文档 4.6 / ADR-054 / ADR-055）。
+/// 完成规则（ADR-054 / ADR-055）。
 ///
 /// 全系统唯一规则：
 ///   **节点可被标记「已完成」⟺ 它所有「参与判定」的直接子节点都处于 done 或 ignored。**

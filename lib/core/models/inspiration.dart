@@ -48,7 +48,7 @@ class Inspiration implements Entity {
   @override
   final bool deleted;
 
-  /// 标签（灵感整理第 5 条）：创建灵感时就能直接分类。
+  /// 标签：创建灵感时就能直接分类。
   ///
   /// **空列表按"没有这个字段"处理**（写出时省略，见 [toJson]）：这样老数据
   /// 读进来再写出去仍然逐字节一致，不需要迁移。

@@ -4,7 +4,7 @@ import '../../app/app_controller.dart';
 import '../common/dialogs.dart';
 import 'ai_settings_page.dart';
 
-/// AI 整理的**预览页**（设计文档 §2.2）。
+/// AI 整理的**预览页**（《定义与边界》§10）。
 ///
 /// 这里是整个功能的护栏所在：模型整理完**不直接写库**，先把结果摆在这里让人核对。
 /// 之所以必须这样：这是本应用唯一会"生成内容"的地方，而模型**可能补充或改写

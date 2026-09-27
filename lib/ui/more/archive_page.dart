@@ -13,7 +13,7 @@ import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/labels.dart';
 
-/// 归档区（设计文档 4.10 / ADR-052）。
+/// 归档区（ADR-052）。
 ///
 /// **所有「从主视图消失」的东西必须有唯一去处。** 归档区不是新实体，
 /// 而是由 `archived` / `status` / `deleted` 推导出来的视图聚合，分五个分区：

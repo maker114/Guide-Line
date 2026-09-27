@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 /// 平台适配层：**唯一允许出现平台判断的地方**（ADR-024）。
 ///
 /// 手机端数据放在**应用私有目录**（其它 App 读不到；但**卸载会被系统清除**，
-/// 所以必须配合导出备份，见《手机端（Android 单机）v1.0 计划》§4）。
+/// 所以必须配合导出备份，见《定义与边界》§9）。
 class DataDirectory {
   const DataDirectory._();
 
@@ -25,7 +25,7 @@ class DataDirectory {
   }
 }
 
-/// 应用元信息（与 §10.2 的版本规则一致）。
+/// 应用元信息（与 `pubspec.yaml` 的 `version:` 一致，由 `test/core/version_test.dart` 守着）。
 class AppInfo {
   const AppInfo._();
 

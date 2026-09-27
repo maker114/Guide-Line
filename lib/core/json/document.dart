@@ -9,7 +9,7 @@ import 'canonical.dart';
 /// 一份**集合**（某一实体类型的全部记录）。
 ///
 /// 手机端是单机应用，因此不再有文档级版本号 / 服务端时间戳 / 事务 ID ——
-/// 那些都是为「双端同步」服务的（见归档的《双端软件架构设计》5.3 / ADR-004）。
+/// 那些都是为「双端同步」服务的（ADR-004）。
 /// 现在只剩「一组记录」这一件事。
 class Document {
   const Document({required this.name, required this.items});

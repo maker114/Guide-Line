@@ -3,7 +3,7 @@ import '../models/project.dart';
 import '../models/project_item.dart';
 
 /// 把项目生成一份**交接说明**（Markdown），用来导出到电脑上丢给 AI
-/// （设计文档 §3）。
+/// （《定义与边界》§11）。
 ///
 /// 纯 Dart、无 Flutter 依赖：格式是逻辑，不是外观，所以放 core 并能被单测覆盖。
 ///

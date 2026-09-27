@@ -13,7 +13,7 @@ import '../events/task_actions.dart';
 import '../projects/project_detail_page.dart';
 import '../theme/shape_tokens.dart';
 
-/// 全局搜索（设计文档 Q42）：**只搜未归档、未删除；灵感只搜待处理的**。
+/// 全局搜索：**只搜未归档、未删除；灵感只搜待处理的**。
 ///
 /// 多选（Q26）：任务条目上多了"长按进多选、批量改期 / 归档"这条捷径 ——
 /// 原来搜到一条任务想改到期日，只能点进去、在任务线上再找一遍。习惯与
@@ -304,7 +304,7 @@ class _HitTile extends StatelessWidget {
 
     if (selecting) {
       // 多选态：点这一行只切换选中（用 `AbsorbPointer` 把原来"点开"的那条路
-      // 关掉），底色垫在 `Material` 上而不是包 `DecoratedBox`（《界面规范》§6.2）。
+      // 关掉），底色垫在 `Material` 上而不是包 `DecoratedBox`（《界面规范》§6 第 2 条）。
       tile = Material(
         type: selected ? MaterialType.canvas : MaterialType.transparency,
         color: selected

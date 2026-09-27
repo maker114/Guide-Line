@@ -8,7 +8,7 @@ import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project_item.dart';
 
-/// 后加字段的兼容性（灵感整理第 5、10 条）：`Inspiration.tags` 与 `Project.color`。
+/// 后加字段的兼容性：`Inspiration.tags` 与 `Project.color`。
 ///
 /// 这两条的核心约束只有一句：**老数据必须照常读，而且读进来再写出去要逐字节不变**。
 /// 所以新字段一律"未设置即省略"、位置追加在末尾。
@@ -273,7 +273,7 @@ void main() {
     });
   });
 
-  group('项目实现清单 items（设计文档 §1.1）', () {
+  group('项目实现清单 items（《数据契约》§3.2.1）', () {
     Map<String, dynamic> item(String id, String text, bool done) =>
         <String, dynamic>{'id': id, 'text': text, 'done': done};
 

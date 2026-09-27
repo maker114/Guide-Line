@@ -6,7 +6,7 @@ import '../models/project.dart';
 import '../models/task.dart';
 import '../tree/tree_index.dart';
 
-/// 归档区（设计文档 4.10 / ADR-052）。
+/// 归档区（ADR-052）。
 ///
 /// **所有「从主视图消失」的东西必须有唯一去处**。归档区不是新实体，
 /// 而是由既有字段（`archived` / `status` / `deleted`）推导出的**视图聚合**。

@@ -432,7 +432,7 @@ void main() {
       expect(ws.inspirationInbox.length, 1);
     });
 
-    test('已分配的 pending 灵感仍留在灵感列表（设计文档 4.12）', () {
+    test('已分配的 pending 灵感仍留在灵感列表（ADR-065）', () {
       final project = ws.createProject(title: '项目 A');
       final inspiration = ws.captureInspiration('已分配未合并');
       ws.assignInspiration(inspiration.id, project.id);
@@ -724,7 +724,7 @@ void main() {
     });
   });
 
-  group('灵感：改正文 / 一键追加 / 批量（灵感整理第 2、6、7 条）', () {
+  group('灵感：改正文 / 一键追加 / 批量', () {
     test('改正文：改得掉、能落盘读回', () {
       final inspiration = ws.captureInspiration('原来的内容');
       ws.updateInspirationText(inspiration.id, '改过的内容');
@@ -954,7 +954,7 @@ void main() {
     });
   });
 
-  group('实现清单（设计文档 §1.4）', () {
+  group('实现清单（《数据契约》§3.2.1）', () {
     late Project project;
 
     setUp(() {
@@ -1188,7 +1188,7 @@ void main() {
     });
   });
 
-  group('删除项目的跨文档影响面（4.5 / ADR-056）', () {
+  group('删除项目的跨文档影响面（ADR-056）', () {
     test('pending 灵感被删、merged 灵感回退为未分配，且一次落盘同时生效', () {
       final project = ws.createProject(title: '项目 A');
       final child = ws.createProject(title: '子项目', parentId: project.id);

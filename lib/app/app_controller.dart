@@ -634,7 +634,7 @@ class AppController extends ChangeNotifier {
   /// 把项目清单交给模型整理成一段通顺说明（**只返回结果，不写库**）。
   ///
   /// 分成"生成"与"写回"两步是刻意的：模型可能编造清单里没有的东西，
-  /// 必须让用户**先看到再确认**（设计文档 §2.2）。
+  /// 必须让用户**先看到再确认**（《定义与边界》§10）。
   Future<({String? text, String? error})> summarizeProjectItems(String projectId) async {
     final project = workspace.findProject(projectId);
     if (project == null || project.deleted) return (text: null, error: '项目不存在');

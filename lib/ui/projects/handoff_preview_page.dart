@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../common/dialogs.dart';
 
-/// 交接说明的**预览页**（设计文档 §3.1）。
+/// 交接说明的**预览页**（《定义与边界》§11）。
 ///
 /// 生成好的 Markdown 先在这里全文显示，**可编辑** —— 用户能删掉不想给出去的部分。
 /// 预览页本身就是确认环节，所以导出前不再另弹确认框；

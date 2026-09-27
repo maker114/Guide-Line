@@ -1044,7 +1044,7 @@ class _InspirationsField extends StatelessWidget {
           child: Text('待处理灵感 ${inspirations.length}', style: theme.textTheme.labelLarge),
         ),
         if (inspirations.isNotEmpty) ...<Widget>[
-          // 点一条**直接进合并编辑器**（灵感整理第 9 条）。
+          // 点一条**直接进合并编辑器**。
           // 原来这里是只读列表，还让用户"去灵感页合并"——入口绕了一圈。
           for (final inspiration in inspirations)
             ListTile(

@@ -2,7 +2,7 @@ import '../models/inspiration.dart';
 import '../models/task.dart';
 import '../tree/tree_index.dart';
 
-/// 级联规则（设计文档 4.5 / 4.7 / ADR-051 / ADR-056）。
+/// 级联规则（ADR-051 / ADR-056）。
 ///
 /// 这些函数**只计算 id 集合**，不修改对象 —— 由数据层统一落库，
 /// 这样「先算再写」可测试，也便于跨文档走一次事务提交。
@@ -91,7 +91,7 @@ Set<String> eventDeletionTaskIds(Iterable<Task> tasks, String eventId) {
   return out;
 }
 
-/// 把一个节点移动到新父节点下的合法性（设计文档 4.11）。
+/// 把一个节点移动到新父节点下的合法性（ADR-060）。
 class MoveCheck {
   const MoveCheck({required this.allowed, required this.reason});
 

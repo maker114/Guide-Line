@@ -158,7 +158,7 @@ class Workspace {
   List<Inspiration> get liveInspirations =>
       allInspirations.where((i) => !i.deleted).toList(growable: false);
 
-  /// 灵感列表：**未处理、且所属项目没有归档**，按 `created_at` 倒序（设计文档 4.12）。
+  /// 灵感列表：**未处理、且所属项目没有归档**，按 `created_at` 倒序（ADR-065）。
   ///
   /// 「项目归档了，挂在它下面的灵感照旧列在这儿」曾经是个前后不一致的缺陷
   /// （Q10）：项目归档的确认框承诺"这些灵感会从列表里隐藏"，归档区也写着
@@ -261,7 +261,7 @@ class Workspace {
     return list;
   }
 
-  /// 事件完成条件：所有参与判定的主线任务终态（设计文档 4.6）。
+  /// 事件完成条件：所有参与判定的主线任务终态（ADR-054 / ADR-055）。
   CompletionCheck checkEventCompletion(String eventId) {
     final children = liveTasks
         .where((t) => t.eventId == eventId && t.parentId == null && !t.archived)
@@ -396,7 +396,7 @@ class Workspace {
     return count;
   }
 
-  /// 全局搜索（Q42）：只搜未归档、未删除；灵感只搜 `pending`。
+  /// 全局搜索：只搜未归档、未删除；灵感只搜 `pending`。
   ///
   /// 返回**按 `updatedAt` 倒序**的命中，最多 [limit] 条（默认 [searchHitLimit]）。
   /// 调用方若还要知道"是不是被截断了"，**传一个更大的 limit 自己比** ——
@@ -689,7 +689,7 @@ class Workspace {
     return inspiration;
   }
 
-  /// 改标签（灵感整理第 5 条）。传入的内容会按契约口径清洗：去空格、丢空串、去重。
+  /// 改标签。传入的内容会按契约口径清洗：去空格、丢空串、去重。
   void updateInspirationTags(String id, Iterable<String> tags) {
     final inspiration = findInspiration(id);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
@@ -715,7 +715,7 @@ class Workspace {
     return true;
   }
 
-  /// 设 / 清项目标识色（灵感整理第 10 条）。传 `null` 或非法值表示清空。
+  /// 设 / 清项目标识色。传 `null` 或非法值表示清空。
   void setProjectColor(String id, String? color) {
     final project = findProject(id);
     if (project == null) throw const RuleViolation('项目不存在');
@@ -747,7 +747,7 @@ class Workspace {
     persist();
   }
 
-  /// 改灵感正文（灵感整理第 2 条）。
+  /// 改灵感正文。
   ///
   /// 空内容一律拒绝并保持原值 —— 与界面层的"必填项被清空时不提交"是同一条约定，
   /// 这里再挡一次，免得别的调用点绕过去把灵感清成空串。
@@ -846,7 +846,7 @@ class Workspace {
     persist();
   }
 
-  /// 把一条灵感**原封不动**追加到项目「如何解决」的末尾（灵感整理第 7 条）。
+  /// 把一条灵感**原封不动**追加到项目「如何解决」的末尾。
   ///
   /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
   /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
@@ -1673,7 +1673,7 @@ class Workspace {
   ///   · **归属决定类型**（《数据契约》§4.3：`standard ⟺ parent_task_id == null`）：
   ///     提到主线就写 `standard`，挂到节点下就写 `subtask`。只改 `parent_id`
   ///     不改 `task_type`，会留下"`subtask` + 空父节点"这种非法组合；
-  ///   · **跨事件移动时父引用强制归零**（设计文档 4.11：禁止跨事件父子）——
+  ///   · **跨事件移动时父引用强制归零**（ADR-060：禁止跨事件父子）——
   ///     调用方即便沿用旧父节点，也不会写出非法状态。
   ///
   /// 老数据里的 `parallel` 只在**归属真的变了**时才改写：没换父节点的移动

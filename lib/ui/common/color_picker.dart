@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 
-/// 标识色的候选色板（灵感整理第 10 条）。
+/// 标识色的候选色板。
 ///
 /// 色值就是 [AccentColors.hexes]（唯一来源是 core 的 `ProjectPalette`）——
 /// 低饱和的灰调彩色，用来在小面积上互相区分，不抢内容。
