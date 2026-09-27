@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
-import 'package:guideline/ui/events/event_detail_page.dart';
 
 /// 任务行的入口与"被挡住"的表达（灵感 14 / 15）：
 ///   · 还有未处理子任务时，状态按钮换**锁形**，点它不改变状态、只解释原因；
@@ -13,17 +12,8 @@ import 'package:guideline/ui/events/event_detail_page.dart';
 ///   · 任务行上只留一个图标按钮「设到期日」，其余动作走点整行弹出的面板；
 ///   · Q27：动作面板能改归属（提到主线 / 挂到某个节点下），与"改归属"配套的
 ///     上下挪一格到两端时要给一句反馈。
-///
-/// 断言一律收在**任务线那一段**里（`eventDetailLineKey`）：详情页顶上那张卡
-/// 还会用「接下来」把当前节点的标题再写一遍，也会画自己的日期图标 ——
-/// 全屏数会数出两个。
 void main() {
   late Directory tempDir;
-
-  Finder inLine(Finder matching) => find.descendant(
-        of: find.byKey(eventDetailLineKey),
-        matching: matching,
-      );
 
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('guideline_lock_test');
@@ -107,12 +97,12 @@ void main() {
     final app = await appWithTask(withSubtask: false);
     await openEvent(tester, app);
 
-    expect(inLine(find.byIcon(Icons.event_outlined)), findsOneWidget, reason: '没排期时是"设到期日"');
+    expect(find.byIcon(Icons.event_outlined), findsOneWidget, reason: '没排期时是"设到期日"');
     // 「接后续任务…」那个折线入口跟着分叉 / 合流一起删了：链上不再有"走向"
-    expect(inLine(find.byIcon(Icons.timeline)), findsNothing);
+    expect(find.byIcon(Icons.timeline), findsNothing);
 
     // 设到期日：点开的是日期选择器（不再走"更多"菜单）
-    await tester.tap(inLine(find.byIcon(Icons.event_outlined)));
+    await tester.tap(find.byIcon(Icons.event_outlined));
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsOneWidget);
   });
@@ -122,8 +112,8 @@ void main() {
     await openEvent(tester, app);
 
     // 任务行那一整条（含它自己的内边距）与里面那颗日历图标的实际位置
-    final tile = tester.getRect(inLine(find.byType(ListTile)).first);
-    final icon = tester.getRect(inLine(find.byIcon(Icons.event_outlined)));
+    final tile = tester.getRect(find.byType(ListTile).first);
+    final icon = tester.getRect(find.byIcon(Icons.event_outlined));
 
     expect(
       tile.right - icon.right,
@@ -136,7 +126,7 @@ void main() {
     final app = await appWithTask(withSubtask: true);
     await openEvent(tester, app);
 
-    await tester.tap(inLine(find.text('主线任务')));
+    await tester.tap(find.text('主线任务'));
     await tester.pumpAndSettle();
 
     expect(find.text('新建子任务'), findsOneWidget);
@@ -153,9 +143,9 @@ void main() {
 
     await openEvent(tester, app);
 
-    expect(inLine(find.byIcon(Icons.event_available_outlined)), findsOneWidget);
+    expect(find.byIcon(Icons.event_available_outlined), findsOneWidget);
     expect(
-      inLine(find.textContaining('2099-05-01')),
+      find.textContaining('2099-05-01'),
       findsOneWidget,
       reason: '任务行要同时给出绝对日期与剩余天数',
     );
@@ -226,7 +216,7 @@ void main() {
     final parent = app.ws.liveTasks.firstWhere((t) => t.parentId == null);
     await openEvent(tester, app);
 
-    await tester.tap(inLine(find.text('主线任务')));
+    await tester.tap(find.text('主线任务'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('改归属…'));
     await tester.pumpAndSettle();
@@ -255,7 +245,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 第一个节点往上挪：到头了
-    await tester.tap(inLine(find.text('第一步')));
+    await tester.tap(find.text('第一步'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('往上挪一格'));
     await tester.pumpAndSettle();
@@ -266,7 +256,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 最后一个节点往下挪：也到头了
-    await tester.tap(inLine(find.text('第二步')));
+    await tester.tap(find.text('第二步'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('往下挪一格'));
     await tester.pumpAndSettle();

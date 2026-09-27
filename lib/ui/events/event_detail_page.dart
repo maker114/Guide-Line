@@ -12,9 +12,7 @@ import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
-import '../common/urgency.dart';
 import '../theme/shape_tokens.dart';
-import 'event_next_up.dart';
 import 'fold_toggle_row.dart';
 import 'task_actions.dart';
 import 'task_fold.dart';
@@ -24,17 +22,9 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 
 /// 详情页里**任务线那一段**的 key（测试用；界面上看不见）。
 ///
-/// 为什么需要它：事件详情页顶部那张卡里的「接下来」会**把当前节点的标题再写一遍**
-/// （那是它的职责：一句话答"下一步做哪件"）。于是"这一页里有几个「第四步」"
-/// 这类断言会数出两个 —— 想验"任务线里看得见哪几个节点"的用例得先把范围
-/// 收到任务线上（`find.descendant(of: find.byKey(eventDetailLineKey), …)`）。
+/// 为什么需要它：这一页除了任务线，顶上那张卡里也有文字，任务线的断言收在
+/// 这个 key 里就不用担心别处也出现同名字样（`find.descendant(of: find.byKey(eventDetailLineKey), …)`）。
 const Key eventDetailLineKey = Key('event-detail-line');
-
-/// 详情页顶部那张卡里**「时间与任务」那一段**的 key（测试用；界面上看不见）。
-///
-/// 它和 `eventDetailLineKey` 是一对：当前节点的标题在这两段里**各出现一次**
-/// （「接下来」的职责就是把它写出来），测试要能分别断言这两处。
-const Key eventFactsKey = Key('event-facts');
 
 /// 事件详情：**一条任务线的可视化**。
 ///
@@ -52,9 +42,11 @@ const Key eventFactsKey = Key('event-facts');
 ///
 /// **事件名不在这里改**（标题栏已经写着事件名了，正文再放一遍是重复 ——
 /// 与项目详情页同一条裁定）：改名收在标题右侧的 ⋮ 里，点「重命名」之后
-/// **标题栏原地变成输入框**。腾出来的位置给「时间与任务」
-/// （`_EventFacts`）：最近到期 + 接下来做哪一件，这两件事原来只挤在
-/// 事件列表卡头的一行小灰字里（实机反馈：挪到这里来，并且要好看）。
+/// **标题栏原地变成输入框**。
+///
+/// 顶上那张卡只回答"这条线走到哪了"（进度 + 三态）。**没有**"最近到期 / 接下来
+/// 做什么"这一类摘要：做过一版（叫「时间与任务」）并装到真机，实机反馈"不好看"，
+/// 整块撤掉了（见 CHANGELOG 1.5.0）。
 class EventDetailPage extends StatefulWidget {
   const EventDetailPage({super.key, required this.app, required this.eventId});
 
@@ -313,8 +305,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
             children: <Widget>[
-              // 事件自身的状态、进度，以及「时间与任务」（同一张卡，见 `_EventHeader`）
-              _EventHeader(host: this, event: event, mainLine: mainLine),
+              // 事件自身的状态与进度
+              _EventHeader(host: this, event: event),
               const SizedBox(height: 12),
               if (mainLine.isEmpty)
                 Padding(
@@ -401,27 +393,18 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 }
 
-/// 事件自身那一张卡：**状态 + 进度 + 「时间与任务」**。
+/// 事件自身：三态 + 主线完成情况。
 ///
 /// **没有名字字段**：名字在标题栏（改名走标题栏的 ⋮ →「重命名」），
-/// 正文再放一遍只是把同一句话写两次。腾出来的位置给「时间与任务」。
+/// 正文再放一遍只是把同一句话写两次。
 ///
-/// 为什么三者同一张卡：它们都是"这条线现在什么状态"的字段 ——
-/// 上面的进度与状态是**一行总览**，下面的「时间与任务」是两行明细，
-/// 中间靠小标题与留白分开，**不画分割线**（实机反馈：一条线把一张卡切成几块）。
-/// 拆成两张卡则会白占一圈卡片间距，手机上不划算。
+/// 也**没有**"最近到期 / 接下来做什么"：那一版（「时间与任务」）做完实机反馈不满意，
+/// 整块撤掉了（见 CHANGELOG 1.5.0）。卡里只留"这条线走到哪了"。
 class _EventHeader extends StatelessWidget {
-  const _EventHeader({
-    required this.host,
-    required this.event,
-    required this.mainLine,
-  });
+  const _EventHeader({required this.host, required this.event});
 
   final _EventDetailPageState host;
   final Event event;
-
-  /// 主线任务（`Workspace.mainLineOf` 的结果：排好序、已排除归档节点）
-  final List<Task> mainLine;
 
   @override
   Widget build(BuildContext context) {
@@ -457,165 +440,8 @@ class _EventHeader extends StatelessWidget {
                 if (error != null) showToast(context, error, error: true);
               },
             ),
-            // 空线不摆「时间与任务」：下面那句空态说明已经讲清了，
-            // 再写一遍"还没排期 / 没有待做的节点"只是噪音。
-            if (mainLine.isNotEmpty) _EventFacts(mainLine: mainLine),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// 「时间与任务」：这条线**急不急**（最近到期）+ **接下来做哪一件**。
-///
-/// 这两件事原来只有事件列表卡头的一行小灰字（「最近 2026-09-28（3 天后） ·
-/// 接下来 · 某任务」），实机反馈：那行太小、也太挤，挪到详情页来，并且要好看。
-///
-/// 做法是**两行"左小右大、右侧右对齐"的字段**，而不是把小灰字放大：
-///   · 左边是图标 + 小标签（`labelSmall`），右边是内容（`bodyLarge`，比标签大一档）；
-///   · 内容**向右对齐**：两行的右缘落在同一条竖线上，扫下来是一条直线；
-///   · 到期日**单独染色**：逾期用 `UrgencyColors.overdue`（红），
-///     其余用 `primary` —— 只把真急的事标出来，不把"还有半年"也刷成警报色；
-///   · 「接下来」后面直接写任务名，比卡头那句被省略号截断的话完整；
-///   · 值最多两行省略 —— 1.6 倍字体下也只是换行，不会挤爆（`app_smoke_test` 守着）。
-///
-/// 值用 `bodyLarge` 而不是任务框那行 `titleSmall`（14 / 中粗）：字号更大、字重更轻，
-/// 一眼分得出"这是摘要"与"那是能点开的任务本身"。
-///
-/// 这一段的顶上**不画分割线**（实机反馈）：与上面那排状态胶囊之间靠标题与留白分开就够了，
-/// 多一条线反而把一张卡切成三块。行与行之间也不用细线：两行本来就隔着 `SizedBox`。
-///
-/// 没事可做（线上节点都终结了）时明确写「这条线没有待做的节点」，而不是留空 ——
-/// 空着会让人以为这块坏了。
-class _EventFacts extends StatelessWidget {
-  const _EventFacts({required this.mainLine});
-
-  final List<Task> mainLine;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final nextUp = nextUpOf(mainLine);
-    final current = nextUp.task;
-    final due = nextUp.dueAt;
-
-    return Column(
-      key: eventFactsKey,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.only(left: 4, top: 12, bottom: 8),
-          child: Text('时间与任务', style: theme.textTheme.labelMedium),
-        ),
-        _FactRow(
-          icon: Icons.event_outlined,
-          highlighted: due != null,
-          label: '最近到期',
-          // 详情页这一行位置宽裕（没有事件名与完成钮抢宽度），
-          // 所以余量按最小估；窄屏放不下时 `dueLabelOf` 自己退成相对日。
-          value: due == null ? '还没排期' : dueLabelOf(context, due, reservedWidth: 120),
-          valueColor: due == null
-              ? theme.colorScheme.outline
-              : (isOverdue(due)
-                    ? UrgencyColors.ofContext(context).overdue
-                    : theme.colorScheme.primary),
-        ),
-        const SizedBox(height: 10),
-        _FactRow(
-          icon: current == null
-              ? Icons.check_circle_outline
-              : Icons.play_circle_outline,
-          highlighted: current != null,
-          label: '接下来',
-          value: current == null ? '这条线没有待做的节点' : current.title,
-        ),
-      ],
-    );
-  }
-}
-
-/// 「时间与任务」里的一行字段：**左小右大 + 右侧右对齐**。
-///
-/// 左边是图标 + 标签，右边是内容：**两边的字号、字重、颜色规则完全一样**
-/// （都取 `bodyLarge`）—— 一行里只有"标题 / 内容"的分工，没有主次
-/// （实机反馈："我要左右一样大，包括图标"）。
-///
-/// 内容**向右对齐**：两行的右缘落在同一条竖线上，眼睛扫下来是一条直线。
-///
-/// 不用 `ListTile` 的理由：它两端各留 16 内边距，而这段已经在卡片里（卡片自己还有 12），
-/// 再叠一层会让标题与上面的「时间与任务」对不齐；这里自己排，侧边距与卡片一致。
-class _FactRow extends StatelessWidget {
-  const _FactRow({
-    required this.icon,
-    required this.highlighted,
-    required this.label,
-    required this.value,
-    this.valueColor,
-  });
-
-  final IconData icon;
-
-  /// 这一行有没有内容（有则图标与内容上主题色，没有则整体走次要色）
-  final bool highlighted;
-
-  final String label;
-  final String value;
-
-  /// 内容的颜色；不给就按 `highlighted` 取主题色 / 次要色。
-  final Color? valueColor;
-
-  /// 标题那一栏的宽度上限。**必须留出上限**：不给的话「最近到期」在窄屏上会被
-  /// 右边的日期挤到折行，而它只有四个字，怎么都不该折。
-  static const double _labelWidth = 88;
-
-  /// 行的字号：**左右与图标共用这一个数**（图标直径 = 字号 + 2，视觉上与文字等高）。
-  static const double fontSize = 16;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final accent = highlighted ? theme.colorScheme.primary : theme.colorScheme.outline;
-    // 左右同一套字：一行里只有"标题 / 内容"的分工，没有大小之分
-    final textStyle = theme.textTheme.bodyLarge;
-    return Padding(
-      padding: const EdgeInsets.only(left: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          // 标题栏单挂一个 key：用例要能"只看这一行的内容"，而不是全屏数标题
-          SizedBox(
-            key: ValueKey<String>('fact-label-$label'),
-            width: _labelWidth,
-            child: Row(
-              children: <Widget>[
-                Icon(icon, size: fontSize + 2, color: accent),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: textStyle,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          // 内容靠右：两行的右缘对齐（宽度由行分配，右对齐由 textAlign 完成）
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.right,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: textStyle?.copyWith(
-                color: valueColor ?? (highlighted ? null : theme.colorScheme.outline),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -9,7 +9,6 @@ import 'package:guideline/core/models/project_palette.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
-import 'package:guideline/ui/events/event_detail_page.dart';
 import 'package:guideline/ui/more/task_grouping.dart';
 
 import 'scroll_finders.dart';
@@ -118,19 +117,11 @@ void main() {
 
     // 新建主线任务：现在是任务线末尾的页内输入行
     await submitInlineComposer(tester, '新建主线任务', '完成四个 Tab');
-    // 顶上那张卡会用「接下来」把这条任务再写一遍 → 数任务线里的那一行
-    // （`eventDetailLineKey` 见 `event_detail_page.dart`）
-    final line = find.byKey(eventDetailLineKey);
-    expect(
-      find.descendant(of: line, matching: find.text('完成四个 Tab')),
-      findsOneWidget,
-    );
+    expect(find.text('完成四个 Tab'), findsOneWidget);
 
     // 点任务行 → 动作面板 → 加一个子任务（验证框内渲染）
     // 「新建子任务」不再是对话框，而是在那个框内展开一行输入
-    await tester.tap(
-      find.descendant(of: line, matching: find.text('完成四个 Tab')),
-    );
+    await tester.tap(find.text('完成四个 Tab'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新建子任务'));
     await tester.pumpAndSettle();
@@ -398,12 +389,7 @@ void main() {
     // 进任务线并打开任务动作面板（项目最多，是最容易溢出的地方）
     await tester.tap(find.text('一个名字相当长的事件名'));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(
-        of: find.byKey(eventDetailLineKey),
-        matching: find.text('一条名字相当长的主线任务'),
-      ),
-    );
+    await tester.tap(find.text('一条名字相当长的主线任务'));
     await tester.pumpAndSettle();
     // 动作面板打开了，且只剩"加一条 / 改这一条"的动作 ——
     // 走向类动作（接后续 / 断开后续 / 新建后续节点）已随分叉 / 合流一起删除

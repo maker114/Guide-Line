@@ -7,7 +7,6 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/task.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/events/event_detail_page.dart';
-import 'package:guideline/ui/events/event_next_up.dart';
 import 'package:guideline/ui/events/task_fold.dart';
 
 /// 事件页改成"与项目页同一套观感"之后的接线：
@@ -86,53 +85,6 @@ void main() {
     });
   });
 
-  group('nextUpOf（「最近到期 + 接下来」的取数，列表页与详情页共用）', () {
-    Task task(String id, NodeStatus status, {String? dueAt}) => Task(
-          id: id,
-          eventId: 'e1',
-          parentTaskId: null,
-          taskType: TaskType.standard,
-          title: '任务 $id',
-          dueAt: dueAt,
-          status: status,
-          archived: false,
-          order: 1000,
-          completedAt: status == NodeStatus.done ? 1700000000000 : null,
-          createdAt: 1700000000000,
-          updatedAt: 1700000000000,
-          deleted: false,
-        );
-
-    test('最近到期只数还没终结的节点，并取日期最早的那个', () {
-      final nextUp = nextUpOf(<Task>[
-        task('a', NodeStatus.done, dueAt: '2000-01-01'),
-        task('b', NodeStatus.ignored, dueAt: '2000-02-01'),
-        task('c', NodeStatus.pending, dueAt: '2099-12-31'),
-        task('d', NodeStatus.pending, dueAt: '2026-09-28'),
-      ]);
-      expect(nextUp.dueAt, '2026-09-28', reason: '已完成 / 已搁置的不再催人，也不算"最近"');
-    });
-
-    test('接下来 = 第一个还没终结的节点（任务线的顺序就是接着做的顺序）', () {
-      final nextUp = nextUpOf(<Task>[
-        task('a', NodeStatus.done),
-        task('b', NodeStatus.ignored),
-        task('c', NodeStatus.pending),
-        task('d', NodeStatus.pending),
-      ]);
-      expect(nextUp.task?.id, 'c');
-    });
-
-    test('没有排期 / 没有未终结节点时都是 null，界面据此给空态', () {
-      final none = nextUpOf(<Task>[task('a', NodeStatus.pending)]);
-      expect(none.dueAt, isNull);
-      expect(none.task?.id, 'a');
-
-      final allDone = nextUpOf(<Task>[task('a', NodeStatus.done)]);
-      expect(allDone.dueAt, isNull);
-      expect(allDone.task, isNull);
-    });
-  });
 
   Future<AppController> bootWithLine(WidgetTester tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
@@ -155,12 +107,12 @@ void main() {
 
     // 卡头一眼看到进度
     expect(find.text('主线 3/4 已完成'), findsOneWidget);
-    // 但**不再**在卡头写"最近到期 / 接下来"：那两件事挪进了事件详情页的
-    // 「时间与任务」看板（实机反馈：卡头那行小灰字太挤）
+    // 卡头只留进度与状态记号：**不再**写"最近到期 / 接下来做什么"
+    // （那一版挪进详情页后又整块撤掉了，见 CHANGELOG 1.5.0）
     expect(
-      find.textContaining('接下来 · 第四步'),
+      find.textContaining('接下来'),
       findsNothing,
-      reason: '列表卡头不再重复详情页的"时间与任务"',
+      reason: '列表卡头不写"最近到期 / 接下来"',
     );
 
     // 卡里嵌着任务：当前节点与它的上一个看得见
@@ -171,55 +123,11 @@ void main() {
     expect(find.text('第二步'), findsNothing);
     expect(find.textContaining('另有 2 个已完成节点'), findsOneWidget);
 
-    // 进详情页：这两件事在那里，而且是两行独立的字段，不是一行小灰字
+    // 进详情页：那一版摘要已经撤掉，页面上不该再有它
     await tester.tap(find.text('秋季发布'));
     await tester.pumpAndSettle();
-    final facts = find.byKey(eventFactsKey);
-    expect(find.text('时间与任务'), findsOneWidget);
-    expect(find.descendant(of: facts, matching: find.text('最近到期')), findsOneWidget);
-    expect(find.descendant(of: facts, matching: find.text('接下来')), findsOneWidget);
-    expect(
-      find.descendant(of: facts, matching: find.text('第四步')),
-      findsOneWidget,
-      reason: '「接下来」要写出当前节点的名字',
-    );
-
-    // 左右一样大 + 右侧右对齐：两行内容的右缘落在同一条竖线上，且**左右字号相同**
-    // （实机反馈："我要左右一样大，包括图标"）。
-    // 不去数值那串文字（日期文案会随"今天"变、任务名页面上还有一份），
-    // 直接量两行**标题栏的右缘**：标题栏是定宽的，它的右缘就是内容区的右缘。
-    double labelRight(String label) => tester
-        .getRect(find.byKey(ValueKey<String>('fact-label-$label')))
-        .right;
-    expect(
-      labelRight('最近到期'),
-      closeTo(labelRight('接下来'), 0.5),
-      reason: '两行内容的右缘要对齐',
-    );
-    final valueStyle = tester
-        .widget<Text>(find.descendant(of: facts, matching: find.text('第四步')))
-        .style!;
-    final labelStyle = tester
-        .widget<Text>(find.descendant(of: facts, matching: find.text('接下来')))
-        .style!;
-    expect(
-      valueStyle.fontSize,
-      labelStyle.fontSize,
-      reason: '左右一样大：内容字号必须等于标签字号',
-    );
-    expect(
-      valueStyle.fontWeight,
-      labelStyle.fontWeight,
-      reason: '左右一样大：字重也要一样',
-    );
-    final nextIcon = tester.widget<Icon>(
-      find.descendant(of: facts, matching: find.byIcon(Icons.play_circle_outline)),
-    );
-    expect(
-      nextIcon.size,
-      greaterThanOrEqualTo(labelStyle.fontSize!),
-      reason: '图标也要一样大（不能比字小一圈）',
-    );
+    expect(find.text('时间与任务'), findsNothing);
+    expect(find.text('最近到期'), findsNothing);
   });
 
   testWidgets('卡头能收起整条线，再点一次展开', (tester) async {
@@ -449,46 +357,15 @@ void main() {
     expect(app.ws.overdueTasks().map((t) => t.title), <String>['进行中线的任务']);
   });
 
-  testWidgets('"先做哪个"在详情页回答：最近到期日只认最早的那个，搁置的事件有记号', (tester) async {
+  testWidgets('已搁置的事件在列表里有记号', (tester) async {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final event = app.ws.createEvent(name: '搬家');
-    final far = app.ws.createTask(eventId: event.id, title: '慢慢来');
-    app.run(() => app.ws.updateTask(far.id, dueAt: '2099-12-31'));
     final near = app.ws.createTask(eventId: event.id, title: '先做这个');
     app.run(() => app.ws.updateTask(near.id, dueAt: '2026-09-28'));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
     await tester.tap(find.text('事件'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('搬家'));
-    await tester.pumpAndSettle();
-
-    // 「最近到期」那一行只出现**最近**的那个到期日
-    final facts = find.byKey(eventFactsKey);
-    expect(
-      find.descendant(of: facts, matching: find.textContaining('2026-09-28')),
-      findsOneWidget,
-      reason: '详情页要给出还没终结的主线任务里最近的那个到期日',
-    );
-    expect(
-      find.descendant(of: facts, matching: find.textContaining('2099-12-31')),
-      findsNothing,
-      reason: '不是最近的那个，不该出现在这一行',
-    );
-
-    // 「接下来」那一行指第一个还没终结的节点（链上的顺序就是接着做的顺序）。
-    // 顺序由数据层说了算：同一批创建的任务 `order` 相同，`compareByOrder` 会退到
-    // 按 id 排 —— 所以这里不写死是哪一条，拿任务线的头一条来对。
-    final firstOpen = app.ws
-        .mainLineOf(event.id)
-        .firstWhere((t) => t.status == NodeStatus.pending);
-    expect(
-      find.descendant(of: facts, matching: find.text(firstOpen.title)),
-      findsOneWidget,
-    );
-
-    await tester.pageBack();
     await tester.pumpAndSettle();
 
     // 搁置的事件在列表里原本和正常事件长得一样，用户没法解释"为什么它不催我"
