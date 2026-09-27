@@ -130,15 +130,7 @@ class _ProjectTabState extends State<ProjectTab> {
                 leading: Icons.create_new_folder_outlined,
                 onCreate: (title) => _create(title: title),
               ),
-              if (rows.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(
-                    '分类只用来归类；真正要交出的结果叫「目标」，灵感合并进目标的「如何解决」',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                )
-              else
+              if (rows.isNotEmpty)
                 // **每个主项目一张卡**（与设置页分组卡同一种观感）：
                 //   · 一张卡里的多行靠"同框"表达归属，不再画分割线
                 //     （分割线会把主项目与它的子项目切成同级的小块）；

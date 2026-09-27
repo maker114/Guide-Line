@@ -117,7 +117,7 @@ Future<String?> pickProjectColor(BuildContext context, {String? current}) {
     context,
     current: current,
     title: '项目标识色',
-    hint: '只在项目树与标题旁显示，不影响状态与完成判定。',
+    hint: '显示在项目树与标题旁',
   );
 }
 
@@ -127,7 +127,7 @@ Future<String?> pickEventColor(BuildContext context, {String? current}) {
     context,
     current: current,
     title: '事件标识色',
-    hint: '任务列表里的小圆点与日历上的圆环都用它；不影响状态与完成判定。',
+    hint: '任务列表里的小圆点与日历上的圆环都用它',
   );
 }
 

@@ -61,11 +61,9 @@ void main() {
 
     await scrollTo(tester, find.text('实现清单'));
     expect(find.text('实现清单'), findsOneWidget);
-    // Q35：空态可以把话说得轻一点，但仍要给出下一步
-    expect(
-      find.text('还没有条目。把「如何解决」拆成一条条清单，开工时就不用一边做一边回忆了。'),
-      findsOneWidget,
-    );
+    // Q35 之后又按实机反馈收了一轮：空态只留一句"还没有条目"，
+    // 说明性文字整批删掉（用户自己做教程）
+    expect(find.text('还没有条目'), findsOneWidget);
     expect(find.text('从正文拆成条目'), findsOneWidget, reason: '正文非空时才给这个入口');
   });
 
@@ -188,7 +186,7 @@ void main() {
     expect(find.text('改了一半'), findsNothing);
   });
 
-  testWidgets('清单标题行有「重拆 / 清空」入口，并说明长按条目能做什么（Q32）', (tester) async {
+  testWidgets('清单标题行有「重拆 / 清空」入口（Q32）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目壬');
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
@@ -199,8 +197,7 @@ void main() {
     // 入口必须**看得见**：上一批把「重拆 / 清空」整个删掉，拆错了就再没有重来入口
     expect(find.text('重拆 / 清空'), findsOneWidget);
     expect(find.byTooltip('清单：按正文重拆 / 清空'), findsOneWidget);
-    // 上移 / 下移 / 建成任务 / 删除只有长按这一条路，界面上得有一句说明
-    expect(find.text('长按条目可以建成任务、上移、下移、删除'), findsOneWidget);
+    // 长按那套说明已删（说明性文字整批收掉）；长按本身在下面这个用例里验
 
     await tester.tap(find.text('重拆 / 清空'));
     await tester.pumpAndSettle();
@@ -336,7 +333,6 @@ void main() {
 
     expect(find.text('AI 整理成「如何解决」'), findsOneWidget);
     expect(find.text('AI 整理成计划'), findsNothing);
-    expect(find.text('把清单合成一段通顺说明，写进「如何解决」'), findsOneWidget);
   });
 
   testWidgets('导出交接说明：菜单入口 → 预览页能看到生成的内容与隐私提醒', (tester) async {

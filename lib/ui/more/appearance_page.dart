@@ -71,14 +71,6 @@ class _AppearancePageState extends State<AppearancePage> {
               ),
 
               const SectionHeader('背景图 · 实验性'),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  '把一张图垫在界面底下。会保留一层底色保证文字读得清，'
-                  '所以背景始终是淡淡的；不喜欢随时可以移除。',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
               if (_app.backgroundBytes != null)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -101,7 +93,7 @@ class _AppearancePageState extends State<AppearancePage> {
               ListTile(
                 leading: const Icon(Icons.add_photo_alternate_outlined),
                 title: Text(prefs.hasBackground ? '换一张背景图' : '选择背景图'),
-                subtitle: const Text('从相册/文件里选，图会拷进应用私有目录'),
+                subtitle: const Text('图会拷进应用私有目录'),
                 enabled: !_busy,
                 onTap: _busy ? null : () => _pickBackground(context),
               ),

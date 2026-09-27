@@ -103,10 +103,11 @@ void main() {
 
     await openUpcoming(tester, app);
 
+    // 只留逐条对得上的数字，"这一页只列…"那句说明已删
     expect(find.textContaining('共 2 条任务'), findsOneWidget);
     expect(find.textContaining('已完成 1 条'), findsOneWidget);
     expect(find.textContaining('已搁置 1 条'), findsOneWidget);
-    expect(find.textContaining('这一页只列未完成'), findsOneWidget);
+    expect(find.textContaining('这一页只列'), findsNothing);
   });
 
   testWidgets('「日历」按钮打开任务日历，点一天能看到那天的任务', (tester) async {

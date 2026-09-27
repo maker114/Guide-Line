@@ -66,14 +66,6 @@ Future<String?> pickProject(
             padding: const EdgeInsets.all(12),
             child: Text(title, style: Theme.of(sheetContext).textTheme.titleMedium),
           ),
-          if (requireTarget)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                '灵感只能并进「目标」；分类只回答"归哪一类"。',
-                style: Theme.of(sheetContext).textTheme.bodySmall,
-              ),
-            ),
           if (flat.isEmpty)
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 8, 16, 16),

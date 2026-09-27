@@ -82,15 +82,7 @@ class _EventTabState extends State<EventTab> {
                   if (error != null) _toast(error, error: true);
                 },
               ),
-              if (events.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(
-                    '事件是一条任务线的起点，本身不设时间与描述',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                )
-              else
+              if (events.isNotEmpty)
                 // **一个事件一张卡**（与项目页同一种观感）：卡内靠"同框"表达归属，
                 // 卡与卡之间留空隙 —— 这是"两个不同事件"的唯一线索。
                 for (final event in events)
@@ -179,9 +171,8 @@ class _EventTabState extends State<EventTab> {
           padding: const EdgeInsets.fromLTRB(40, 0, 12, 10),
           child: Text(
             archivedCount > 0
-                ? '主线节点都归档了，共 $archivedCount 个 —— 显示与判定同一套取数，'
-                    '已归档的不画在任务线上；去「更多 → 归档区 → 已归档」取消归档'
-                : '还没有主线任务 —— 点开这条事件去加第一个节点',
+                ? '主线节点都归档了，共 $archivedCount 个，去「归档区 → 已归档」取消归档'
+                : '还没有主线任务',
             style: Theme.of(context).textTheme.labelSmall,
           ),
         ),

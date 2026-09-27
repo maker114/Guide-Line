@@ -90,7 +90,6 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
         final children = ws.childProjectsOf(widget.projectId);
         // 有下级 = 分类（Q2）；分类不装灵感，所以这一页不为它取灵感
         final isCategory = children.isNotEmpty;
-        final summary = isCategory ? ws.summarizeCategory(widget.projectId) : null;
         final inspirations = isCategory
             ? const <Inspiration>[]
             : (ws.liveInspirations
@@ -186,13 +185,20 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                   title: Text('属于「${parent.title}」', style: Theme.of(context).textTheme.labelMedium),
                 ),
               // 分类与目标看到的是**两套正文**（Q2）：
-              //   分类只回答"归哪一类" —— 名字（标题栏）、标识色、下级列表、汇总；
+              //   分类写**总纲领**（ADR-069：这一类要一起往哪走）+ 下级列表；
               //   目标才有一整套字段（有什么问题 / 思路、清单、如何解决、灵感）。
+              //
+              // 「汇总」卡已删（2026-09-27 实机反馈）：分类里装的是同一个方向的几件事，
+              // 这个方向理应有一个总纲领 —— 那句"含 N 个目标 / 清单 x/y"既不是纲领也不是
+              // 内容，占着首屏位置却回答不了任何问题。数字在下级行上就能看到。
               if (isCategory) ...<Widget>[
-                _CategorySummaryCard(
-                  app: app,
-                  project: project,
-                  summary: summary!,
+                _ProjectIconsRow(app: app, project: project, showDate: false),
+                _TextField(
+                  title: '总纲领',
+                  hint: '这一类要一起往哪走',
+                  value: project.purpose,
+                  onSubmitted: (value) =>
+                      app.run(() => ws.updateProject(project.id, purpose: value)),
                 ),
                 _ChildrenField(app: app, project: project, children: children),
               ] else ...<Widget>[
@@ -304,8 +310,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   /// 但拆错了必须找得到的事收在一处，入口挂在清单卡片的标题行上。
   ///
   /// 两件事都**只动清单、一个字都不动正文**（《定义与边界》§2.1：清单不参与
-  /// 完成判定，也与事件里的任务零联动）。入口本身也顺带说明"长按条目能做什么"——
-  /// 那是条目级操作唯一的入口，不说就没人知道。
+  /// 完成判定，也与事件里的任务零联动）。
   Future<void> _showChecklistActions(BuildContext context, Project project) async {
     final items = project.items;
     final action = await showModalBottomSheet<String>(
@@ -321,20 +326,11 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text('整理清单', style: theme.textTheme.titleMedium),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  items.isEmpty
-                      ? '清单现在是空的。'
-                      : '长按某一条，可以建成任务、上移、下移、删除。',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
               ListTile(
                 leading: const Icon(Icons.splitscreen_outlined),
                 title: const Text('按正文重拆'),
                 // 说清代价：怎么拆是猜的，而且会顶掉现有条目 —— 不可逆
-                subtitle: const Text('按行拆开「如何解决」；正文不动，怎么拆是猜的'),
+                subtitle: const Text('按行拆开正文；怎么拆是猜的'),
                 enabled: project.implementation.trim().isNotEmpty,
                 onTap: () => Navigator.of(sheetContext).pop('split'),
               ),
@@ -508,7 +504,7 @@ class _ImplementationBodyState extends State<_ImplementationBody> {
   Widget _editor(ThemeData theme, String value) {
     return InlineTextField(
       value: value,
-      hint: '如何解决 —— 灵感合并、AI 整理都会写到这里',
+      hint: '打算怎么做',
       minLines: 1,
       maxLines: 12,
       allowEmpty: true,
@@ -523,10 +519,17 @@ class _ImplementationBodyState extends State<_ImplementationBody> {
 /// 这一行原来是「状态」那一行 —— 项目取消完成 / 搁置之后（Q1），三态胶囊整个拿掉，
 /// 只留下这两个"设置一次就不再动"的图标。
 class _ProjectIconsRow extends StatelessWidget {
-  const _ProjectIconsRow({required this.app, required this.project});
+  const _ProjectIconsRow({
+    required this.app,
+    required this.project,
+    this.showDate = true,
+  });
 
   final AppController app;
   final Project project;
+
+  /// 分类**没有日期**（《定义与边界》§2.1）—— 那时不给日期图标。
+  final bool showDate;
 
   @override
   Widget build(BuildContext context) {
@@ -534,49 +537,7 @@ class _ProjectIconsRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: _IconActions(app: app, project: project),
-      ),
-    );
-  }
-}
-
-/// 分类详情页的**汇总卡**（Q2）。
-///
-/// 只显示算得出来的数字（口径见 `Workspace.summarizeCategory` / `CategorySummary`），
-/// 外加标识色入口 —— 分类没有目的 / 如何解决 / 清单 / 日期，所以这一页没有别的字段卡。
-class _CategorySummaryCard extends StatelessWidget {
-  const _CategorySummaryCard({
-    required this.app,
-    required this.project,
-    required this.summary,
-  });
-
-  final AppController app;
-  final Project project;
-  final CategorySummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return _FieldCard(
-      title: '汇总',
-      // 标识色仍可在这一页改（分类靠色条在树里认人）
-      trailing: _IconActions(app: app, project: project, showDate: false),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('含 ${summary.targetCount} 个目标', style: theme.textTheme.bodyMedium),
-          if (summary.itemTotal > 0)
-            Text(
-              '清单 ${summary.itemDone}/${summary.itemTotal} 已完成',
-              style: theme.textTheme.bodyMedium,
-            ),
-          const SizedBox(height: 4),
-          Text(
-            '分类只负责归类；要写内容、合并灵感，进它下面的目标。',
-            style: theme.textTheme.bodySmall,
-          ),
-        ],
+        child: _IconActions(app: app, project: project, showDate: showDate),
       ),
     );
   }
@@ -816,7 +777,14 @@ class _TextField extends StatelessWidget {
   }
 }
 
-class _ChildrenField extends StatelessWidget {
+/// 「下级」列表：**点一行就地展开**（ADR-070），展开后直接看到并勾选
+/// 那个下级的实现清单。
+///
+/// 分类里装的是同一个方向上的几件事（Q2）：在这一层要回答的是"这个方向走到哪了"，
+/// 所以一行下级只给三样东西 —— 名字、进度 `清单 n/m`、展开后的清单本体。
+/// 完整字段（问题 / 思路、如何解决、灵感）仍旧在下级自己的详情页里，
+/// 入口放在展开区的最后一步（「打开这个目标」）。
+class _ChildrenField extends StatefulWidget {
   const _ChildrenField({required this.app, required this.project, required this.children});
 
   final AppController app;
@@ -824,8 +792,18 @@ class _ChildrenField extends StatelessWidget {
   final List<Project> children;
 
   @override
+  State<_ChildrenField> createState() => _ChildrenFieldState();
+}
+
+class _ChildrenFieldState extends State<_ChildrenField> {
+  /// 已展开的下级（按 id 记）。勾一条清单就会触发整页重建，
+  /// 展开状态不能挂在临时变量上，否则勾一下就自己收起来了。
+  final Set<String> _expanded = <String>{};
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final children = widget.children;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -841,36 +819,31 @@ class _ChildrenField extends StatelessWidget {
             ],
           ),
         ),
-        if (children.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            // 「没有下级 = 目标」这条口径（§2.1）顺带说给用户听，
-            // 比干巴巴一句"还没有下级项目"有用
-            child: Text(
-              '还没有下级 —— 现在它自己就是一个目标。',
-              style: theme.textTheme.bodySmall,
+        if (children.isNotEmpty)
+          for (final child in children) ...<Widget>[
+            _ChildRow(
+              key: ValueKey<String>(child.id),
+              child: child,
+              expanded: _expanded.contains(child.id),
+              onToggle: () => setState(() {
+                // `remove` 返回 false = 原本没展开，那就展开
+                if (!_expanded.remove(child.id)) _expanded.add(child.id);
+              }),
             ),
-          )
-        else
-          for (final child in children)
-            // 比主项目行更紧凑：小图标 + 小字号 + 一行式副标题，
-            // 缩进 24 表达层级（`contentPadding` 同时收紧到 8，
-            // 原来是 `ListTile` 默认的 16 + 20 图标位，显得空）
-            ListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              contentPadding: const EdgeInsets.only(left: 24, right: 12),
-              minLeadingWidth: 18,
-              leading: ProjectMarker(color: child.color, size: 12),
-              title: Text(child.title, style: theme.textTheme.bodyMedium),
-              subtitle: _childSubtitle(theme, child),
-              trailing: const Icon(Icons.chevron_right, size: 18),
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => ProjectDetailPage(app: app, projectId: child.id),
+            if (_expanded.contains(child.id))
+              _ChildChecklist(
+                app: widget.app,
+                child: child,
+                onOpen: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProjectDetailPage(
+                      app: widget.app,
+                      projectId: child.id,
+                    ),
+                  ),
                 ),
               ),
-            ),
+          ],
         // 新建下级：文案随层级走（Q2）—— 在**分类**下新建的是「目标」。
         // 用现成的 `InlineComposer`，不新增控件；放在下级列表**末尾**
         // （与「实现清单」的「添加条目」同一个位置习惯）。
@@ -884,8 +857,8 @@ class _ChildrenField extends StatelessWidget {
           leading: Icons.add,
           dense: true,
           onCreate: (title) {
-            final error = app.run(
-              () => app.ws.createProject(title: title, parentId: project.id),
+            final error = widget.app.run(
+              () => widget.app.ws.createProject(title: title, parentId: widget.project.id),
             );
             if (error != null) showToast(context, error, error: true);
           },
@@ -895,16 +868,154 @@ class _ChildrenField extends StatelessWidget {
   }
 }
 
-/// 下级项目行的副标题：**一行搞定**（有日期才给），没有就不显示。
+/// 一行下级：**点它就展开 / 收起**。
 ///
+/// 展开方向只用一个记号表示（行尾的 `chevron_right` 转到朝下），
+/// 进详情页的入口放在展开区里 —— 一行上挂两个"点我"的记号只会让人犹豫。
+class _ChildRow extends StatelessWidget {
+  const _ChildRow({
+    super.key,
+    required this.child,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final Project child;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final subtitle = _childSubtitle(theme, child);
+    return InkWell(
+      onTap: onToggle,
+      child: Padding(
+        // 比主项目行更紧凑：缩进 24 表达层级，字号降一档
+        padding: const EdgeInsets.fromLTRB(24, 6, 12, 6),
+        child: Row(
+          children: <Widget>[
+            ProjectMarker(color: child.color, size: 12),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(child.title, style: theme.textTheme.bodyMedium),
+                  ?subtitle,
+                ],
+              ),
+            ),
+            AnimatedRotation(
+              turns: expanded ? 0.25 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: const Icon(Icons.chevron_right, size: 18),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 展开后的**实现清单**：就地打勾。
+///
+/// 打勾的口径与项目页一致（`ProjectChecklist`）：**只是打勾，不参与任何判定**，
+/// 全勾完也不会把项目变成已完成（项目没有完成态，见 Q1）。
+///
+/// 这里**只**能勾和加：改字、删条目、上移下移、建成任务都留在下级自己的详情页
+/// —— 一个展开区里塞两套操作，用户在分类页就分不清自己在改哪一层了。
+class _ChildChecklist extends StatelessWidget {
+  const _ChildChecklist({
+    required this.app,
+    required this.child,
+    required this.onOpen,
+  });
+
+  final AppController app;
+  final Project child;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // 缩进对齐上级那一行的标题文字（24 缩进 + 12 标识色 + 12 间距 = 48）
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(40, 0, 12, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (final item in child.items)
+            CheckboxListTile(
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: item.done,
+              onChanged: (value) => _setDone(context, item.id, value ?? false),
+              title: Text(
+                item.text,
+                style: item.done
+                    ? theme.textTheme.bodySmall?.copyWith(
+                        decoration: TextDecoration.lineThrough,
+                        color: theme.colorScheme.outline,
+                      )
+                    : theme.textTheme.bodySmall,
+              ),
+            ),
+          InlineComposer(
+            label: '添加条目',
+            hint: '这条要做什么',
+            leading: Icons.add,
+            dense: true,
+            onCreate: (text) => _run(context, () => app.ws.addProjectItem(child.id, text)),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onOpen,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('打开这个目标'),
+              style: TextButton.styleFrom(
+                shape: AppShapes.pill,
+                foregroundColor: theme.colorScheme.onSurfaceVariant,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _setDone(BuildContext context, String itemId, bool value) =>
+      _run(context, () => app.ws.setProjectItemDone(child.id, itemId, value));
+
+  void _run(BuildContext context, void Function() action) {
+    final error = app.run(action);
+    if (error != null && context.mounted) showToast(context, error, error: true);
+  }
+}
+
+/// 下级项目行的副标题：**一行搞定**，没有内容就整行不显示。
+///
+/// 只放两个"一眼能做决定"的数字与记号：清单进度（决定要不要展开）与日期。
 /// 原来固定写「未设置日期」，每条都多一行字，既占地方又没信息量；
-/// 现在项目也没有状态可写（Q1），所以这里只剩日期一项。
+/// 现在项目也没有状态可写（Q1），所以这里只剩这两项。
 ///
 /// 私有（Q41）：全仓只有这一页的下级行用它，公开出去只是给"零调用"留口子。
 Text? _childSubtitle(ThemeData theme, Project child) {
-  if (child.date == null) return null;
+  final parts = <String>[
+    if (child.items.isNotEmpty) '清单 ${child.itemsDoneCount}/${child.items.length}',
+    if (child.date != null) describeDate(child.date),
+  ];
+  if (parts.isEmpty) return null;
   return Text(
-    describeDate(child.date),
+    parts.join(' · '),
     style: theme.textTheme.labelSmall,
     maxLines: 1,
     overflow: TextOverflow.ellipsis,
@@ -932,15 +1043,7 @@ class _InspirationsField extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: Text('待处理灵感 ${inspirations.length}', style: theme.textTheme.labelLarge),
         ),
-        if (inspirations.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Text(
-              '这个项目下没有待处理灵感。想到什么，去灵感页记一句。',
-              style: theme.textTheme.bodySmall,
-            ),
-          )
-        else ...<Widget>[
+        if (inspirations.isNotEmpty) ...<Widget>[
           // 点一条**直接进合并编辑器**（灵感整理第 9 条）。
           // 原来这里是只读列表，还让用户"去灵感页合并"——入口绕了一圈。
           for (final inspiration in inspirations)
@@ -952,13 +1055,6 @@ class _InspirationsField extends StatelessWidget {
               trailing: const Icon(Icons.merge_type, size: 18),
               onTap: () => _merge(context, inspiration),
             ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: Text(
-              '点一条即可把它并进「如何解决」，或直接追加成清单的一条',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
         ],
       ],
     );

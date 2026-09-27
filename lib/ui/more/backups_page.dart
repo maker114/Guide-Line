@@ -42,13 +42,13 @@ class BackupsPage extends StatelessWidget {
               ListTile(
                 leading: const Icon(Icons.backup_outlined),
                 title: const Text('立即备份一份'),
-                subtitle: const Text('把当前数据写入主文件，并立刻轮转出一份备份，不等最小间隔'),
+                subtitle: const Text('立刻存一次并留一份备份，不等最小间隔'),
                 onTap: () => _snapshot(context),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Text(
-                  '备份代表「一段完整操作」：进编辑页面后第一次落盘时留一份，离开页面时结算。'
+                  // 只留"会被覆盖、想反悔要尽快"这一句：它是丢失风险
                   '滚动备份只保留 ${AppPaths.rollingBackupCount} 份，'
                   '会被后续保存一份份覆盖 —— 想反悔要尽快。',
                   style: theme.textTheme.bodySmall,
@@ -58,7 +58,7 @@ class BackupsPage extends StatelessWidget {
               if (backups.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text('还没有备份。随便改点什么存一次，它就会出现 —— 没有云端时，它是唯一的安全网。'),
+                  child: Text('还没有备份'),
                 )
               else
                 for (final entry in backups)

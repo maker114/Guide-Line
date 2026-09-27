@@ -250,7 +250,7 @@ class InspirationTabState extends State<InspirationTab> {
                       // 用户会以为灵感没了（Q10）
                       hint: hiddenCount > 0
                           ? '另有 $hiddenCount 条在已归档项目下，去归档区看'
-                          : '上面那个框随手写一句就行 —— 归到哪个项目，是以后才要操心的事',
+                          : null,
                     )
                   // 箱子不空、只是被筛掉了：必须说清"一共还有多少条"，
                   // 否则用户会以为灵感丢了

@@ -174,7 +174,7 @@ void main() {
 
     expect(find.textContaining('开关即时生效'), findsOneWidget);
     expect(find.textContaining('要按右上角「保存」才写入'), findsOneWidget);
-    expect(find.textContaining('这一下不会保存'), findsOneWidget, reason: '按钮旁的说明要如实');
+    expect(find.textContaining('不会保存'), findsOneWidget, reason: '按钮旁的说明要如实');
   });
 }
 

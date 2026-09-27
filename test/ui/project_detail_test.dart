@@ -15,10 +15,13 @@ import 'scroll_finders.dart';
 ///     点「重命名」后标题栏原地变成输入框，带确认 / 取消；
 ///   · **项目没有完成态**（Q1）：这一页没有状态胶囊，也没有
 ///     「还有 N 个子项目未处理」这类提示；
-///   · **分类与目标两套正文**（Q2）：分类只有名字 / 标识色 / 下级 / 汇总，
-///     不出现目的、清单、如何解决、日期，也没有灵感合并入口；
+///   · **分类与目标两套正文**（Q2）：分类只有标识色 / 总纲领 / 下级，
+///     不出现清单、如何解决、日期，也没有灵感合并入口；
+///   · 下级可以**就地展开**，展开后能直接看到并勾选那个下级的实现清单
+///     （进它的详情页走展开区里的「打开这个目标」）；
 ///   · 字段改称「有什么问题 / 思路」与「如何解决」（Q4）；
-///   · 字段的**就地编辑默认带确认 / 取消**（Q33），空态文案顺口一点（Q35）。
+///   · 字段的**就地编辑默认带确认 / 取消**（Q33）；说明性文字整批收掉，
+///     空态只留计数（实机反馈：教程用户自己做）。
 void main() {
   late Directory tempDir;
 
@@ -205,34 +208,46 @@ void main() {
     expect(find.textContaining('先把口子收窄'), findsOneWidget);
   });
 
-  testWidgets('分类详情页：只有名字 / 标识色 / 下级 / 汇总，不出现目的 / 清单 / 如何解决 / 日期', (tester) async {
+  testWidgets('分类详情页：一个总纲领输入框 + 可展开的下级，不出现清单 / 如何解决 / 日期', (tester) async {
     final app = await boot();
     final category = app.ws.createProject(title: '工作');
     final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    // 分类要的是「总纲领」——**同一个 `purpose` 字段**，只是换了个标题：
+    // 分类里装的是同一个方向的几件事，这个方向理应有一句总纲（实机反馈）
+    app.run(
+      () => app.ws.updateProject(
+        category.id,
+        purpose: '这一类都为了把 v1 发出去',
+        date: '2026-12-31',
+      ),
+    );
     // 故意给分类塞上"目标才有"的内容：它一个都不该显示
-    app.run(() => app.ws.updateProject(category.id, purpose: '分类不该有目的', date: '2026-12-31'));
     app.run(() => app.ws.replaceImplementation(category.id, '分类不该有正文'));
     app.run(() => app.ws.addProjectItem(category.id, '分类不该有清单条'));
-    // 目标自己有清单 → 汇总里能算出来
     app.run(() => app.ws.addProjectItem(target.id, '目标的一条'));
 
     await openProject(tester, app, '工作');
 
-    expect(find.text('汇总'), findsOneWidget);
-    expect(find.text('含 1 个目标'), findsOneWidget);
-    expect(find.text('清单 0/1 已完成'), findsOneWidget);
+    expect(find.text('总纲领'), findsOneWidget);
+    expect(find.text('这一类都为了把 v1 发出去'), findsOneWidget);
     expect(find.text('下级'), findsOneWidget);
     expect(find.text('发布 v1'), findsOneWidget);
+    // 「汇总」卡已删：那句"含 N 个目标 / 清单 x/y"既不是纲领也不是内容，
+    // 数字挪到下级行上，需要时一眼就能看到
+    expect(find.text('汇总'), findsNothing);
+    expect(find.text('含 1 个目标'), findsNothing);
+    expect(find.text('清单 0/1'), findsOneWidget, reason: '进度挂在下一个级行上');
 
     // 分类上没有的东西
     expect(find.text('有什么问题 / 思路'), findsNothing);
     expect(find.text('如何解决'), findsNothing);
     expect(find.text('实现清单'), findsNothing);
-    expect(find.text('分类不该有目的'), findsNothing);
     expect(find.text('分类不该有正文'), findsNothing);
     expect(find.text('分类不该有清单条'), findsNothing);
+    // 分类没有日期（《定义与边界》§2.1）：连日期图标都不给
     expect(find.text('日期'), findsNothing);
     expect(find.textContaining('2026-12-31'), findsNothing);
+    expect(find.byTooltip('日期：点一下选'), findsNothing);
     // 分类不装灵感：这一页没有灵感区，也没有交接导出
     expect(find.textContaining('待处理灵感'), findsNothing);
     await tester.tap(find.byTooltip('更多'));
@@ -243,21 +258,71 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('空态文案：下级与灵感都顺口说一句"现在是什么情况"（Q35）', (tester) async {
+  testWidgets('分类的下级可以展开：展开后能看到并勾选它的实现清单', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    app.run(() => app.ws.addProjectItem(target.id, '写好发布说明'));
+
+    await openProject(tester, app, '工作');
+
+    // 收起时只给进度，不给清单内容 —— 一行下级不该把整页撑开
+    expect(find.text('写好发布说明'), findsNothing);
+
+    await tester.tap(find.text('发布 v1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('写好发布说明'), findsOneWidget);
+    // 就地打勾：与项目页同一个口径（只是打勾，不参与任何判定）
+    await tester.tap(find.byType(Checkbox));
+    await tester.pumpAndSettle();
+    expect(app.ws.findProject(target.id)!.items.single.done, isTrue);
+    expect(app.ws.findProject(target.id)!.itemsDoneCount, 1);
+    expect(find.text('已完成'), findsNothing, reason: '项目没有完成态（Q1）');
+
+    // 勾完不会自己收起来（展开状态挂在 State 上）
+    expect(find.text('写好发布说明'), findsOneWidget);
+
+    await tester.tap(find.text('发布 v1'));
+    await tester.pumpAndSettle();
+    expect(find.text('写好发布说明'), findsNothing);
+    expect(app.ws.findProject(target.id)!.items.single.done, isTrue, reason: '收起不会把勾去掉');
+  });
+
+  testWidgets('展开区里的「打开这个目标」进的是下级自己的详情页', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    app.run(() => app.ws.updateProject(target.id, purpose: '发布页还差一个回滚口径'));
+
+    await openProject(tester, app, '工作');
+    await tester.tap(find.text('发布 v1'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('打开这个目标'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('有什么问题 / 思路'), findsOneWidget);
+    expect(find.text('发布页还差一个回滚口径'), findsOneWidget);
+  });
+
+  testWidgets('空态只剩计数：下级 0 与"待处理灵感 0"，不再配说明性文字', (tester) async {
     final app = await boot();
     app.ws.createProject(title: '光杆目标');
 
     await openProject(tester, app, '光杆目标');
 
-    // 「没有下级 = 目标」这条口径本来就该让用户看到，比干巴巴一句"还没有下级项目"有用
-    expect(find.text('还没有下级 —— 现在它自己就是一个目标。'), findsOneWidget);
+    // 说明性文字整批收掉（用户自己做教程）：空态只留标题里的计数
+    expect(find.text('下级'), findsOneWidget);
+    expect(find.textContaining('还没有下级'), findsNothing);
     await tester.scrollUntilVisible(
-      find.text('这个项目下没有待处理灵感。想到什么，去灵感页记一句。'),
+      find.text('待处理灵感 0'),
       150,
       scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
-    expect(find.text('这个项目下没有待处理灵感。想到什么，去灵感页记一句。'), findsOneWidget);
+    expect(find.text('待处理灵感 0'), findsOneWidget);
+    expect(find.textContaining('去灵感页记一句'), findsNothing);
   });
 
   testWidgets('新建入口文案随层级：分类下是「新建目标」（复用 InlineComposer）', (tester) async {

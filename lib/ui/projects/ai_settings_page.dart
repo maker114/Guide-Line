@@ -89,9 +89,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   value: widget.app.aiEnabled,
                   title: const Text('启用 AI 整理'),
                   subtitle: Text(
-                    widget.app.aiEnabled
-                        ? '关掉后项目里不再出现 AI 整理入口；地址、模型与 Key 都保留'
-                        : '已关闭：项目里不显示 AI 整理入口，地址、模型与 Key 仍然保留',
+                    widget.app.aiEnabled ? '关掉后项目里不再出现 AI 整理入口，配置保留' : '已关闭',
                     style: theme.textTheme.bodySmall,
                   ),
                   onChanged: (value) => setState(() => widget.app.setAiEnabled(value)),
@@ -103,8 +101,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                   child: Text(
-                    '开关即时生效；下面的地址 / 模型 / Key 要按右上角「保存」才写入，'
-                    '「测试连接」只试不存。',
+                    '开关即时生效；下面的地址 / 模型 / Key 要按右上角「保存」才写入。',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),
@@ -112,14 +109,13 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   label: 'API 地址',
                   hint: AiConfig.defaultBaseUrl,
                   controller: _baseUrl,
-                  helper: '填根地址即可，会自动补 /chat/completions；'
-                      '带路径也认得，/v1 这类版本前缀可以留着',
+                  helper: '填根地址即可，会自动补 /chat/completions',
                 ),
                 _Field(
                   label: '模型',
                   hint: AiConfig.defaultModel,
                   controller: _model,
-                  helper: '默认 deepseek-flash；换别的兼容端点时按那边的模型名填',
+                  helper: '默认 deepseek-flash；换别的兼容端点时填那边的模型名',
                 ),
                 _Field(
                   label: 'API Key',
@@ -165,8 +161,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          '会真的发一次请求，只发一句测试文字、不含你的任何数据；'
-                          '但这一下不会保存 —— 存下来要按右上角「保存」',
+                          '只发一句测试文字，不含你的数据；不会保存',
                           style: theme.textTheme.labelSmall,
                         ),
                       ),
@@ -200,13 +195,13 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       const SizedBox(height: 6),
                       // 字段名三处一致（Q4）：项目详情页、这一页的说明、线上提示词
                       // （`ai_client.dart`）都写「有什么问题 / 思路」与「实现清单」。
-                      _Bullet('项目名称、项目「有什么问题 / 思路」、清单里的条目文本与勾选状态'),
-                      _Bullet('还有一段固定的提示词，要求它只整理、不新增内容'),
+                      _Bullet('项目名称、项目「有什么问题 / 思路」、清单条目文本与勾选状态，'
+                          '以及一段要求它只整理不新增的固定提示词'),
                       const SizedBox(height: 12),
                       Text('不会发出去什么', style: theme.textTheme.labelLarge),
                       const SizedBox(height: 6),
-                      _Bullet('灵感原文、事件与任务、其它项目、设备信息 —— 一律不发'),
-                      _Bullet('提示词与模型返回的原文都不会落盘'),
+                      _Bullet('灵感原文、事件与任务、其它项目、设备信息；'
+                          '提示词与模型返回的原文也都不落盘'),
                       const SizedBox(height: 12),
                       Text('请求只会发到你上面填的地址。', style: theme.textTheme.bodySmall),
                     ],
@@ -288,9 +283,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
       _testOk = result.ok;
       // 成功时补一句"还没保存"：不然用户会以为测通 = 存好了，
       // 关掉页面再回来发现地址还是旧的（这正是要避免的那类惊讶）。
-      _testResult = result.ok
-          ? '${result.message}\n\n这次只是试跑：上面的配置还没保存，按右上角「保存」才会写入'
-          : result.message;
+      _testResult = result.ok ? '${result.message}\n\n还没保存：按右上角「保存」才会写入' : result.message;
     });
   }
 }

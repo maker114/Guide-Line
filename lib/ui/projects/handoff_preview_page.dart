@@ -55,7 +55,7 @@ class _HandoffPreviewPageState extends State<HandoffPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Text(
-              '下面这份就是将要导出的内容，可以直接改 —— 不想给出去的部分删掉即可。',
+              '可以直接改 —— 不想给出去的部分删掉即可。',
               style: theme.textTheme.bodySmall,
             ),
           ),

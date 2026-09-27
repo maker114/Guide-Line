@@ -57,8 +57,7 @@ class ProjectChecklist extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Text('还没有条目。把「如何解决」拆成一条条清单，开工时就不用一边做一边回忆了。',
-                    style: theme.textTheme.bodySmall),
+                Text('还没有条目', style: theme.textTheme.bodySmall),
                 if (project.implementation.trim().isNotEmpty)
                   Align(
                     alignment: Alignment.centerLeft,
@@ -72,12 +71,6 @@ class ProjectChecklist extends StatelessWidget {
             ),
           )
         else ...<Widget>[
-          // 上移 / 下移 / 建成任务 / 删除**只有长按这一条路**，不说一句用户
-          // 永远不知道（Q32 / Q24）。
-          Padding(
-            padding: const EdgeInsets.only(left: 4, right: 4, bottom: 2),
-            child: Text('长按条目可以建成任务、上移、下移、删除', style: theme.textTheme.bodySmall),
-          ),
           for (var i = 0; i < items.length; i += 1)
             _ItemRow(
               app: app,
@@ -107,7 +100,6 @@ class ProjectChecklist extends StatelessWidget {
               dense: true,
               leading: const Icon(Icons.auto_awesome_outlined, size: 18),
               title: const Text('AI 整理成「如何解决」'),
-              subtitle: const Text('把清单合成一段通顺说明，写进「如何解决」'),
               onTap: () => startAiSummarize(context, app, project.id, project.title),
             ),
           ),
@@ -213,7 +205,7 @@ class _ItemRow extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.playlist_add_check),
               title: const Text('建成任务…'),
-              subtitle: const Text('在某个事件末尾新建一条同名任务；条目留着，之后互不影响'),
+              subtitle: const Text('在某个事件末尾新建一条同名任务'),
               onTap: () => Navigator.of(sheetContext).pop('task'),
             ),
             if (!isFirst)

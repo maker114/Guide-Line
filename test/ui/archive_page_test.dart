@@ -121,7 +121,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining('到期的条目会在下次启动时自动清除'),
+      find.textContaining('到期的在下次启动时自动清除'),
       findsOneWidget,
       reason: '清理只发生在启动时，说明里必须写出来',
     );
@@ -190,7 +190,7 @@ void main() {
 
     // 分区说明先说清代价，动作名再说一遍 —— 名字与语义必须一致
     expect(
-      find.textContaining('恢复为待处理只把灵感放回灵感箱，项目里的内容不会退回'),
+      find.textContaining('项目里的内容不会退回'),
       findsOneWidget,
     );
     await tester.tap(find.byTooltip('更多'));
@@ -230,9 +230,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.textContaining('单独归档的子任务也能在这里找回'),
+      find.textContaining('单独归档的子任务也会列在这里'),
       findsOneWidget,
-      reason: '任务线里不再显示已归档节点，说明里必须给出去处',
+      reason: '任务线里不显示已归档节点，说明里必须给出去处',
     );
     // 它真的在这一区里（父节点还活着 → 它就是归档根）
     expect(find.text('被归档的子任务'), findsOneWidget);

@@ -102,7 +102,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
             child: Text(
-              '下面是模型给出的整理稿，可以直接改；写入后清单不受影响，只替换「如何解决」。',
+              '可以直接改；写入只替换「如何解决」，清单不动。',
               style: theme.textTheme.bodySmall,
             ),
           ),

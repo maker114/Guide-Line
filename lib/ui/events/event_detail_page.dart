@@ -315,9 +315,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
                     // 「空了」有两种（Q18）：新事件确实没任务，和节点全被归档了。
                     // 已归档节点不再画在任务线上，所以后者必须说清去哪找回。
                     _archivedMainLineCount() > 0
-                        ? '这条线的 ${_archivedMainLineCount()} 个主线节点都已归档 —— '
-                            '任务线只画未归档的节点；去「更多 → 归档区 → 已归档」取消归档'
-                        : '这条任务线还是空的 —— 一条线就是一件事的脉络，一个节点接着一个节点往下走',
+                        ? '这条线的 ${_archivedMainLineCount()} 个主线节点都已归档，'
+                            '去「归档区 → 已归档」取消归档'
+                        : '还没有主线任务',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 )

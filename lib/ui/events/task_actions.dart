@@ -104,13 +104,6 @@ Future<void> changeTaskParentAction(
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                '一条线只有两层：主线节点 + 挂在节点里的子任务',
-                style: theme.textTheme.bodySmall,
-              ),
-            ),
             if (!inMainLine)
               ListTile(
                 leading: const Icon(Icons.vertical_align_top),
@@ -123,8 +116,7 @@ Future<void> changeTaskParentAction(
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                 child: Text(
-                  '这条下面还有 $descendantCount 个下级，而子任务不能再有下级 —— '
-                  '想挂到某个节点下，先把下级移走',
+                  '这条下面还有 $descendantCount 个下级，子任务不能再有下级',
                   style: theme.textTheme.bodySmall,
                 ),
               )
@@ -139,7 +131,7 @@ Future<void> changeTaskParentAction(
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   child: Text(
-                    '这个事件里还没有别的节点可以挂 —— 主线上的节点才装得下东西',
+                    '这个事件里还没有别的节点可以挂',
                     style: theme.textTheme.bodySmall,
                   ),
                 ),

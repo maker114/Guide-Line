@@ -31,11 +31,11 @@ class AppInfo {
 
   static const String displayName = 'Guide Line';
 
-  static const String version = '1.5.4';
+  static const String version = '1.5.5';
 
-  static const String buildNumber = '28';
+  static const String buildNumber = '29';
 
-  /// 界面与导出里展示的完整版本（`1.5.4+28`）。
+  /// 界面与导出里展示的完整版本（`1.5.5+29`）。
   ///
   /// 只留这一个源头：以前 `pubspec.yaml`、关于对话框、更多页各写一遍，
   /// 发版时必然漏一个（1.0.0 就是漏到 1.1.0 才发现），所以这里拼出来给界面用。

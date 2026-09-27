@@ -113,7 +113,7 @@ void main() {
     // 进任务线
     await tester.tap(find.text('手机端上线'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('这条任务线还是空的'), findsOneWidget);
+    expect(find.text('还没有主线任务'), findsOneWidget);
 
     // 新建主线任务：现在是任务线末尾的页内输入行
     await submitInlineComposer(tester, '新建主线任务', '完成四个 Tab');
@@ -368,7 +368,7 @@ void main() {
       scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
-    expect(find.text('长按条目可以建成任务、上移、下移、删除'), findsOneWidget);
+    expect(find.text('重拆 / 清空'), findsOneWidget);
     await tester.tap(find.text('重拆 / 清空'));
     await tester.pumpAndSettle();
     expect(find.text('整理清单'), findsOneWidget, reason: '面板本身也不能在放大字体下溢出');

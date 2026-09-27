@@ -112,11 +112,6 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   List<String> get _originalTexts =>
       <String>[for (final inspiration in widget.inspirations) inspiration.text];
 
-  /// 文案里的主语：一条说"这条灵感"，多条说"N 条灵感"。
-  String get _subject => widget.inspirations.length > 1
-      ? '这 ${widget.inspirations.length} 条灵感'
-      : '这条灵感';
-
   @override
   void dispose() {
     _implementation.dispose();
@@ -175,14 +170,6 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               child: Text(categoryNotForInspiration, style: theme.textTheme.titleMedium),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text(
-                '「${widget.project.title}」下面还有下级项目，它自己是分类 —— '
-                '分类只回答"归哪一类"。把$_subject并进它下面的某个目标，或者先建一个目标。',
-                style: theme.textTheme.bodySmall,
-              ),
             ),
             _ReferencePanel(
               texts: _originalTexts,
@@ -243,9 +230,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
                 keyboardType: TextInputType.multiline,
                 decoration: InputDecoration(
                   border: const OutlineInputBorder(),
-                  hintText: widget.inspirations.length > 1
-                      ? '照着这几条灵感把正文改清楚，改完点右上角「保存」'
-                      : '照着这条灵感把正文改清楚，改完点右上角「保存」',
+                  hintText: '改成你要的样子',
                 ),
               ),
             ),
@@ -271,12 +256,8 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
             child: Text(
-              '「追加原文」和手改都走「保存」：保存后项目正文更新，$_subject从灵感箱消失。'
-              '「作为清单条目」不碰正文，直接把原文追加成清单的新'
-              '${widget.inspirations.length > 1 ? '若干条，一条灵感一条' : '一条'}'
-              '；上面没保存的改动不会写回。'
-              '两种情况都能在「更多 → 归档区 → 已合并」里「恢复为待处理」—— '
-              '但项目里的内容不会退回，已经写进去的那一行或那条不会消失。',
+              // 唯一必须留的一句：恢复灵感**不会**把已经写进项目的内容退回去
+              '「恢复为待处理」只把灵感放回灵感箱，项目里的内容不会退回。',
               style: theme.textTheme.bodySmall,
             ),
           ),

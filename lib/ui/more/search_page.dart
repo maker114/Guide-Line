@@ -201,13 +201,13 @@ class _SearchPageState extends State<SearchPage> {
                     ? const EmptyState(
                         icon: Icons.search,
                         title: '输入关键词开始搜索',
-                        hint: '搜索范围：未归档的项目 / 事件 / 任务，以及待处理的灵感',
+                        hint: '范围：未归档的项目 / 事件 / 任务与待处理灵感',
                       )
                     : shown.isEmpty
                         ? const EmptyState(
                             icon: Icons.search_off,
                             title: '没有匹配的结果',
-                            hint: '换个词试试；已归档与已丢弃的去了归档区，不在这儿露面',
+                            hint: '换个词试试；已归档与已丢弃的去了归档区',
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
@@ -361,11 +361,6 @@ class _HitTile extends StatelessWidget {
                   Text('灵感原文', style: Theme.of(sheetContext).textTheme.labelLarge),
                   const SizedBox(height: 8),
                   Text(inspiration.text),
-                  const SizedBox(height: 12),
-                  Text(
-                    '去「灵感」页可以把它分配 / 合并 / 丢弃',
-                    style: Theme.of(sheetContext).textTheme.bodySmall,
-                  ),
                 ],
               ),
             ),

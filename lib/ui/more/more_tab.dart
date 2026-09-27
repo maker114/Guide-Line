@@ -137,7 +137,7 @@ class _MoreTabState extends State<MoreTab> {
     if (app.exportOverdue) {
       return '上次导出 $when，已超过 ${AppController.exportReminderDays} 天';
     }
-    return '上次导出 $when · 导出为 .json.gz 后可分享出去';
+    return '上次导出 $when';
   }
 
   /// 外观入口的副标题：一眼看出当前是哪套主题、有没有背景图。
@@ -160,7 +160,7 @@ class _MoreTabState extends State<MoreTab> {
   /// 藏掉它就等于"关掉之后再也没法打开"。
   Widget _aiSubtitle(BuildContext context) {
     if (!app.aiEnabled) {
-      return Text('已关闭 · 项目里不再显示 AI 整理入口', style: Theme.of(context).textTheme.bodySmall);
+      return Text('已关闭', style: Theme.of(context).textTheme.bodySmall);
     }
     return FutureBuilder<AiConfig>(
       future: _aiConfig,
@@ -168,8 +168,7 @@ class _MoreTabState extends State<MoreTab> {
         final config = snapshot.data;
         final String text;
         if (config == null) {
-          // 字段已改称「如何解决」（Q4），提示词与详情页都用这个词
-          text = '用于把实现清单整理成「如何解决」';
+          text = '把实现清单整理成「如何解决」';
         } else if (config.isConfigured) {
           text = '已配置 · ${config.model}';
         } else {

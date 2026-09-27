@@ -80,8 +80,8 @@ class _ExportPageState extends State<ExportPage> {
                       Text(
                         app.exportOverdue
                             ? '建议每 ${AppController.exportReminderDays} 天导出一次 —— '
-                                '这个 App 没有云端，手机丢了或卸载了，数据就只剩这份导出。'
-                            : '导出的备份还不算旧，保持这个节奏就好。',
+                                '没有云端，手机丢了或卸载了，数据就只剩这份导出。'
+                            : '导出的备份还不算旧。',
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
@@ -91,21 +91,21 @@ class _ExportPageState extends State<ExportPage> {
               ListTile(
                 leading: const Icon(Icons.ios_share),
                 title: const Text('导出并分享'),
-                subtitle: const Text('导出为 .json.gz，再交给系统分享：微信 / 邮件 / 网盘 / 电脑'),
+                subtitle: const Text('导出为 .json.gz，再交给系统分享'),
                 enabled: !_busy,
                 onTap: _busy ? null : () => _export(context),
               ),
               ListTile(
                 leading: const Icon(Icons.file_download_outlined),
                 title: const Text('从文件导入'),
-                subtitle: const Text('整体替换当前数据，替换前会自动留一份备份'),
+                subtitle: const Text('整体替换当前数据；替换前会自动留一份备份'),
                 enabled: !_busy,
                 onTap: _busy ? null : () => _import(context),
               ),
               ListTile(
                 leading: const Icon(Icons.merge_type),
                 title: const Text('合并导入'),
-                subtitle: const Text('把两份数据并成一份：各自独有的都留下，同一条以较新的为准'),
+                subtitle: const Text('两份并成一份，同一条以较新的为准；合并前会先留备份'),
                 enabled: !_busy,
                 onTap: _busy ? null : () => _mergeImport(context),
               ),
@@ -119,17 +119,10 @@ class _ExportPageState extends State<ExportPage> {
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                 child: Text('说明', style: theme.textTheme.labelLarge),
               ),
-              const _Bullet('导出内容是全部四类记录，含已归档与回收站；不含界面偏好。'),
-              const _Bullet('文件名形如 guideline-20260923-134500.json.gz，gzip 压缩的 JSON，'
-                  '每条记录的字段与《数据契约》完全一致。'),
-              const _Bullet('「从文件导入」是整体替换：文件里有什么，这台手机就变成什么；'
-                  '替换前当前数据会先轮转进滚动备份，导错了可以在「备份与恢复」里退回来。'),
-              const _Bullet('「合并导入」把两份数据并成一份：两边各自独有的记录都留下，'
-                  '同一条记录以较新的一方为准；时间戳相同的以本机为准。'
-                  '合并前同样会先留一份备份。'),
-              const _Bullet('导出文件只写在应用私有目录，分享时由系统按次授权给目标 App 读取，'
-                  '不需要存储权限，也不会被别的 App 扫到。'),
-              const _Bullet('电脑端导出的旧格式也能直接导入，指 v1 的四文档信封。'),
+              // 只留与"会不会丢数据"有关的两条
+              const _Bullet('「从文件导入」是整体替换：文件里有什么，这台手机就变成什么。'
+                  '替换前会先留一份备份，导错了可以在「备份与恢复」里退回来。'),
+              const _Bullet('「合并导入」同一条记录以较新的一方为准，合并前同样先留一份备份。'),
             ],
           ),
         );

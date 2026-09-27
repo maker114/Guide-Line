@@ -112,7 +112,7 @@ class UpcomingTasksPage extends StatelessWidget {
   String _whyEmpty() {
     final unarchived =
         app.ws.liveTasks.where((t) => !t.archived).toList(growable: false);
-    if (unarchived.isEmpty) return '还没有任务：去「事件」页给某条线加几条';
+    if (unarchived.isEmpty) return '还没有任务';
 
     final done = unarchived.where((t) => t.status == NodeStatus.done).length;
     final ignored = unarchived.where((t) => t.status == NodeStatus.ignored).length;
@@ -124,7 +124,6 @@ class UpcomingTasksPage extends StatelessWidget {
       if (ignored > 0) '已搁置 $ignored 条',
     ];
     final archivedNote = archived > 0 ? '；另有 $archived 条已归档，去归档区看' : '';
-    return '${parts.join(' · ')}。这一页只列未完成、未归档的$archivedNote。'
-        '要看含已完成的全部，切到「全部任务」';
+    return '${parts.join(' · ')}$archivedNote';
   }
 }
