@@ -65,7 +65,7 @@ class MergeEditorPage extends StatefulWidget {
     this.isCategory = false,
   }) : inspirations = <Inspiration>[inspiration];
 
-  /// **多选合并**（Q37）：一次把选中的多条带进来。
+  /// **多选合并**：一次把选中的多条带进来（新版修改计划 Q37 的那一条）。
   ///
   /// [inspirations] 的顺序**就是**灵感列表上从上到下的顺序 ——
   /// 「追加原文」各占一行、「作为清单条目」各成一条，都按它来；
@@ -103,7 +103,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   @override
   void initState() {
     super.initState();
-    // 多条一起并时，"这次并的是哪几条"必须一眼看得见（Q37）→ 默认展开；
+    // 多条一起并时，"这次并的是哪几条"必须一眼看得见（新版修改计划 Q37 的那一条）→ 默认展开；
     // 单条维持原样（默认收起，想看得自己点一下）。
     _referenceExpanded = widget.inspirations.length > 1;
   }

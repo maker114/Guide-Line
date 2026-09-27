@@ -11,7 +11,8 @@ import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/models/task.dart';
 import 'package:guideline/core/store/merge.dart';
 
-/// 合并导入的纯逻辑内核（《修改计划总表》Q25）。
+/// 合并导入的纯逻辑内核（原《修改计划总表》Q25，该文档已移出工作区；
+/// 现行落点见 docs/决策索引.md §2.2）。
 ///
 /// 合并最怕的不是"合错了"，而是**悄悄丢东西**：丢一条记录用户当场能看出来，
 /// 丢一个墓碑却要等到下次合并"复活"了才发作。所以这里的用例重点在两处：

@@ -77,7 +77,7 @@ Future<void> deleteProjectAction(
 
   final plan = planProjectDeletion(ws.projectTree, ws.allInspirations, projectId);
   // 两句话必须**分开说**：项目 / 事件 / 任务进回收站、30 天内能找回，
-  // 而灵感不进回收站（《定义与边界》§9 的对照表）—— 合成一句"全部可恢复"，
+  // 而灵感不进回收站（《定义与边界》§8 的对照表）—— 合成一句"全部可恢复"，
   // 用户会以为灵感也躺在回收站里等它。
   final lines = <String>['「${project.title}」及其下 ${plan.projectIds.length - 1} 个子项目会被删除；'];
   if (plan.inspirationIdsToUnassign.isNotEmpty) {
