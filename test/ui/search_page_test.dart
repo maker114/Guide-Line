@@ -6,6 +6,8 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/ids.dart';
 import 'package:guideline/ui/more/search_page.dart';
 
+import 'scroll_finders.dart';
+
 /// 搜索页的搜索框（实机反馈）：**页面上要有一个明显的框**。
 ///
 /// 原来它是标题栏里一个没有边框的输入框 —— 看着像一行说明文字，
@@ -95,7 +97,8 @@ void main() {
 
     await tester.tap(find.byTooltip('设到期日'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OK'));
+    // 日期面板：点日历里"今天"那一格就落定（选中即生效）
+    await tapTodaysDay(tester);
     await tester.pumpAndSettle();
 
     final today = Ids.todayDate();

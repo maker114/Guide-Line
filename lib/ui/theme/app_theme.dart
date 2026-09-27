@@ -223,3 +223,25 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
 /// 背景强度滑杆的取值范围：上限压到 0.6，配合上面的"留底"保证可读性。
 const double minBackgroundOpacity = 0.05;
 const double maxBackgroundOpacity = 0.6;
+
+/// 把偏好里的主题模式（`system` / `light` / `dark`）翻成 `MaterialApp` 要的
+/// [ThemeMode]。
+///
+/// **翻译只有这一处**：core 层不认识 Flutter（`ui_prefs` 里存的是字符串），
+/// 而界面侧好几个地方要用同一个口径 —— 写两遍迟早会漂成"设置页说深色、
+/// 实际还是跟系统"。
+///
+/// 认不出来的值（不该出现，`UiPrefs.fromJson` 已经把坏值收回默认）一律按
+/// **跟随系统**处理，与默认值同一条口径。
+ThemeMode themeModeOf(UiPrefs prefs) => switch (prefs.themeMode) {
+      UiPrefs.themeModeLight => ThemeMode.light,
+      UiPrefs.themeModeDark => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+
+/// 主题模式在界面上的中文名（设置页与「更多」页副标题共用同一份）。
+String themeModeLabel(String mode) => switch (mode) {
+      UiPrefs.themeModeLight => '浅色',
+      UiPrefs.themeModeDark => '深色',
+      _ => '跟随系统',
+    };

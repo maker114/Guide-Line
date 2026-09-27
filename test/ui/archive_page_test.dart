@@ -173,7 +173,7 @@ void main() {
     expect(find.text('已恢复：孤单的项目'), findsOneWidget);
   });
 
-  testWidgets('「已合并」的动作叫「恢复为待处理，项目内容不退回」（Q9）', (tester) async {
+  testWidgets('三档合一：已合并的动作叫「恢复为待处理，项目内容不退回」（Q9）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '目标项目');
     final inspiration = app.ws.captureInspiration('合并掉的灵感', projectId: project.id);
@@ -185,7 +185,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('已合并 1'));
+    await tester.tap(find.textContaining('已处理的灵感 1'));
     await tester.pumpAndSettle();
 
     // 分区说明先说清代价，动作名再说一遍 —— 名字与语义必须一致
@@ -193,6 +193,8 @@ void main() {
       find.textContaining('项目里的内容不会退回'),
       findsOneWidget,
     );
+    // 行上必须有来源标记：三档合一之后，"这条是怎么来的"只能靠它
+    expect(find.text('已合并'), findsOneWidget, reason: '逐条标来源');
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
     expect(
@@ -211,6 +213,64 @@ void main() {
       app.ws.findProject(project.id)!.implementation,
       '写进项目的正文',
       reason: '项目里的内容不退回 —— 这正是名字里要写清的那半句',
+    );
+  });
+
+  testWidgets('三档合一：被隐藏 / 已丢弃 / 已合并 同在一档，各自带来源胶囊', (tester) async {
+    final app = await boot();
+    // 已丢弃
+    final dropped = app.ws.captureInspiration('丢掉的灵感');
+    app.run(() => app.ws.discardInspiration(dropped.id));
+    // 已合并
+    final target = app.ws.createProject(title: '目标项目');
+    final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
+    app.run(() => app.ws.mergeInspiration(
+          inspirationId: merged.id,
+          projectId: target.id,
+          newImplementation: '写进项目的正文',
+        ));
+    // 被隐藏：所在项目归档
+    final archived = app.ws.createProject(title: '归档掉的项目');
+    app.ws.captureInspiration('被遮住的灵感', projectId: archived.id);
+    app.run(() => app.ws.setProjectArchived(archived.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('已处理的灵感 3'), findsOneWidget, reason: '页签上是三种加起来的总数');
+
+    await tester.tap(find.textContaining('已处理的灵感 3'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('被遮住的灵感'), findsOneWidget);
+    expect(find.text('丢掉的灵感'), findsOneWidget);
+    expect(find.text('合并掉的灵感'), findsOneWidget);
+    expect(find.text('被隐藏'), findsOneWidget);
+    expect(find.text('已丢弃'), findsOneWidget);
+    expect(find.text('已合并'), findsOneWidget);
+  });
+
+  testWidgets('被隐藏的那条没有「恢复为待处理」—— 它的出路是取消归档那个项目', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '归档掉的项目');
+    app.ws.captureInspiration('被遮住的灵感', projectId: project.id);
+    app.run(() => app.ws.setProjectArchived(project.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('已处理的灵感 1'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('被遮住的灵感'), findsOneWidget);
+    expect(
+      find.byTooltip('更多'),
+      findsNothing,
+      reason: '它没被处理过，只是项目归档了（Q53）—— 给一个"恢复为待处理"会让人以为它坏过',
+    );
+    expect(
+      find.textContaining('取消归档对应项目'),
+      findsOneWidget,
+      reason: '出路必须写在分区说明里',
     );
   });
 

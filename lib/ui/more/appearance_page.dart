@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/store/ui_prefs.dart';
 import '../../platform/data_transfer_platform.dart';
 import '../common/dialogs.dart';
 import '../common/section_header.dart';
@@ -39,6 +40,35 @@ class _AppearancePageState extends State<AppearancePage> {
           body: ListView(
             padding: const EdgeInsets.only(bottom: 32),
             children: <Widget>[
+              // 深色 / 亮色**单独成节**，不和配色预设混在一起：
+              // 预设是"换一套色"，这是"这套色用亮的那版还是暗的那版"，
+              // 两者是正交的；混进同一个列表会让人以为它们是同一组单选。
+              const SectionHeader('深色 / 亮色'),
+              // `groupValue` / `onChanged` 挪到 `RadioGroup` 上（Flutter 3.32 起
+              // 单选组由祖先统一管；挂在每个 `RadioListTile` 上的写法已废弃）。
+              RadioGroup<String>(
+                groupValue: prefs.themeMode,
+                onChanged: (value) {
+                  if (value == null) return;
+                  _app.updatePrefs(prefs.copyWith(themeMode: value));
+                },
+                child: Column(
+                  children: <Widget>[
+                    for (final mode in UiPrefs.themeModes)
+                      RadioListTile<String>(
+                        value: mode,
+                        title: Text(themeModeLabel(mode)),
+                        subtitle: mode == UiPrefs.themeModeSystem
+                            ? Text(
+                                '跟着系统的深色开关走',
+                                style: theme.textTheme.labelSmall,
+                              )
+                            : null,
+                      ),
+                  ],
+                ),
+              ),
+
               const SectionHeader('主题'),
               for (final preset in appThemePresets)
                 ListTile(

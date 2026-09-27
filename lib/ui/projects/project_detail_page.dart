@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
@@ -7,6 +8,7 @@ import '../../core/rules/handoff_export.dart';
 import '../../features/workspace.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
+import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../inspiration/merge_editor_page.dart';
@@ -127,6 +129,18 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                     ),
                   ]
                 : <Widget>[
+                    // 标识色与日期**收进标题栏**（2026-09-27 实机反馈：
+                    // 把项目界面里的调色盘和日期设置挪到顶部的标题栏中）。
+                    // 它们本来就是"设置一次就不再动"的两项，摆在正文首屏只是
+                    // 白占一行高度；标题栏右侧正好是它们的位置 ——
+                    // 与事件详情页的调色盘图标也在标题栏，观感一致。
+                    _IconActions(
+                      app: app,
+                      project: project,
+                      // 分类**不给设日期**（《定义与边界》§2.1），但设过的那个
+                      // 必须露出来，否则它再也点不到、清不掉。
+                      showDate: !isCategory || project.date != null,
+                    ),
                     PopupMenuButton<String>(
                       tooltip: '更多',
                       onSelected: (value) async {
@@ -158,13 +172,13 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                       },
                       itemBuilder: (_) => <PopupMenuEntry<String>>[
                         const PopupMenuItem<String>(value: 'rename', child: Text('重命名')),
-                        // 分类不写「有什么问题 / 思路」，也没有清单与如何解决，
-                        // 交接说明对它没有意义 —— 这个入口只给目标。
-                        if (!isCategory)
-                          const PopupMenuItem<String>(
-                            value: 'handoff',
-                            child: Text('导出交接说明…'),
-                          ),
+                        // 分类与目标**都给这个入口**（2026-09-27 实机反馈：
+                        // 分类界面应当可以统一导出其子项目的所有条目）——
+                        // 只是同一件东西的两种范围：目标导自己，分类导整棵子树。
+                        PopupMenuItem<String>(
+                          value: 'handoff',
+                          child: Text(isCategory ? '导出分类说明…' : '导出交接说明…'),
+                        ),
                         PopupMenuItem<String>(
                           value: 'move',
                           child: Text(isCategory ? '移到其它分类' : '移动到…'),
@@ -192,7 +206,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               // 这个方向理应有一个总纲领 —— 那句"含 N 个目标 / 清单 x/y"既不是纲领也不是
               // 内容，占着首屏位置却回答不了任何问题。数字在下级行上就能看到。
               if (isCategory) ...<Widget>[
-                _ProjectIconsRow(app: app, project: project, showDate: false),
+                // 标识色与日期已经收进标题栏（见上面 AppBar 的 `_IconActions`），
+                // 这里只留分类自己的正文。
                 _TextField(
                   title: '总纲领',
                   hint: '这一类要一起往哪走',
@@ -202,7 +217,6 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                 ),
                 _ChildrenField(app: app, project: project, children: children),
               ] else ...<Widget>[
-                _ProjectIconsRow(app: app, project: project),
                 _TextField(
                   title: '有什么问题 / 思路',
                   hint: '想解决什么问题、有什么思路',
@@ -210,64 +224,15 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                   onSubmitted: (value) =>
                       app.run(() => ws.updateProject(project.id, purpose: value)),
                 ),
-                // 「实现」由两部分组成：上面的**实现清单**（结构化、可勾选），
-                // 下面的**如何解决**（整段说明 / 灵感合并的落点 / AI 整理的输出）。
-                // 两者都套在与「有什么问题 / 思路」同一个 `_FieldCard` 里，一页只留一种观感。
-                _FieldCard(
-                  title: '实现清单',
-                  // 进度与「重拆 / 清空」入口共用标题行右侧（Q32）：
-                  // 一个数字 + 一枚胶囊，加起来比原来那个"独占一整行的更多按钮"省地方。
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      if (project.items.isNotEmpty) ...<Widget>[
-                        Text(
-                          '${project.itemsDoneCount}/${project.items.length}',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      // 清空 / 按正文重拆这两件事平时不用，但"拆错了想重来"时
-                      // 必须找得到 —— 上一批把它们藏进长按里，用户就再也看不到了。
-                      Tooltip(
-                        message: '清单：按正文重拆 / 清空',
-                        child: TextButton.icon(
-                          onPressed: () => _showChecklistActions(context, project),
-                          icon: const Icon(Icons.tune, size: 18),
-                          label: const Text('重拆 / 清空'),
-                          style: TextButton.styleFrom(
-                            // 能点的用胶囊（《界面规范》§1）；次要入口不加底色
-                            shape: AppShapes.pill,
-                            // 不用强调色：这里进去的是**危险动作**（清空 / 覆盖现有条目），
-                            // 规范要求危险动作别做成醒目的按钮，实际的门在确认框上
-                            foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            minimumSize: const Size(0, 32),
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  child: ProjectChecklist(
-                    app: app,
-                    project: project,
-                    onSplitFromImplementation: () => _splitIntoItems(context, project),
-                  ),
-                ),
-                _FieldCard(
-                  title: '如何解决',
-                  child: _ImplementationBody(
-                    value: project.implementation,
-                    hasItems: project.items.isNotEmpty,
-                    onSubmit: (value) {
-                      // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
-                      if (value.trim().isEmpty) return;
-                      final error = app.run(() => ws.replaceImplementation(project.id, value));
-                      if (error != null) showToast(context, error, error: true);
-                    },
-                  ),
+                // 「实现」有两种表达方式（ADR-077）：结构化的**清单**，或整段的
+                // **文本**（「如何解决」）。2026-09-27 实机反馈之前，两张卡一直
+                // 同时摆着 —— 有清单时正文默认收起，等于一屏里一半是折叠着的字。
+                // 现在改成**二选一**：切过去就看得见另一种，两个字段一个都不动。
+                _ImplementationField(
+                  app: app,
+                  project: project,
+                  onSplitFromImplementation: () => _splitIntoItems(context, project),
+                  onChecklistActions: () => _showChecklistActions(context, project),
                 ),
                 _ChildrenField(app: app, project: project, children: children),
                 _InspirationsField(
@@ -284,22 +249,54 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   }
 
   /// 生成并把用户送到**交接说明预览页**（真正写文件在那一步）。
+  ///
+  /// 一个入口、两种范围：
+  ///   · **目标** —— 只导它自己（老行为，一个字没改）；
+  ///   · **分类** —— 导它自己 + 所有下级目标（实机反馈：分类界面要能
+  ///     "统一导出其子项目的所有条目"）。
+  ///
+  /// 分类那一侧的取数只说三件事：**要哪些目标**、**每个目标带哪些灵感**、
+  /// **不含哪些**。「不含」定死两条：已归档的与已删除的下级一律不进 ——
+  /// 分类里装的是**还活着**的目标（《定义与边界》§2.1），把归档掉的东西
+  /// 塞进一份给外人读的说明里，只会让对面以为它还在做。
   Future<void> _exportHandoff(BuildContext context, Project project) async {
-    final markdown = HandoffExport.build(
-      project: project,
-      // 只带这个项目的待处理灵感 —— 事件与任务线不再进交接说明（实机反馈：
-      // 事件与项目没有关联字段，全量带过去只会把说明撑长、跑题）
-      inspirations: app.ws.liveInspirations
-          .where((i) => i.projectId == project.id)
-          .toList(growable: false),
-      now: DateTime.now(),
-    );
+    final children = app.ws.childProjectsOf(project.id);
+    final isCategory = children.isNotEmpty;
+    final ws = app.ws;
+
+    // 待处理灵感：目标导自己的，分类导整棵子树里各个目标的
+    List<Inspiration> pendingOf(String projectId) => ws.liveInspirations
+        .where((i) => i.isPending && i.projectId == projectId)
+        .toList(growable: false);
+
+    final String markdown;
+    if (!isCategory) {
+      markdown = HandoffExport.build(
+        project: project,
+        inspirations: pendingOf(project.id),
+        now: DateTime.now(),
+      );
+    } else {
+      final inspirationsByProject = <String, List<Inspiration>>{
+        for (final child in children) child.id: pendingOf(child.id),
+      };
+      markdown = HandoffExport.buildCategory(
+        category: project,
+        children: children,
+        inspirationsByProject: inspirationsByProject,
+        now: DateTime.now(),
+      );
+    }
+
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => HandoffPreviewPage(
           app: app,
           projectId: project.id,
-          projectTitle: project.title,
+          // 分类顺带说到"含几个目标"：一份说明里装了几件事，用户得先知道
+          projectTitle: isCategory
+              ? '${project.title}（含 ${children.length} 个目标）'
+              : project.title,
           markdown: markdown,
         ),
       ),
@@ -446,108 +443,247 @@ class _DetailTitle extends StatelessWidget {
   }
 }
 
+/// 「实现」的两种模式：**清单**（结构化、可勾选）与**文本**（整段说明）。
+enum ImplementationMode {
+  checklist('清单'),
+  text('文本');
+
+  const ImplementationMode(this.label);
+
+  final String label;
+}
+
+/// 「实现」这一块：标题行一个**二选一**切换，下面画对应的那一种。
+///
+/// 为什么合成一块（ADR-077）：清单与正文是同一件事的两种写法 ——
+/// "这个项目打算怎么做"。从前两张卡同时摆着，有清单时正文默认收起，
+/// 那一屏就永远有一半是折叠着的字，用户得先想"我要看的是哪一半"。
+/// 现在是二选一：**切过去的动作本身就是"我要看那一种"**。
+///
+/// 底线（不许因为合并而破坏）：底层 `items` 与 `implementation`
+/// 是**两个独立字段**，切模式**只换显示**，一个字都不清空、也不互相覆盖。
+class _ImplementationField extends StatefulWidget {
+  const _ImplementationField({
+    required this.app,
+    required this.project,
+    required this.onSplitFromImplementation,
+    required this.onChecklistActions,
+  });
+
+  final AppController app;
+  final Project project;
+  final VoidCallback onSplitFromImplementation;
+  final VoidCallback onChecklistActions;
+
+  @override
+  State<_ImplementationField> createState() => _ImplementationFieldState();
+}
+
+class _ImplementationFieldState extends State<_ImplementationField> {
+  /// 当前看的是哪一种。`null` = 还没手动切过，用"有什么"来定。
+  ///
+  /// 为什么不进偏好：这是**看这一页时的临时视角**，不是一条长期设置。
+  /// 但同一个项目在这一次会话里切过之后要留得住 —— 所以挂在 State 上，
+  /// 靠 `ProjectDetailPage` 的 `ListenableBuilder` 重建时保持。
+  ImplementationMode? _mode;
+
+  /// 默认看哪一侧：**一律先给清单**。
+  ///
+  /// 三条理由，合起来就是"清单才是这一块的主视图"：
+  ///   · 它是**能打勾的那一份**，日常打开项目要看的就是进度；
+  ///   · 条目为空时它给出的"还没有条目 + 添加条目 + 从正文拆成条目"正是
+  ///     一个刚建的项目需要的东西，而正文那一侧这时是一张白纸；
+  ///   · 与合进这块之前的行为一致 —— 从前清单永远在、正文才是有条件收起的那一半，
+  ///     所以"打开就能看见清单"这件事没有变过，变的只是另一半改成切过去看。
+  ///
+  /// 用户手动切过之后以手动为准（`_mode`）。
+  ImplementationMode get _effective => _mode ?? ImplementationMode.checklist;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final project = widget.project;
+    final mode = _effective;
+
+    return _FieldCard(
+      title: '实现',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          if (mode == ImplementationMode.checklist && project.items.isNotEmpty) ...<Widget>[
+            Text(
+              '${project.itemsDoneCount}/${project.items.length}',
+              style: theme.textTheme.labelSmall,
+            ),
+            const SizedBox(width: 8),
+          ],
+          // 清空 / 按正文重拆这两件事平时不用，但"拆错了想重来"时必须找得到
+          // —— 它们只对清单有意义，所以只在清单模式下出现。
+          if (mode == ImplementationMode.checklist)
+            Tooltip(
+              message: '清单：按正文重拆 / 清空',
+              child: TextButton.icon(
+                onPressed: widget.onChecklistActions,
+                icon: const Icon(Icons.tune, size: 18),
+                label: const Text('重拆 / 清空'),
+                style: TextButton.styleFrom(
+                  // 能点的用胶囊（《界面规范》§1）；次要入口不加底色
+                  shape: AppShapes.pill,
+                  // 不用强调色：这里进去的是**危险动作**（清空 / 覆盖现有条目），
+                  // 规范要求危险动作别做成醒目的按钮，实际的门在确认框上
+                  foregroundColor: theme.colorScheme.onSurfaceVariant,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+          // 「全部复制」只做在文本模式：那一侧才是"一段整文"，复制它才有意义
+          if (mode == ImplementationMode.text && project.implementation.trim().isNotEmpty)
+            Tooltip(
+              message: '把「如何解决」全文复制到剪贴板',
+              child: TextButton.icon(
+                onPressed: () => _copyBody(context),
+                icon: const Icon(Icons.copy_all_outlined, size: 18),
+                label: const Text('全部复制'),
+                style: TextButton.styleFrom(
+                  shape: AppShapes.pill,
+                  foregroundColor: theme.colorScheme.onSurfaceVariant,
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SegmentedButton<ImplementationMode>(
+              showSelectedIcon: false,
+              segments: <ButtonSegment<ImplementationMode>>[
+                for (final each in ImplementationMode.values)
+                  ButtonSegment<ImplementationMode>(
+                    value: each,
+                    label: Text(each.label),
+                  ),
+              ],
+              selected: <ImplementationMode>{mode},
+              onSelectionChanged: (selection) =>
+                  setState(() => _mode = selection.first),
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (mode == ImplementationMode.checklist)
+            ProjectChecklist(
+              app: widget.app,
+              project: project,
+              onSplitFromImplementation: widget.onSplitFromImplementation,
+            )
+          else
+            _ImplementationBody(
+              value: project.implementation,
+              hasItems: project.items.isNotEmpty,
+              onSubmit: (value) {
+                // AI 整理后正文会被替换，空内容会被业务层拒绝（不让正文被清没）
+                if (value.trim().isEmpty) return;
+                final error = widget.app.run(
+                  () => widget.app.ws.replaceImplementation(project.id, value),
+                );
+                if (error != null && context.mounted) {
+                  showToast(context, error, error: true);
+                }
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 把「如何解决」全文拷进剪贴板。
+  ///
+  /// 拷的是**当前的正文原值**（不是编辑框里的半成品）：这一页的正文改完就落盘，
+  /// 所以两者本来就一样；用原值可以避免"正在编辑、还没提交"时拷到半截。
+  Future<void> _copyBody(BuildContext context) async {
+    final text = widget.project.implementation.trim();
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (context.mounted) showToast(context, '已复制');
+  }
+}
+
 /// 「如何解决」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
 ///
 /// 这一块是三样东西的共同落点 —— AI 整理写进来、交接导出从这里取、
 /// 手写也写在这里（灵感合并不再写它，见 `Workspace.mergeInspiration`）。
-/// 清单为空时它就是主角，默认展开；有清单时它退成"整理稿"，默认收起，
-/// 免得一屏全是字。
-class _ImplementationBody extends StatefulWidget {
+///
+/// **不再自己管展开 / 收起**（ADR-077）：那是"清单与正文同时存在"时代的东西，
+/// 现在由外面那个模式切换决定要不要显示它，所以这里就是一个**始终展开的编辑区**。
+class _ImplementationBody extends StatelessWidget {
   const _ImplementationBody({
     required this.value,
     required this.hasItems,
     required this.onSubmit,
   });
 
+  /// 当前正文。
   final String value;
+
+  /// 这个项目有没有清单条目 —— 决定空态提示该说什么。
+  ///
+  /// "有清单但正文是空的"是很常见的一步（先拆了清单、还没写正文），
+  /// 那时得说清"这里空着不影响清单"，否则用户会以为数据丢了。
   final bool hasItems;
+
   final ValueChanged<String> onSubmit;
-
-  @override
-  State<_ImplementationBody> createState() => _ImplementationBodyState();
-}
-
-class _ImplementationBodyState extends State<_ImplementationBody> {
-  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final value = widget.value;
     final empty = value.trim().isEmpty;
-    final canCollapse = !empty && widget.hasItems;
-    final showEditor = !canCollapse || _expanded;
-
-    if (!canCollapse) {
-      return _editor(theme, value);
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Text('${value.trim().length} 字', style: theme.textTheme.labelSmall),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: () => setState(() => _expanded = !_expanded),
-              icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more, size: 18),
-              label: Text(_expanded ? '收起' : '展开'),
+        if (empty && hasItems)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '正文还空着 —— 清单里的条目不受影响，切回「清单」就能看到',
+              style: theme.textTheme.bodySmall,
             ),
-          ],
+          ),
+        InlineTextField(
+          value: value,
+          hint: '打算怎么做',
+          minLines: 1,
+          maxLines: 12,
+          allowEmpty: true,
+          textStyle: theme.textTheme.bodyMedium,
+          onSubmitted: onSubmit,
         ),
-        if (showEditor) _editor(theme, value),
       ],
     );
   }
-
-  Widget _editor(ThemeData theme, String value) {
-    return InlineTextField(
-      value: value,
-      hint: '打算怎么做',
-      minLines: 1,
-      maxLines: 12,
-      allowEmpty: true,
-      textStyle: theme.textTheme.bodyMedium,
-      onSubmitted: widget.onSubmit,
-    );
-  }
 }
 
-/// 「标识色 / 日期」的图标入口。
+/// 「标识色 / 日期」的图标入口 —— **挂在标题栏右侧**（`AppBar.actions`）。
 ///
-/// 这一行原来是「状态」那一行 —— 项目取消完成 / 搁置之后（Q1），三态胶囊整个拿掉，
-/// 只留下这两个"设置一次就不再动"的图标。
-class _ProjectIconsRow extends StatelessWidget {
-  const _ProjectIconsRow({
-    required this.app,
-    required this.project,
-    this.showDate = true,
-  });
-
-  final AppController app;
-  final Project project;
-
-  /// 分类**没有日期**（《定义与边界》§2.1）—— 那时不给日期图标。
-  final bool showDate;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: _IconActions(app: app, project: project, showDate: showDate),
-      ),
-    );
-  }
-}
-
-/// 「标识色 / 日期」的图标入口。
+/// 按实机反馈收成图标：这两项是**设置一次就不再动**的东西，各占一整行 ListTile
+/// 太浪费纵向空间。再按 2026-09-27 的实机反馈，从正文首屏**挪进标题栏**：
+/// 它们与"看这一页要干什么"无关，而标题栏右侧本来就是"关于这个项目本身"的位置。
 ///
-/// 按实机反馈收成图标：这两项是**设置一次就不再动**的东西，
-/// 各占一整行 ListTile 太浪费纵向空间。长按 = 清除（图标右下角带个小叉提示），
-/// 所以不需要再各配一个"清除"按钮。分类只给标识色（分类没有日期，见 Q2）。
+/// 清除的路子：调色盘仍是长按（面板里也有「不用标识色」），
+/// **日期则是点开日历面板、在面板里点「清除日期」** —— 长按这个手势
+/// 曾经是唯一的清除路径，而提示也写在同一个长按的 tooltip 里，等于没有提示。
 class _IconActions extends StatelessWidget {
   const _IconActions({
     required this.app,
@@ -586,12 +722,11 @@ class _IconActions extends StatelessWidget {
           _ClearableIcon(
             tooltip: !hasDate
                 ? '日期：点一下选'
-                : '日期 ${describeDateWithDays(project.date)}，长按可清除',
+                : '日期 ${describeDateWithDays(project.date)}，点一下改或清',
             icon: hasDate ? Icons.event_available_outlined : Icons.event_outlined,
             color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
             hasValue: hasDate,
             onTap: () => _pickDate(context),
-            onLongPress: hasDate ? () => _setDate(context, null) : null,
           ),
       ],
     );
@@ -610,24 +745,23 @@ class _IconActions extends StatelessWidget {
   }
 
   Future<void> _pickDate(BuildContext context) async {
-    final now = DateTime.now();
-    final initial = project.date == null ? now : (DateTime.tryParse(project.date!) ?? now);
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime(now.year - 5),
-      lastDate: DateTime(now.year + 20),
-      helpText: project.date == null ? '选择日期' : '当前：${describeDateWithDays(project.date)}',
+    final picked = await pickDateSheet(
+      context,
+      title: project.date == null ? '选择日期' : '改日期',
+      current: project.date,
     );
     if (picked == null || !context.mounted) return;
-    final month = picked.month.toString().padLeft(2, '0');
-    final day = picked.day.toString().padLeft(2, '0');
-    _setDate(context, '${picked.year}-$month-$day');
+    // 空串 = 用户点了「清除日期」
+    _setDate(context, picked == clearDateValue ? null : picked);
   }
 
   void _setDate(BuildContext context, String? value) {
     final error = app.run(() => app.ws.updateProject(project.id, date: value));
-    if (error != null) showToast(context, error, error: true);
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
+    showToast(context, value == null ? '已清除日期' : '日期：$value');
   }
 }
 
@@ -829,20 +963,17 @@ class _ChildrenFieldState extends State<_ChildrenField> {
                 // `remove` 返回 false = 原本没展开，那就展开
                 if (!_expanded.remove(child.id)) _expanded.add(child.id);
               }),
-            ),
-            if (_expanded.contains(child.id))
-              _ChildChecklist(
-                app: widget.app,
-                child: child,
-                onOpen: () => Navigator.of(context).push<void>(
-                  MaterialPageRoute<void>(
-                    builder: (_) => ProjectDetailPage(
-                      app: widget.app,
-                      projectId: child.id,
-                    ),
+              onOpen: () => Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => ProjectDetailPage(
+                    app: widget.app,
+                    projectId: child.id,
                   ),
                 ),
               ),
+            ),
+            if (_expanded.contains(child.id))
+              _ChildChecklist(app: widget.app, child: child),
           ],
         // 新建下级：文案随层级走（Q2）—— 在**分类**下新建的是「目标」。
         // 用现成的 `InlineComposer`，不新增控件；放在下级列表**末尾**
@@ -868,51 +999,75 @@ class _ChildrenFieldState extends State<_ChildrenField> {
   }
 }
 
-/// 一行下级：**点它就展开 / 收起**。
+/// 一行下级：**点它进下级自己的详情页**，**行尾箭头**只管展开 / 收起。
 ///
-/// 展开方向只用一个记号表示（行尾的 `chevron_right` 转到朝下），
-/// 进详情页的入口放在展开区里 —— 一行上挂两个"点我"的记号只会让人犹豫。
+/// （2026-09-27 实机反馈：分类详情页展开之后，去掉「添加条目」与「打开项目」
+///   两项。）展开区里原来那个「打开这个目标」按钮跟着一起去掉了，
+/// 所以"怎么进下级"必须另有出路 —— 就是点这一行的**标题**。
+/// 与"点箭头只折叠"分开之后，一行上有两个各管一件事的落点：
+///
+/// ```
+/// ● 发布 v1            ← 点这里进详情页
+///   清单 1/2        ⌄  ← 点这里只展开 / 收起
+/// ```
 class _ChildRow extends StatelessWidget {
   const _ChildRow({
     super.key,
     required this.child,
     required this.expanded,
     required this.onToggle,
+    required this.onOpen,
   });
 
   final Project child;
   final bool expanded;
   final VoidCallback onToggle;
 
+  /// 进下级自己的详情页。
+  final VoidCallback onOpen;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final subtitle = _childSubtitle(theme, child);
-    return InkWell(
-      onTap: onToggle,
-      child: Padding(
-        // 比主项目行更紧凑：缩进 24 表达层级，字号降一档
-        padding: const EdgeInsets.fromLTRB(24, 6, 12, 6),
-        child: Row(
-          children: <Widget>[
-            ProjectMarker(color: child.color, size: 12),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(child.title, style: theme.textTheme.bodyMedium),
-                  ?subtitle,
-                ],
+    return Padding(
+      // 比主项目行更紧凑：缩进 24 表达层级，字号降一档
+      padding: const EdgeInsets.fromLTRB(24, 6, 12, 6),
+      child: Row(
+        children: <Widget>[
+          ProjectMarker(color: child.color, size: 12),
+          const SizedBox(width: 12),
+          Expanded(
+            child: InkWell(
+              onTap: onOpen,
+              borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(child.title, style: theme.textTheme.bodyMedium),
+                    ?subtitle,
+                  ],
+                ),
               ),
             ),
-            AnimatedRotation(
+          ),
+          // 折叠开关只占行尾这一小块：点它**只**折叠，不进详情页
+          IconButton(
+            tooltip: expanded ? '收起' : '展开',
+            onPressed: onToggle,
+            visualDensity: VisualDensity.compact,
+            iconSize: 18,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            icon: AnimatedRotation(
               turns: expanded ? 0.25 : 0,
               duration: const Duration(milliseconds: 150),
-              child: const Icon(Icons.chevron_right, size: 18),
+              child: const Icon(Icons.chevron_right),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -923,22 +1078,19 @@ class _ChildRow extends StatelessWidget {
 /// 打勾的口径与项目页一致（`ProjectChecklist`）：**只是打勾，不参与任何判定**，
 /// 全勾完也不会把项目变成已完成（项目没有完成态，见 Q1）。
 ///
-/// 这里**只**能勾和加：改字、删条目、上移下移、建成任务都留在下级自己的详情页
-/// —— 一个展开区里塞两套操作，用户在分类页就分不清自己在改哪一层了。
+/// 这里**只能勾**（2026-09-27 实机反馈：去掉「添加条目」与「打开这个目标」）。
+/// 改字、加条目、删条目、上移下移、建成任务都留在下级自己的详情页
+/// —— 一个展开区里塞两套操作，用户在分类页就分不清自己在改哪一层。
 class _ChildChecklist extends StatelessWidget {
-  const _ChildChecklist({
-    required this.app,
-    required this.child,
-    required this.onOpen,
-  });
+  const _ChildChecklist({required this.app, required this.child});
 
   final AppController app;
   final Project child;
-  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // 一条都没有就不占位：空态由上面那一行的「清单 x/y」进度表达
+    if (child.items.isEmpty) return const SizedBox.shrink();
     // 缩进对齐上级那一行的标题文字（24 缩进 + 12 标识色 + 12 间距 = 48）
     return Padding(
       padding: const EdgeInsets.fromLTRB(40, 0, 12, 6),
@@ -946,47 +1098,11 @@ class _ChildChecklist extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           for (final item in child.items)
-            CheckboxListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              contentPadding: EdgeInsets.zero,
-              controlAffinity: ListTileControlAffinity.leading,
-              value: item.done,
-              onChanged: (value) => _setDone(context, item.id, value ?? false),
-              title: Text(
-                item.text,
-                style: item.done
-                    ? theme.textTheme.bodySmall?.copyWith(
-                        decoration: TextDecoration.lineThrough,
-                        color: theme.colorScheme.outline,
-                      )
-                    : theme.textTheme.bodySmall,
-              ),
+            _RoundCheckRow(
+              done: item.done,
+              text: item.text,
+              onChanged: (value) => _setDone(context, item.id, value),
             ),
-          InlineComposer(
-            label: '添加条目',
-            hint: '这条要做什么',
-            leading: Icons.add,
-            dense: true,
-            onCreate: (text) => _run(context, () => app.ws.addProjectItem(child.id, text)),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: onOpen,
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: const Text('打开这个目标'),
-              style: TextButton.styleFrom(
-                shape: AppShapes.pill,
-                foregroundColor: theme.colorScheme.onSurfaceVariant,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                minimumSize: const Size(0, 32),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -998,6 +1114,58 @@ class _ChildChecklist extends StatelessWidget {
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
     if (error != null && context.mounted) showToast(context, error, error: true);
+  }
+}
+
+/// 一条**圆形**勾选行（分类展开区用）。
+///
+/// 为什么是圆的而项目页的清单是方的：这里是"下级目标里的一条"，
+/// 点到的是**别人的**清单（实机反馈：确认框改成圆形）—— 形状不同，
+/// 一眼就知道自己不在改自己那一层。方块/圆块的区分比再加一行说明省地方。
+class _RoundCheckRow extends StatelessWidget {
+  const _RoundCheckRow({
+    required this.done,
+    required this.text,
+    required this.onChanged,
+  });
+
+  final bool done;
+  final String text;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => onChanged(!done),
+      borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            // 圆形勾选：选中画对勾、未选中画空心圈，与方形的 `Checkbox` 区分开
+            Icon(
+              done ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 20,
+              color: done ? theme.colorScheme.primary : theme.colorScheme.outline,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                text,
+                style: done
+                    ? theme.textTheme.bodySmall?.copyWith(
+                        decoration: TextDecoration.lineThrough,
+                        color: theme.colorScheme.outline,
+                      )
+                    : theme.textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

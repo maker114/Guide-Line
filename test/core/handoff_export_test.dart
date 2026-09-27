@@ -185,4 +185,70 @@ void main() {
     expect(text, contains('- [ ] 第一行 第二行'));
     expect(text, isNot(contains('第一行\n第二行')));
   });
+
+  group('分类说明（buildCategory）：分类自己 + 每个下级各成一节', () {
+    /// 两个下级目标，各自带清单 / 正文，用来验证"不会串到别人身上"。
+    final children = <Project>[
+      project(
+        title: '发布 v1',
+        implementation: '先冻结契约',
+        items: const <ProjectItem>[
+          ProjectItem(id: 'i-1', text: '写好发布说明', done: true),
+        ],
+      ),
+      project(title: '复盘', purpose: '把这次的口子记下来'),
+    ];
+
+    String buildCategoryText() => HandoffExport.buildCategory(
+          category: project(title: '工作', purpose: '这一类都为了把 v1 发出去'),
+          children: children,
+          inspirationsByProject: <String, List<Inspiration>>{
+            'p-1': <Inspiration>[inspiration('n-1', '先冻结契约再动手')],
+          },
+          now: now,
+        );
+
+    test('表头写清分类名、总纲领、目标数与导出时间', () {
+      final text = buildCategoryText();
+      expect(text, startsWith('# 分类：工作\n'));
+      expect(text, contains('- 总纲领：这一类都为了把 v1 发出去'));
+      expect(text, contains('- 目标 2 个'));
+      expect(text, contains('- 导出时间：2026-09-25 14:30'));
+    });
+
+    test('每个下级目标都完整带进来（它自己那一节仍走同一个 build）', () {
+      final text = buildCategoryText();
+      expect(text, contains('# 项目：发布 v1'));
+      expect(text, contains('## 实现清单'));
+      expect(text, contains('- [x] 写好发布说明'));
+      expect(text, contains('## 如何解决'));
+      expect(text, contains('先冻结契约'));
+      expect(text, contains('# 项目：复盘'));
+      expect(text, contains('- 有什么问题 / 思路：把这次的口子记下来'));
+      expect(text, contains('## 待处理灵感'));
+      expect(text, contains('- 先冻结契约再动手'));
+    });
+
+    test('节与节之间是分隔线平铺，不再套一层标题层级', () {
+      final text = buildCategoryText();
+      expect(text, contains('\n---\n'));
+      expect(
+        text,
+        isNot(contains('### ')),
+        reason: '每个下级自带 # 与 ## 已是完整一节，再套 ### 只会把层级搞乱',
+      );
+    });
+
+    test('空分类也给出可读的一句，而不是一份空文档', () {
+      final text = HandoffExport.buildCategory(
+        category: project(title: '还没装东西的分类'),
+        children: const <Project>[],
+        inspirationsByProject: const <String, List<Inspiration>>{},
+        now: now,
+      );
+      expect(text, startsWith('# 分类：还没装东西的分类\n'));
+      expect(text, contains('- 目标 0 个'));
+      expect(text, contains('（这个分类下面还没有目标）'));
+    });
+  });
 }

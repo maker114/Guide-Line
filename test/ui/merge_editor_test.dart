@@ -79,6 +79,30 @@ void main() {
     expect(editorText(tester), '已有的计划\n第二行');
   });
 
+  testWidgets('参考区默认展开：单条合并也能直接看见灵感原文与项目已有的清单', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '项目丙');
+    app.run(() => app.ws.addProjectItem(project.id, '已经做完的一条'));
+    app.run(() => app.ws.setProjectItemDone(
+          project.id,
+          app.ws.findProject(project.id)!.items.single.id,
+          true,
+        ));
+    app.run(() => app.ws.addProjectItem(project.id, '还没做的一条'));
+    app.run(() => app.ws.captureInspiration('这条灵感要合并', projectId: project.id));
+
+    await openMergeEditor(tester, app, '项目丙', '这条灵感要合并');
+
+    // 灵感原文默认展开（从前单条时是收起的，得自己点一下才看得见）
+    expect(find.text('灵感原文 · 参考'), findsOneWidget);
+    expect(find.text('这条灵感要合并'), findsOneWidget, reason: '展开着才看得见并的是哪一句');
+
+    // 项目已有的清单也在这一页，带进度；只读，不改数据
+    expect(find.text('项目已有的清单 1/2'), findsOneWidget);
+    expect(find.text('已经做完的一条'), findsOneWidget);
+    expect(find.text('还没做的一条'), findsOneWidget);
+  });
+
   testWidgets('选择二「追加原文」：原文另起一行接到末尾，保存后才写回', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '项目乙');

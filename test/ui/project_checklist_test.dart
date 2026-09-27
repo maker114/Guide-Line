@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
@@ -59,8 +60,8 @@ void main() {
 
     await openProject(tester, app, '清单项目甲');
 
-    await scrollTo(tester, find.text('实现清单'));
-    expect(find.text('实现清单'), findsOneWidget);
+    await scrollTo(tester, find.text('实现'));
+    expect(find.text('实现'), findsOneWidget);
     // Q35 之后又按实机反馈收了一轮：空态只留一句"还没有条目"，
     // 说明性文字整批删掉（用户自己做教程）
     expect(find.text('还没有条目'), findsOneWidget);
@@ -303,24 +304,65 @@ void main() {
     expect(find.text('要删的条目'), findsNothing);
   });
 
-  testWidgets('清单与「如何解决」并存：正文默认收起，展开后能改', (tester) async {
+  testWidgets('实现分「清单 / 文本」两种模式：切过去才看得到正文，两个字段都不动', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目庚');
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
     app.run(() => app.ws.replaceImplementation(project.id, '整理后的整体说明'));
 
     await openProject(tester, app, '清单项目庚');
-    await scrollTo(tester, find.text('如何解决'));
+    await scrollTo(tester, find.text('实现'));
 
+    // 有清单时默认就在「清单」这一侧
     expect(find.text('一条条目'), findsOneWidget);
-    expect(find.text('如何解决'), findsOneWidget);
-    expect(find.text('实现计划'), findsNothing, reason: 'Q4：字段改称「如何解决」');
-    // 有清单时正文默认收起：内容不在树里
-    expect(find.text('整理后的整体说明'), findsNothing);
+    expect(find.text('清单'), findsOneWidget, reason: '模式切换的分段按钮');
+    expect(find.text('文本'), findsOneWidget);
+    expect(find.text('整理后的整体说明'), findsNothing, reason: '另一侧的内容不画出来');
 
-    await tester.tap(find.text('展开'));
+    await tester.tap(find.text('文本'));
     await tester.pumpAndSettle();
+
     expect(find.text('整理后的整体说明'), findsOneWidget);
+    expect(find.text('一条条目'), findsNothing, reason: '二选一：切过去就只看另一种');
+    // **切模式不清空**：清单还在数据里
+    expect(app.ws.findProject(project.id)!.items.single.text, '一条条目');
+    expect(app.ws.findProject(project.id)!.implementation, '整理后的整体说明');
+  });
+
+  testWidgets('文本模式有「全部复制」：拷走的是正文全文', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '清单项目辛');
+    app.run(() => app.ws.replaceImplementation(project.id, '整理后的整体说明'));
+
+    await openProject(tester, app, '清单项目辛');
+    await scrollTo(tester, find.text('实现'));
+
+    // 这一块默认给「清单」，先切到「文本」才看得到正文与复制键
+    await tester.tap(find.text('文本'));
+    await tester.pumpAndSettle();
+    await scrollTo(tester, find.text('全部复制'));
+
+    // 把剪贴板的内容记下来（测试环境下 `Clipboard` 走的是平台通道）
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map<Object?, Object?>)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+
+    await tester.tap(find.text('全部复制'));
+    await tester.pumpAndSettle();
+
+    expect(copied, '整理后的整体说明');
+    expect(find.text('已复制'), findsOneWidget, reason: '复制要有反馈，不然看不出成功没成功');
   });
 
   testWidgets('清单区的 AI 入口与提示都改称「如何解决」（Q4）', (tester) async {

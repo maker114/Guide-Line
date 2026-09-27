@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
+import '../../core/store/ui_prefs.dart';
 import '../../platform/data_directory.dart';
 import '../common/format.dart';
 import '../common/section_header.dart';
@@ -83,7 +84,7 @@ class _MoreTabState extends State<MoreTab> {
         _MoreItem(
           icon: Icons.inventory_2_outlined,
           title: '归档区',
-          subtitle: '已归档 / 已丢弃 / 已合并 / 回收站 / 被隐藏 共 ${app.archiveCount} 条',
+          subtitle: '已归档 / 已处理的灵感 / 回收站 共 ${app.archiveCount} 条',
           page: ArchivePage(app: app),
         ),
         const SectionHeader('外观'),
@@ -140,14 +141,19 @@ class _MoreTabState extends State<MoreTab> {
     return '上次导出 $when';
   }
 
-  /// 外观入口的副标题：一眼看出当前是哪套主题、有没有背景图。
+  /// 外观入口的副标题：一眼看出当前是哪套主题、深色怎么取、有没有背景图。
   String _appearanceSubtitle() {
     final prefs = app.prefs;
     final themeName = prefs.themeId == followBackgroundThemeId
         ? '跟随背景图'
         : presetOf(prefs.themeId).name;
+    // 深色 / 亮色的取法**只在非"跟随系统"时写出来**：跟系统是默认值，
+    // 每条副标题都缀一句"跟随系统"只会把真正有信息量的部分挤掉。
+    final mode = prefs.themeMode == UiPrefs.defaultThemeMode
+        ? ''
+        : ' · ${themeModeLabel(prefs.themeMode)}';
     final background = prefs.hasBackground ? ' · 有背景图' : '';
-    return '$themeName$background';
+    return '$themeName$mode$background';
   }
 
   /// AI 入口的副标题。

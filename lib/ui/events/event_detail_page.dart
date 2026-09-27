@@ -778,15 +778,19 @@ class _TaskLine extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           // 压到 30×30 是有意的：默认 48×48 的按钮几个就把标题挤没了
+      //
+      // **只留这一个日期图标**（实机反馈：改日期与清除日期都要在图标里，
+      // 不要藏在动作面板下）。点它弹的是 `pickDateSheet` —— 日历 + 底部的
+      // 「清除日期」，所以这一颗同时管"设 / 改 / 清"三件事，
+      // 长按清除那条路已经取消（提示与动作曾经是同一个手势，等于没有提示）。
           _TaskIcon(
             tooltip: task.dueAt == null
                 ? '设到期日'
-                : '到期 ${task.dueAt}，长按可清除',
+                : '到期 ${task.dueAt}，点一下改或清',
             icon: task.dueAt == null ? Icons.event_outlined : Icons.event_available_outlined,
             color: overdue ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant,
             clearable: task.dueAt != null,
             onTap: () => _run(context, 'due'),
-            onLongPress: task.dueAt == null ? null : () => _run(context, 'clearDue'),
           ),
         ],
       ),
@@ -815,9 +819,6 @@ class _TaskLine extends StatelessWidget {
         break;
       case 'due':
         await setTaskDueAction(context, app, task);
-        break;
-      case 'clearDue':
-        await clearTaskDueAction(context, app, task);
         break;
       case 'parent':
         await changeTaskParentAction(context, app, task);
@@ -888,10 +889,14 @@ class TaskAction {
   final IconData icon;
 }
 
-/// 任务行上的一个小图标按钮：**有值时右下角带个小叉**，长按可清除。
+/// 任务行上的一个小图标按钮：**有值时右下角带个小叉**（表示"这一项是设过的"）。
 ///
-/// 与项目详情页的日期图标是同一套交互（那里叫 `_ClearableIcon`）——
-/// "点一下改、长按清"在两处保持一致，不然用户得分别记。
+/// 与项目详情页的日期图标是同一套观感（那里叫 `_ClearableIcon`）——
+/// "有没有值"在两处保持一致，不然用户得分别记。
+///
+/// **不再有长按**（2026-09-27）：清除挪进了日期面板的「清除日期」，
+/// 长按这条路连同它的 tooltip 一起取消 —— 提示与动作曾经是同一个手势，
+/// 等于用户永远看不到那句提示。
 class _TaskIcon extends StatelessWidget {
   const _TaskIcon({
     required this.tooltip,
@@ -899,7 +904,6 @@ class _TaskIcon extends StatelessWidget {
     required this.color,
     required this.clearable,
     required this.onTap,
-    this.onLongPress,
   });
 
   final String tooltip;
@@ -907,7 +911,6 @@ class _TaskIcon extends StatelessWidget {
   final Color color;
   final bool clearable;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -916,7 +919,6 @@ class _TaskIcon extends StatelessWidget {
       message: tooltip,
       child: InkWell(
         onTap: onTap,
-        onLongPress: onLongPress,
         customBorder: const CircleBorder(),
         child: Padding(
           padding: const EdgeInsets.all(4),
@@ -971,11 +973,6 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
       Icons.event_outlined,
     ),
   );
-  if (task.dueAt != null) {
-    actions.add(
-      const TaskAction('clearDue', '清除到期日', Icons.event_busy_outlined),
-    );
-  }
   // 归属：提到主线 / 挂到某个节点下（Q27）。与「移到其它事件…」是两件事 ——
   // 一个改"属于哪条线"，一个改"挂在线上的哪一层"。
   actions.add(const TaskAction('parent', '改归属…', Icons.account_tree_outlined));

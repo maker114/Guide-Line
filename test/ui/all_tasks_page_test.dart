@@ -8,6 +8,8 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/common/format.dart';
 import 'package:guideline/ui/more/all_tasks_page.dart';
 
+import 'scroll_finders.dart';
+
 /// 「全部任务」的这几条：
 ///   · 顶上那排「全部 / 未完成 / 已完成 / 已搁置」分类**整行去掉**；
 ///   · 任务行：**左边只放任务名**，箭头没了，**到期日与完成圆钮靠右对齐**，
@@ -222,9 +224,9 @@ void main() {
 
     await tester.tap(find.byTooltip('设到期日'));
     await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsOneWidget);
-    // 选择器初值就是今天，直接确认 → 两条都设成今天
-    await tester.tap(find.text('OK'));
+    expect(find.byType(CalendarDatePicker), findsOneWidget, reason: '点开的是日期面板');
+    // 面板里的日历：点哪一天就落哪一天（选中即生效，没有第二个"确定"）
+    await tapTodaysDay(tester);
     await tester.pumpAndSettle();
 
     final today = Ids.todayDate();

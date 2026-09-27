@@ -53,6 +53,12 @@ class GuidelineApp extends StatelessWidget {
           navigatorObservers: <NavigatorObserver>[controller.editSessionObserver],
           theme: buildAppTheme(prefs, Brightness.light),
           darkTheme: buildAppTheme(prefs, Brightness.dark),
+          // 深色 / 亮色怎么取**由偏好决定**（默认跟随系统）。
+          //
+          // 从前这里没给 `themeMode`，`MaterialApp` 的默认值就是 `system` ——
+          // 于是"跟随系统"一直是**唯一**的行为，想固定用深色也没有入口。
+          // 现在三个取值都能在「更多 → 主题与背景」里选（`ui_prefs.themeMode`）。
+          themeMode: themeModeOf(prefs),
           builder: (context, child) => AppBackground(
             bytes: controller.backgroundBytes,
             opacity: prefs.backgroundOpacity,

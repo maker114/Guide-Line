@@ -116,6 +116,21 @@ class _InlineTextFieldState extends State<InlineTextField> {
     _focus.removeListener(_onFocusChanged);
     _focus.dispose();
     _controller.dispose();
+    // **编辑中被移出树也要收掉父级的"正在编辑"状态**（实机反馈：收起 / 展开
+    // 分类时输入框会自己弹出来）。
+    //
+    // 父级是靠 `onEditClosed` 才把"正在改哪一行"清掉的，而这条回调原来只挂在
+    // `_commit` / `_cancel` 上 —— 于是"编辑中的那一行被折叠收走"会让父级的
+    // 改名 id 一直非空；那一行再出现时（`autofocus: true`）就自己重新进入编辑态，
+    // 表现为"我只是收了个下级，输入框和键盘自己跳出来"。
+    //
+    // 这里只传当前值、**不写盘**：被移出树的编辑会话等于放弃改动，
+    // 与 `_cancel` 同一条口径；提交仍然只走用户显式点确认 / 键盘完成那条路。
+    final onClosed = widget.onEditClosed;
+    if (onClosed != null && _editing) {
+      // 不能在 dispose 里同步 setState（父级可能正在 rebuild），推到下一帧
+      WidgetsBinding.instance.addPostFrameCallback((_) => onClosed());
+    }
     super.dispose();
   }
 

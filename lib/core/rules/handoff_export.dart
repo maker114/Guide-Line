@@ -72,6 +72,57 @@ class HandoffExport {
     return '${out.join('\n')}\n';
   }
 
+  /// 生成**一个分类连同它所有下级目标**的说明（Markdown）。
+  ///
+  /// 实机反馈："分类界面应当可以统一导出其子项目的所有条目" —— 分类里装的
+  /// 就是同一个方向上的几件事，一份说明把整个方向交出去才有用；
+  /// 一条条展开、一个个导出，等于让用户自己做这件汇总。
+  ///
+  /// 为什么不是一个更深的层级标题树：分类说明是给**对面的 AI** 读的，
+  /// 每个下级目标自带 `# 项目：xxx` 与它自己的 `## 实现清单` / `## 如何解决`
+  /// 已经是完整可读的一节；再套一层 `###` 只会把标题层级搞乱。
+  /// 所以这里是**一节一节平铺**，节与节之间用分隔线分开。
+  ///
+  /// 调用方负责**过滤**：已归档与已删除的下级不进 `children`
+  /// （分类里装的是还活着的目标，见《定义与边界》§2.1）。
+  static String buildCategory({
+    required Project category,
+    required List<Project> children,
+    required Map<String, List<Inspiration>> inspirationsByProject,
+    required DateTime now,
+  }) {
+    final out = <String>[
+      '# 分类：${category.title.trim()}',
+      '',
+      if (category.purpose.trim().isNotEmpty)
+        '- 总纲领：${category.purpose.trim()}',
+      '- 目标 ${children.length} 个',
+      '- 导出时间：${_stamp(now)}',
+    ];
+
+    if (children.isEmpty) {
+      out
+        ..add('')
+        ..add('（这个分类下面还没有目标）');
+    }
+
+    for (final child in children) {
+      out
+        ..add('')
+        ..add('---')
+        ..add('')
+        ..add(
+          build(
+            project: child,
+            inspirations: inspirationsByProject[child.id] ?? const <Inspiration>[],
+            now: now,
+          ).trimRight(),
+        );
+    }
+
+    return '${out.join('\n')}\n';
+  }
+
   // 清单：`- [x] 文本`
   static List<String> _checklistSection(List<ProjectItem> items) {
     if (items.isEmpty) return const <String>[];

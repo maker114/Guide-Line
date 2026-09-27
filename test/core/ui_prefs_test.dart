@@ -113,6 +113,55 @@ void main() {
     });
   });
 
+  group('深色 / 亮色（主题模式）', () {
+    test('默认跟随系统 —— 与从前"没给 themeMode"的行为一致', () {
+      expect(UiPrefs.empty.themeMode, UiPrefs.defaultThemeMode);
+      expect(UiPrefs.defaultThemeMode, UiPrefs.themeModeSystem);
+    });
+
+    test('三个取值都能 JSON 往返', () {
+      for (final mode in UiPrefs.themeModes) {
+        final restored = UiPrefs.fromJson(
+          UiPrefs.empty.copyWith(themeMode: mode).toJson(),
+        );
+        expect(restored.themeMode, mode);
+      }
+    });
+
+    test('认不出来的值收回"跟随系统"，不抛也不照单全收', () {
+      for (final bad in <Object?>[null, '', 'DARK', 'auto', 3, <String>['dark']]) {
+        final restored = UiPrefs.fromJson(<String, dynamic>{'themeMode': bad});
+        expect(
+          restored.themeMode,
+          UiPrefs.defaultThemeMode,
+          reason: '坏值 $bad 应当收回默认值',
+        );
+      }
+    });
+
+    test('老偏好文件里没有这个键 → 跟随系统', () {
+      final restored = UiPrefs.fromJson(<String, dynamic>{'lastTabIndex': 1});
+      expect(restored.themeMode, UiPrefs.themeModeSystem);
+    });
+
+    test('copyWith 只翻这一个字段，别的都不动', () {
+      const original = UiPrefs(
+        lastTabIndex: 2,
+        themeId: 'ink',
+        backgroundImagePath: '/p/bg.img',
+        aiModel: 'm',
+      );
+
+      final dark = original.copyWith(themeMode: UiPrefs.themeModeDark);
+
+      expect(dark.themeMode, UiPrefs.themeModeDark);
+      expect(dark.themeId, 'ink', reason: '配色与亮暗是两个维度，互不影响');
+      expect(dark.lastTabIndex, 2);
+      expect(dark.backgroundImagePath, '/p/bg.img');
+      expect(dark.aiModel, 'm');
+    });
+  });
+
   test('withExpanded 不会顺手弄丢别的字段', () {
     const original = UiPrefs(
       lastTabIndex: 1,

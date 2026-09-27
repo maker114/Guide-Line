@@ -117,7 +117,8 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('多选'));
+    // 长按进多选（页头那枚「多选」按钮已按实机反馈拿掉）
+    await tester.longPress(find.text('甲'));
     await tester.pumpAndSettle();
     expect(find.text('已选 1 条'), findsWidgets, reason: '进多选默认选中第一条');
 
@@ -133,16 +134,33 @@ void main() {
     expect(find.text('已选 0 条'), findsWidgets);
   });
 
-  testWidgets('「多选」按钮也能进多选（不只有长按这一条路）', (tester) async {
+  testWidgets('页头不再有「多选」入口，也没有 ⋮ 里的「多选…」—— 只剩长按这一条路',
+      (tester) async {
     final app = await boot();
     app.run(() => app.ws.captureInspiration('一条灵感'));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('多选'));
+    expect(
+      find.text('多选'),
+      findsNothing,
+      reason: '实机反馈：把"多选"这个入口拿掉（功能保留，长按进得去）',
+    );
+
+    // ⋮ 的面板里也没有那一项
+    await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    expect(find.text('已选 1 条'), findsWidgets, reason: '点「多选」默认选中第一条，省一次点击');
+    expect(find.text('多选…'), findsNothing);
+    expect(find.text('编辑内容'), findsOneWidget, reason: '面板本身还在，只是少了多选与标签两项');
+    expect(find.text('标签…'), findsNothing, reason: '标签系统整批移除');
+
+    // 长按照样进得去
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('一条灵感'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 条'), findsWidgets, reason: '长按这条入口一个字没改');
   });
 
   testWidgets('项目详情页的待处理灵感可以直接点进合并编辑器', (tester) async {
@@ -215,10 +233,13 @@ void main() {
     expect(reloaded.items, isEmpty, reason: '走正文这一条就不动清单');
     expect(app.ws.inspirationInbox, isEmpty);
     expect(app.ws.archiveZone.mergedInspirations.length, 1);
+    // 回到详情页：正文在「实现 · 文本」那一侧，默认给的是「清单」，先切过去
+    await tester.tap(find.text('文本'));
+    await tester.pumpAndSettle();
     expect(
       find.textContaining('改好的计划：灵感原文'),
       findsOneWidget,
-      reason: '回到详情页，「实现计划」里就是刚保存的那段',
+      reason: '回到详情页，文本模式里就是刚保存的那段',
     );
   });
 
@@ -322,7 +343,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 只选了 1 条也能用「合并…」（行为等同单条合并）
-    await tester.tap(find.text('多选'));
+    await tester.longPress(find.text('灵感甲'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
@@ -393,27 +414,22 @@ void main() {
     expect(after.width, closeTo(before.width, 0.01));
   });
 
-  testWidgets('标签是灵感的分类：条目上显示、点它筛出这一类、动作面板能改', (tester) async {
+  testWidgets('标签系统整批移除：老数据里的标签也不再出现在界面上', (tester) async {
     final app = await boot();
     final inspiration = app.ws.captureInspiration('带标签的一条');
+    // 直接往数据层写：契约里的字段留着（零迁移），但界面不该再产生、也不再显示它
     app.run(() => app.ws.updateInspirationTags(inspiration.id, <String>['产品', '体验']));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    expect(find.text('#产品'), findsOneWidget, reason: '条目上要看得见标签');
-    expect(find.text('#体验'), findsOneWidget);
+    expect(find.text('#产品'), findsNothing);
+    expect(find.text('#体验'), findsNothing);
+    expect(find.text('加标签'), findsNothing, reason: '书写区不再有打标签的入口');
 
-    // 点标签 → 只看这一类；数字必须说清"筛出几条 / 一共几条"
-    await tester.tap(find.text('#产品'));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('标签「产品」'), findsOneWidget);
-    expect(find.textContaining('筛出 1 条 / 未处理共 1 条'), findsOneWidget);
-
-    // 动作面板里有改标签的入口
     await tester.tap(find.text('带标签的一条'));
     await tester.pumpAndSettle();
-    expect(find.text('标签…'), findsOneWidget);
+    expect(find.text('标签…'), findsNothing, reason: '动作面板里的那一项也删了');
   });
 
   testWidgets('筛空了要说清"还有多少条"，不能假装灵感箱是空的', (tester) async {

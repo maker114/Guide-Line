@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/task.dart';
 import '../common/dialogs.dart';
+import '../common/due_sheet.dart';
 import '../common/event_picker.dart';
-import '../common/format.dart';
 
 /// 任务的常用动作：**到期 / 归属 / 归档 / 删除**。
 ///
@@ -13,36 +13,34 @@ import '../common/format.dart';
 /// 不再弹对话框。留在这里的都是"改完会有副作用、值得问一句"的动作。
 
 /// 设置 / 清除到期日。
-Future<void> setTaskDueAction(
+///
+/// 两件事走**同一个面板**（`pickDateSheet`）：点日期图标弹日历，清除键就在
+/// 日历下面。从前清除只挂在长按上、而提示也写在同一个长按的 tooltip 里，
+/// 点开系统日历**只能改不能删** —— 实机反馈"日期取消不掉"就是从这来的。
+///
+/// 返回 `true` 表示真的落盘了（调用方可以据此给提示）。
+Future<bool> setTaskDueAction(
   BuildContext context,
   AppController app,
   Task task,
 ) async {
-  final now = DateTime.now();
-  final initial = task.dueAt == null ? now : (DateTime.tryParse(task.dueAt!) ?? now);
-  final picked = await showDatePicker(
-    context: context,
-    initialDate: initial,
-    firstDate: DateTime(now.year - 5),
-    lastDate: DateTime(now.year + 20),
-    helpText: task.dueAt == null
-        ? '选择到期日'
-        : '当前：${describeDateWithDays(task.dueAt)}',
+  final picked = await pickDateSheet(
+    context,
+    title: task.dueAt == null ? '选择到期日' : '改到期日',
+    current: task.dueAt,
   );
-  if (picked == null || !context.mounted) return;
-  final month = picked.month.toString().padLeft(2, '0');
-  final day = picked.day.toString().padLeft(2, '0');
-  final error = app.run(() => app.ws.updateTask(task.id, dueAt: '${picked.year}-$month-$day'));
-  if (error != null && context.mounted) showToast(context, error, error: true);
-}
+  if (picked == null || !context.mounted) return false;
 
-Future<void> clearTaskDueAction(
-  BuildContext context,
-  AppController app,
-  Task task,
-) async {
-  final error = app.run(() => app.ws.updateTask(task.id, dueAt: null));
-  if (error != null && context.mounted) showToast(context, error, error: true);
+  // 空串 = 用户点了「清除日期」
+  final dueAt = picked == clearDateValue ? null : picked;
+  final error = app.run(() => app.ws.updateTask(task.id, dueAt: dueAt));
+  if (!context.mounted) return false;
+  if (error != null) {
+    showToast(context, error, error: true);
+    return false;
+  }
+  showToast(context, dueAt == null ? '已清除到期日' : '到期日：$dueAt');
+  return true;
 }
 
 /// 移到其它事件（跨事件移动时父引用会被业务层强制归零）。
@@ -167,28 +165,25 @@ Future<bool> batchSetTasksDueAction(
 ) async {
   if (taskIds.isEmpty) return false;
 
-  final now = DateTime.now();
   final firstDue = app.ws.findTask(taskIds.first)?.dueAt;
-  final initial = firstDue == null ? now : (DateTime.tryParse(firstDue) ?? now);
-  final picked = await showDatePicker(
-    context: context,
-    initialDate: initial,
-    firstDate: DateTime(now.year - 5),
-    lastDate: DateTime(now.year + 20),
-    helpText: '给这 ${taskIds.length} 条设到期日',
+  final picked = await pickDateSheet(
+    context,
+    title: '给这 ${taskIds.length} 条设到期日',
+    current: firstDue,
   );
   if (picked == null || !context.mounted) return false;
 
-  final month = picked.month.toString().padLeft(2, '0');
-  final day = picked.day.toString().padLeft(2, '0');
-  final dueAt = '${picked.year}-$month-$day';
+  final dueAt = picked == clearDateValue ? null : picked;
   final error = app.run(() => app.ws.setTasksDue(taskIds, dueAt));
   if (!context.mounted) return false;
   if (error != null) {
     showToast(context, error, error: true);
     return false;
   }
-  showToast(context, '已给 ${taskIds.length} 条设到期日 $dueAt');
+  showToast(
+    context,
+    dueAt == null ? '已清除 ${taskIds.length} 条的到期日' : '已给 ${taskIds.length} 条设到期日 $dueAt',
+  );
   return true;
 }
 

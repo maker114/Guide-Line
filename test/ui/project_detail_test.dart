@@ -194,7 +194,7 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('目标详情页：字段改称「有什么问题 / 思路」与「如何解决」（Q4）', (tester) async {
+  testWidgets('目标详情页：字段改称「有什么问题 / 思路」，实现分「清单 / 文本」两种模式', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '目标甲');
     app.run(() => app.ws.updateProject(project.id, purpose: '先把口子收窄'));
@@ -202,10 +202,70 @@ void main() {
     await openProject(tester, app, '目标甲');
 
     expect(find.text('有什么问题 / 思路'), findsOneWidget);
-    expect(find.text('如何解决'), findsOneWidget);
     expect(find.text('目的'), findsNothing);
     expect(find.text('实现计划'), findsNothing);
     expect(find.textContaining('先把口子收窄'), findsOneWidget);
+
+    // 实现那一块：标题 + 二选一的分段按钮（不再是"实现清单 + 如何解决"两张卡）
+    expect(find.text('实现'), findsOneWidget);
+    expect(find.text('清单'), findsOneWidget);
+    expect(find.text('文本'), findsOneWidget);
+    expect(
+      find.text('如何解决'),
+      findsNothing,
+      reason: 'ADR-077：整段正文并进「实现 · 文本」那一侧，不再单独占一张卡',
+    );
+  });
+
+  testWidgets('目标的日期设上之后能在日期面板里清掉（实机反馈：设了就取消不掉）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '带日期的目标');
+    app.run(() => app.ws.updateProject(project.id, date: '2099-05-01'));
+
+    await openProject(tester, app, '带日期的目标');
+
+    // 日期入口就是那颗图标（不在任何菜单里）
+    await tester.tap(find.byIcon(Icons.event_available_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('当前：'), findsOneWidget);
+    await tester.tap(find.text('清除日期'));
+    await tester.pumpAndSettle();
+
+    expect(
+      app.ws.findProject(project.id)!.date,
+      isNull,
+      reason: '设过的日期必须能取消掉 —— 从前清除只挂在长按上，而提示也写在同一个长按的 tooltip 里',
+    );
+    expect(find.byIcon(Icons.event_outlined), findsOneWidget, reason: '图标回到"没设"');
+  });
+
+  testWidgets('设过日期的目标变成分类之后，那个日期仍然点得到、清得掉', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '后来长了下级');
+    app.run(() => app.ws.updateProject(project.id, date: '2099-05-01'));
+    // 它现在有下级了 = 分类。分类**不给设日期**，但设过的那个不能就此消失
+    app.ws.createProject(title: '一个新下级', parentId: project.id);
+
+    await openProject(tester, app, '后来长了下级');
+
+    expect(
+      find.byIcon(Icons.event_available_outlined),
+      findsOneWidget,
+      reason: '变成分类之后日期图标整个不见了，那个日期就再也点不到、清不掉（实机反馈的根因之一）',
+    );
+
+    await tester.tap(find.byIcon(Icons.event_available_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除日期'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findProject(project.id)!.date, isNull);
+    expect(
+      find.byIcon(Icons.event_available_outlined),
+      findsNothing,
+      reason: '清掉之后分类就不该再画这个图标（分类本来就没有日期）',
+    );
   });
 
   testWidgets('分类详情页：一个总纲领输入框 + 可展开的下级，不出现清单 / 如何解决 / 日期', (tester) async {
@@ -248,14 +308,50 @@ void main() {
     expect(find.text('日期'), findsNothing);
     expect(find.textContaining('2026-12-31'), findsNothing);
     expect(find.byTooltip('日期：点一下选'), findsNothing);
-    // 分类不装灵感：这一页没有灵感区，也没有交接导出
+    // 分类不装灵感：这一页没有灵感区
     expect(find.textContaining('待处理灵感'), findsNothing);
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
+    // 分类现在**也有**导出入口：导的是"分类 + 所有下级目标"（实机反馈：
+    // 分类界面应当可以统一导出其子项目的所有条目），名字与目标那条区分开
+    expect(find.text('导出分类说明…'), findsOneWidget);
     expect(find.text('导出交接说明…'), findsNothing);
     expect(find.text('移到其它分类'), findsOneWidget, reason: '分类的动作仍在菜单里');
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
+  });
+
+  testWidgets('分类可以统一导出：预览页里能看到分类自己和每个下级目标', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    app.run(() => app.ws.updateProject(category.id, purpose: '这一类都为了把 v1 发出去'));
+    final targetA = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    final targetB = app.ws.createProject(title: '复盘', parentId: category.id);
+    app.run(() => app.ws.addProjectItem(targetA.id, '写好发布说明'));
+    app.run(() => app.ws.updateProject(targetB.id, purpose: '把这次的口子记下来'));
+    // 归档掉一个下级：**它不该进这份说明**（分类里装的是还活着的目标）
+    final archived = app.ws.createProject(title: '归档掉的目标', parentId: category.id);
+    app.run(() => app.ws.setProjectArchived(archived.id, true));
+
+    await openProject(tester, app, '工作');
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('导出分类说明…'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('交接说明 · 工作'), findsOneWidget);
+    final preview = tester.widget<TextField>(find.byType(TextField));
+    final text = preview.controller!.text;
+    expect(text, contains('# 分类：工作'));
+    expect(text, contains('这一类都为了把 v1 发出去'));
+    expect(text, contains('# 项目：发布 v1'));
+    expect(text, contains('写好发布说明'));
+    expect(text, contains('# 项目：复盘'));
+    expect(
+      text,
+      isNot(contains('归档掉的目标')),
+      reason: '已归档的下级不进分类说明 —— 它已经不在这件事里了',
+    );
   });
 
   testWidgets('分类的下级可以展开：展开后能看到并勾选它的实现清单', (tester) async {
@@ -269,37 +365,43 @@ void main() {
     // 收起时只给进度，不给清单内容 —— 一行下级不该把整页撑开
     expect(find.text('写好发布说明'), findsNothing);
 
-    await tester.tap(find.text('发布 v1'));
+    // 行尾箭头只管展开 / 收起（点标题是进详情页，见下一条用例）
+    await tester.tap(find.byIcon(Icons.chevron_right));
     await tester.pumpAndSettle();
 
     expect(find.text('写好发布说明'), findsOneWidget);
+    // 展开区**没有**「添加条目」与「打开这个目标」这两项（2026-09-27 实机反馈）
+    expect(find.text('添加条目'), findsNothing);
+    expect(find.text('打开这个目标'), findsNothing);
+
     // 就地打勾：与项目页同一个口径（只是打勾，不参与任何判定）
-    await tester.tap(find.byType(Checkbox));
+    // 展开区用的是**圆形**勾选（实机反馈：确认框改成圆形），不是方形 `Checkbox`
+    expect(find.byType(Checkbox), findsNothing, reason: '展开区不该再出现方形勾选框');
+    await tester.tap(find.byIcon(Icons.radio_button_unchecked));
     await tester.pumpAndSettle();
     expect(app.ws.findProject(target.id)!.items.single.done, isTrue);
     expect(app.ws.findProject(target.id)!.itemsDoneCount, 1);
+    expect(find.byIcon(Icons.check_circle), findsOneWidget, reason: '勾上之后换成实心圆');
     expect(find.text('已完成'), findsNothing, reason: '项目没有完成态（Q1）');
 
     // 勾完不会自己收起来（展开状态挂在 State 上）
     expect(find.text('写好发布说明'), findsOneWidget);
 
-    await tester.tap(find.text('发布 v1'));
+    await tester.tap(find.byIcon(Icons.chevron_right));
     await tester.pumpAndSettle();
     expect(find.text('写好发布说明'), findsNothing);
     expect(app.ws.findProject(target.id)!.items.single.done, isTrue, reason: '收起不会把勾去掉');
   });
 
-  testWidgets('展开区里的「打开这个目标」进的是下级自己的详情页', (tester) async {
+  testWidgets('点下级那一行的标题进的是下级自己的详情页', (tester) async {
     final app = await boot();
     final category = app.ws.createProject(title: '工作');
     final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
     app.run(() => app.ws.updateProject(target.id, purpose: '发布页还差一个回滚口径'));
 
     await openProject(tester, app, '工作');
+    // 展开区里那个「打开这个目标」按钮已经按要求去掉，进下级的出路是点标题
     await tester.tap(find.text('发布 v1'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('打开这个目标'));
     await tester.pumpAndSettle();
 
     expect(find.text('有什么问题 / 思路'), findsOneWidget);

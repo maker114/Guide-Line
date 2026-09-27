@@ -12,12 +12,23 @@ import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/labels.dart';
+import '../theme/shape_tokens.dart';
 
 /// 归档区（ADR-052）。
 ///
 /// **所有「从主视图消失」的东西必须有唯一去处。** 归档区不是新实体，
-/// 而是由 `archived` / `status` / `deleted` 推导出来的视图聚合，分五个分区：
-/// 已归档 / 已丢弃 / 已合并 / 回收站 / 因项目归档被隐藏。
+/// 而是由 `archived` / `status` / `deleted` 推导出来的视图聚合，分**三档**
+/// （2026-09-27 合并：原先把灵感拆成「已丢弃」「已合并」「被隐藏」三档，
+/// 三档常常各是 0 条却各占一个横向页签，手机上得横向滚才看得全）：
+///
+/// ```
+/// 已归档        项目 / 事件 / 任务（archived，只列级联根）
+/// 已处理的灵感   被隐藏 + 已丢弃 + 已合并（逐条一个来源小胶囊）
+/// 回收站        deleted（只列级联根），每条保留 30 天
+/// ```
+///
+/// **灵感删除不进这里**：它是唯一不进回收站的实体（《定义与边界》§8），
+/// 删除只留一条 30 天后骨架化的墓碑。
 ///
 /// 每个分区都能**反向找回**；只有「彻底删除」是不可逆的，所以它必须二次确认。
 class ArchivePage extends StatelessWidget {
@@ -28,11 +39,12 @@ class ArchivePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 3,
       child: ListenableBuilder(
         listenable: app,
         builder: (context, _) {
           final zone = app.ws.archiveZone;
+          final processed = _ProcessedInspirations.of(zone);
           return Scaffold(
             appBar: AppBar(
               title: const Text('归档区'),
@@ -40,32 +52,105 @@ class ArchivePage extends StatelessWidget {
                 isScrollable: true,
                 tabs: <Widget>[
                   Tab(text: '已归档 ${zone.archivedRoots.length}'),
-                  Tab(text: '已丢弃 ${zone.discardedInspirations.length}'),
-                  Tab(text: '已合并 ${zone.mergedInspirations.length}'),
+                  Tab(text: '已处理的灵感 ${processed.total}'),
                   Tab(text: '回收站 ${zone.trashRoots.length}'),
-                  Tab(text: '被隐藏 ${zone.hiddenInspirations.length}'),
                 ],
               ),
             ),
             body: TabBarView(
               children: <Widget>[
                 _ArchivedPane(app: app, items: zone.archivedRoots),
-                _InspirationPane(
-                  app: app,
-                  items: zone.discardedInspirations,
-                  merged: false,
-                ),
-                _InspirationPane(
-                  app: app,
-                  items: zone.mergedInspirations,
-                  merged: true,
-                ),
+                _ProcessedInspirationsPane(app: app, items: processed.items),
                 _TrashPane(app: app, items: zone.trashRoots),
-                _HiddenPane(items: zone.hiddenInspirations),
               ],
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// 「已处理的灵感」这一档里**每一条是从哪来的**。
+enum ProcessedSource {
+  /// 因所属项目被归档而看不见的**待处理**灵感（原文一个字没动、也没被处理过）
+  hidden('被隐藏'),
+
+  /// 被丢弃的（恢复就是放回待处理）
+  discarded('已丢弃'),
+
+  /// 已被合进项目的（恢复只放回灵感箱，项目里的内容不退回）
+  merged('已合并');
+
+  const ProcessedSource(this.label);
+
+  /// 逐条打在灵感行上的小胶囊文案。
+  final String label;
+}
+
+/// 「已处理的灵感」这一档的取数：三路合流、各带来源标记、按更新时间倒序。
+///
+/// 单独抽一个值对象，是为了让「页签上的数字」与「列表里的条数」出自
+/// **同一处** —— 界面上写 7 条、点进去只有 5 条，是实机反馈里被点过名的那类问题。
+class _ProcessedInspirations {
+  const _ProcessedInspirations(this.items);
+
+  final List<({Entity entity, ProcessedSource source})> items;
+
+  int get total => items.length;
+
+  static _ProcessedInspirations of(ArchiveZone zone) {
+    final out = <({Entity entity, ProcessedSource source})>[
+      for (final item in zone.hiddenInspirations)
+        (entity: item, source: ProcessedSource.hidden),
+      for (final item in zone.discardedInspirations)
+        (entity: item, source: ProcessedSource.discarded),
+      for (final item in zone.mergedInspirations)
+        (entity: item, source: ProcessedSource.merged),
+    ]..sort((a, b) => b.entity.updatedAt.compareTo(a.entity.updatedAt));
+    return _ProcessedInspirations(out);
+  }
+}
+
+/// 灵感行上的**来源小胶囊**（《界面规范》§1：标签一律用胶囊）。
+///
+/// 三档合一之后，用户更需要一眼分清"这条是被我丢了、还是合进项目了、
+/// 还是仅仅因为项目归档而看不见" —— 这三件事的**出路完全不同**
+/// （放回待处理 / 项目内容不退回 / 取消归档那个项目）。
+class _SourceChip extends StatelessWidget {
+  const _SourceChip({required this.source});
+
+  final ProcessedSource source;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // 三档各取一个**主题里的前景 role**，颜色一律从 `colorScheme` 取、不硬编码。
+    // 被隐藏最轻（中性），已丢弃次之，已合并最实 —— 它已经在项目里留了痕。
+    final (Color background, Color foreground) = switch (source) {
+      ProcessedSource.hidden => (
+          scheme.surfaceContainerHighest,
+          scheme.onSurfaceVariant,
+        ),
+      ProcessedSource.discarded => (
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer,
+        ),
+      ProcessedSource.merged => (
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+      ),
+      child: Text(
+        source.label,
+        style: theme.textTheme.labelSmall?.copyWith(color: foreground),
       ),
     );
   }
@@ -168,80 +253,99 @@ class _ArchivedPane extends StatelessWidget {
 
 // ---------------------------------------------------------------- 灵感分区
 
-class _InspirationPane extends StatelessWidget {
-  const _InspirationPane({
-    required this.app,
-    required this.items,
-    required this.merged,
-  });
+class _ProcessedInspirationsPane extends StatelessWidget {
+  const _ProcessedInspirationsPane({required this.app, required this.items});
 
   final AppController app;
-  final List<Entity> items;
-  final bool merged;
+
+  /// 三路合流之后的条目（已按更新时间倒序）。
+  final List<({Entity entity, ProcessedSource source})> items;
 
   @override
   Widget build(BuildContext context) {
-    // 分区说明与动作名必须**说同一件事**（Q9）：合并是"吸收"，恢复只把灵感
-    // 放回待处理，项目里的那一行 / 那条清单**不退回** —— 这句话涉及数据会不会
-    // 回来，必须留。
-    final note = merged ? '「恢复为待处理」只把灵感放回灵感箱，项目里的内容不会退回。' : null;
-    // 归档区把灵感与树形实体放在同一个列表里返回，这里按分区语义收回具体类型
-    final list = items.whereType<Inspiration>().toList(growable: false);
-    if (list.isEmpty) {
+    // 分区说明必须与动作名**说同一件事**（Q9）：三档合一之后，这里要把
+    // 「三件事的出路不一样」一次讲清 —— 尤其是"合并过的那条，项目里的内容
+    // 不会退回来"，那是涉及数据会不会回来的一句，必须留。
+    const note = '「恢复为待处理」只把灵感放回灵感箱；'
+        '已合并的那些，写进项目里的内容不会退回。'
+        '「被隐藏」的那些，取消归档对应项目即可自动回到灵感列表。';
+    if (items.isEmpty) {
       return _Pane(
         note: note,
-        child: _empty(merged ? '没有已合并的灵感' : '没有已丢弃的灵感', '处理灵感时会自动归档到这里'),
+        child: _empty('没有已处理的灵感', '丢弃 / 合并灵感、或归档一个项目之后，相关的灵感会出现在这里'),
       );
     }
     return _Pane(
       note: note,
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
-        itemCount: list.length,
+        itemCount: items.length,
         separatorBuilder: (_, _) => const Divider(height: 1, indent: 16, endIndent: 16),
         itemBuilder: (context, index) {
-          final inspiration = list[index];
+          final entry = items[index];
+          // 归档区把灵感与树形实体放在同一个列表里返回，这里按分区语义收回具体类型
+          final inspiration = entry.entity as Inspiration;
+          final merged = entry.source == ProcessedSource.merged;
+          // 「被隐藏」的那条**没有动作可做**：它没被处理过，只是所在项目归档了 ——
+          // 出路是去把那个项目取消归档，不是"恢复为待处理"。
+          final actionable = entry.source != ProcessedSource.hidden;
           return ListTile(
             isThreeLine: true,
             leading: const Icon(Icons.lightbulb_outline),
             title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),
-            subtitle: Text(
-              '${_projectName(inspiration)} · ${relativeTime(inspiration.updatedAt)}',
-              style: Theme.of(context).textTheme.labelSmall,
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                children: <Widget>[
+                  _SourceChip(source: entry.source),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_projectName(inspiration)} · ${relativeTime(inspiration.updatedAt)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            trailing: PopupMenuButton<String>(
-              tooltip: '更多',
-              onSelected: (value) async {
-                if (value == 'restore') {
-                  if (merged) {
-                    final error = app.run(() => app.ws.undoMerge(inspiration.id));
-                    if (error != null) {
-                      showToast(context, error, error: true);
-                      return;
-                    }
-                    showToast(context, '已恢复为待处理，项目里的内容不会退回');
-                  } else {
-                    final error = app.run(() => app.ws.restoreInspiration(inspiration.id));
-                    if (error != null) {
-                      showToast(context, error, error: true);
-                      return;
-                    }
-                    showToast(context, '已恢复为待处理');
-                  }
-                  return;
-                }
-                await _purge(context, app, inspiration);
-              },
-              itemBuilder: (_) => <PopupMenuEntry<String>>[
-                PopupMenuItem<String>(
-                  value: 'restore',
-                  // 名字里就把代价写出来（Q9）：这个动作**不回滚项目内容**，
-                  // 只把灵感放回待处理。叫"撤销合并"会让人以为项目也一起退回去了。
-                  child: Text(merged ? '恢复为待处理，项目内容不退回' : '恢复为待处理'),
-                ),
-                const PopupMenuItem<String>(value: 'purge', child: Text('彻底删除')),
-              ],
-            ),
+            trailing: actionable
+                ? PopupMenuButton<String>(
+                    tooltip: '更多',
+                    onSelected: (value) async {
+                      if (value == 'restore') {
+                        if (merged) {
+                          final error = app.run(() => app.ws.undoMerge(inspiration.id));
+                          if (error != null) {
+                            showToast(context, error, error: true);
+                            return;
+                          }
+                          showToast(context, '已恢复为待处理，项目里的内容不会退回');
+                        } else {
+                          final error =
+                              app.run(() => app.ws.restoreInspiration(inspiration.id));
+                          if (error != null) {
+                            showToast(context, error, error: true);
+                            return;
+                          }
+                          showToast(context, '已恢复为待处理');
+                        }
+                        return;
+                      }
+                      await _purge(context, app, inspiration);
+                    },
+                    itemBuilder: (_) => <PopupMenuEntry<String>>[
+                      PopupMenuItem<String>(
+                        value: 'restore',
+                        // 名字里就把代价写出来（Q9）：这个动作**不回滚项目内容**，
+                        // 只把灵感放回待处理。叫"撤销合并"会让人以为项目也一起退回去了。
+                        child: Text(merged ? '恢复为待处理，项目内容不退回' : '恢复为待处理'),
+                      ),
+                      const PopupMenuItem<String>(value: 'purge', child: Text('彻底删除')),
+                    ],
+                  )
+                : null,
           );
         },
       ),
@@ -332,43 +436,6 @@ String _restoreScopeLabel(Entity entity, DocName doc, int total) {
   if (total <= 1) return name;
   if (doc == DocName.events) return '$name，含整条任务线共 $total 条';
   return '$name，含下级共 $total 条';
-}
-
-// ---------------------------------------------------------------- 被隐藏
-
-class _HiddenPane extends StatelessWidget {
-  const _HiddenPane({required this.items});
-
-  final List<Entity> items;
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return _Pane(
-        child: _empty('没有被隐藏的灵感', '取消归档对应项目即可让它们回到灵感列表'),
-      );
-    }
-    return _Pane(
-      // 这些灵感"不见了"是算出来的，必须说清去哪找回来
-      note: '所属项目已归档，所以它们不在灵感列表里；取消归档即可回来。',
-      child: ListView.separated(
-        padding: const EdgeInsets.only(bottom: 24),
-        itemCount: items.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, indent: 16, endIndent: 16),
-        itemBuilder: (context, index) {
-          final inspiration = items[index];
-          return ListTile(
-            leading: const Icon(Icons.visibility_off_outlined),
-            title: Text(entityTitle(inspiration), maxLines: 3, overflow: TextOverflow.ellipsis),
-            subtitle: Text(
-              relativeTime(inspiration.updatedAt),
-              style: Theme.of(context).textTheme.labelSmall,
-            ),
-          );
-        },
-      ),
-    );
-  }
 }
 
 // ---------------------------------------------------------------- 公共动作

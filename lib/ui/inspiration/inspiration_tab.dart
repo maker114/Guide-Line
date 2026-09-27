@@ -39,17 +39,12 @@ class InspirationTabState extends State<InspirationTab> {
   /// 记完**不重置** —— 连着记几条同一个项目的想法是常见动作。
   String? _captureProjectId;
 
-  /// 正在写的这条灵感要打哪些标签。
-  ///
-  /// 标签就是**灵感的分类**（契约里一直有 `tags`，只是界面入口曾经拿掉过）：
-  /// 它只回答"这条想法属于哪一类"，不影响归属项目、不影响归档与完成判定。
-  /// 与归属项目一样**记完不重置** —— 连着给同一类想法打同一个标签很常见。
-  List<String> _captureTags = <String>[];
-
-  /// 按标签筛选（点条目上的标签进来）。`null` = 不筛。
-  String? _filterTag;
-
   /// 多选模式：长按任一条进入，之后点条目标即选中。
+  ///
+  /// **入口只有长按这一个**（2026-09-27 实机反馈：把"多选"这个入口拿掉）：
+  /// 页头那枚「多选」按钮与 ⋮ 里的「多选…」都删了 —— 批量动作一件没少
+  /// （分配 / 合并 / 丢弃 / 删除都在选中后的动作条上），只是不再有两个显眼的
+  /// 入口把每一屏的注意力分走。
   bool _selecting = false;
   final Set<String> _selectedIds = <String>{};
 
@@ -129,14 +124,10 @@ class InspirationTabState extends State<InspirationTab> {
     final byProject = (_onlySelectedProject && _selectedProjectId != null)
         ? all.where((i) => i.projectId == _selectedProjectId)
         : all;
-    // 标签是第二个筛选维度，与"只看某个项目"**叠加**使用
-    final list = _filterTag == null
-        ? byProject.toList(growable: false)
-        : byProject.where((i) => i.tags.contains(_filterTag)).toList(growable: false);
+    final list = byProject.toList(growable: false);
     /// 有没有在筛：筛着的时候标题行的数字必须说清"筛出几条 / 一共几条"，
     /// 否则会出现"标题写 12 条、列表只有 3 条"这种对不上号的情况（实机反馈）。
-    final filtering =
-        (_onlySelectedProject && _selectedProjectId != null) || _filterTag != null;
+    final filtering = _onlySelectedProject && _selectedProjectId != null;
 
     // 选中项可能已被别人改动（例如在别处合并掉了），每次构建都清一遍幽灵选中
     final visibleIds = list.map((i) => i.id).toSet();
@@ -168,23 +159,11 @@ class InspirationTabState extends State<InspirationTab> {
                       }),
                     ),
                   ),
-                if (_filterTag != null) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: FilterChip(
-                      avatar: const Icon(Icons.sell_outlined, size: 16),
-                      label: Text('标签「$_filterTag」'),
-                      selected: true,
-                      onSelected: (_) => setState(() => _filterTag = null),
-                    ),
-                  ),
-                ],
                 const Spacer(),
                 TextButton(
                   onPressed: () => setState(() {
                     _selectedProjectId = null;
                     _onlySelectedProject = false;
-                    _filterTag = null;
                   }),
                   child: const Text('清除筛选'),
                 ),
@@ -201,12 +180,8 @@ class InspirationTabState extends State<InspirationTab> {
                     : (filtering ? '筛出 ${list.length} 条 / 未处理共 ${all.length} 条' : '未处理 ${all.length} 条'),
                 style: Theme.of(context).textTheme.labelLarge,
               ),
-              const Spacer(),
-              if (!_selecting && list.isNotEmpty)
-                TextButton(
-                  onPressed: () => _enterSelection(list.first.id),
-                  child: const Text('多选'),
-                ),
+              // 这里**不再有**那枚「多选」按钮（2026-09-27 实机反馈）：
+              // 长按任一条就能进多选，页头不需要再占一个常驻入口。
             ],
           ),
         ),
@@ -262,7 +237,6 @@ class InspirationTabState extends State<InspirationTab> {
                         onPressed: () => setState(() {
                           _selectedProjectId = null;
                           _onlySelectedProject = false;
-                          _filterTag = null;
                         }),
                         child: const Text('清除筛选'),
                       ),
@@ -285,17 +259,6 @@ class InspirationTabState extends State<InspirationTab> {
                       _selectedProjectId = projectId;
                       _onlySelectedProject = true;
                     }),
-                    onFilterTag: (tag) => setState(() => _filterTag = tag),
-                    onEditTags: (item) async {
-                      final tags = await _askTags(item.tags, '这条灵感的标签');
-                      if (tags == null || !mounted) return;
-                      final error = widget.app.run(
-                        () => widget.app.ws.updateInspirationTags(item.id, tags),
-                      );
-                      if (error != null && mounted) {
-                        showToast(this.context, error, error: true);
-                      }
-                    },
                   ),
                 ),
         ),
@@ -353,7 +316,7 @@ class InspirationTabState extends State<InspirationTab> {
                 children: <Widget>[
                   // 归属选择：一个胶囊小按钮，一眼看出这条灵感将归到哪儿。
                   // 它占**左侧剩余空间**（项目名长了就地省略），「记下」由
-                  // `Expanded` 之后的固定位置兜住 —— 按钮的位置不跟着标签长短跑
+                  // `Expanded` 之后的固定位置兜住 —— 按钮的位置不跟着项目名长短跑
                   // （实机反馈：改个项目名，记下按钮就挪了）。
                   Expanded(
                     child: Row(
@@ -386,41 +349,6 @@ class InspirationTabState extends State<InspirationTab> {
                                     Icons.expand_more,
                                     size: 16,
                                     color: theme.colorScheme.outline,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        // 标签就是灵感的分类：写下来的时候就分好，事后不用再一条条补
-                        Flexible(
-                          child: InkWell(
-                            onTap: _pickCaptureTags,
-                            borderRadius: BorderRadius.circular(AppShapes.chipRadius),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Icon(
-                                    Icons.sell_outlined,
-                                    size: 14,
-                                    color: theme.colorScheme.outline,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Flexible(
-                                    child: Text(
-                                      _captureTags.isEmpty
-                                          ? '加标签'
-                                          : _captureTags.join(' · '),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: theme.textTheme.labelMedium,
-                                    ),
                                   ),
                                 ],
                               ),
@@ -461,132 +389,6 @@ class InspirationTabState extends State<InspirationTab> {
     );
     if (picked == null || !mounted) return;
     setState(() => _captureProjectId = picked == pickNone ? null : picked);
-  }
-
-  /// 给正在写的这条灵感选标签（空的就往输入框里现编）。
-  Future<void> _pickCaptureTags() async {
-    final result = await _askTags(_captureTags, '这条灵感的标签');
-    if (result == null || !mounted) return;
-    setState(() => _captureTags = result);
-  }
-
-  /// 已经用过的标签（按出现顺序去重）：给标签面板当快捷选项。
-  ///
-  /// 只作为"省得重新打字"的候选，**不是**一份固定的分类表 ——
-  /// 灵感分类靠用户自己长出来，而不是先规定几个大类。
-  List<String> _allTags() {
-    final out = <String>[];
-    for (final inspiration in widget.app.ws.allInspirations) {
-      for (final tag in inspiration.tags) {
-        if (!out.contains(tag)) out.add(tag);
-      }
-    }
-    return out;
-  }
-
-  /// 标签面板：输入框里现编 + 勾选"用过的标签"。
-  ///
-  /// 取消返回 `null`（与其它选择器一致：`null` 与"清空"是两种意思）。
-  Future<List<String>?> _askTags(List<String> current, String title) async {
-    final theme = Theme.of(context);
-    final controller = TextEditingController(text: current.join(' '));
-    final existing = _allTags();
-    final picked = <String>{...current};
-    final result = await showModalBottomSheet<List<String>>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => StatefulBuilder(
-        builder: (sheetContext, setSheet) => SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              12 + MediaQuery.of(sheetContext).viewInsets.bottom,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Text(title, style: theme.textTheme.titleMedium),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: controller,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: '空格分开，例如：产品 体验',
-                    border: inputBorderForLines(1),
-                  ),
-                  onSubmitted: (_) => Navigator.of(sheetContext)
-                      .pop(_mergeTags(controller.text, picked)),
-                ),
-                if (existing.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text('用过的标签', style: theme.textTheme.labelMedium),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    children: <Widget>[
-                      for (final tag in existing)
-                        FilterChip(
-                          label: Text(tag),
-                          selected: picked.contains(tag),
-                          onSelected: (value) => setSheet(() {
-                            if (value) {
-                              picked.add(tag);
-                            } else {
-                              picked.remove(tag);
-                            }
-                          }),
-                        ),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: <Widget>[
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(),
-                      child: const Text('取消'),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () => Navigator.of(sheetContext)
-                          .pop(_mergeTags(controller.text, picked)),
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    controller.dispose();
-    return result;
-  }
-
-  /// 输入框里现编的 + 勾过的，合并去重。
-  ///
-  /// 口径与契约的 `tags` 规范化一致（`trim`、丢空串、按出现顺序去重），
-  /// 所以同一批标签无论怎么进来，落盘形态都一样。
-  List<String> _mergeTags(String raw, Set<String> picked) {
-    final out = <String>[];
-    void add(String value) {
-      final tag = value.trim();
-      if (tag.isEmpty || out.contains(tag)) return;
-      out.add(tag);
-    }
-
-    raw.split(RegExp(r'[\s,，、]+')).forEach(add);
-    picked.forEach(add);
-    return out;
   }
 
   /// 多选时的批量动作条：胶囊形按钮，动作少而明确。
@@ -754,18 +556,10 @@ class InspirationTabState extends State<InspirationTab> {
   void _save() {
     final text = _capture.text;
     if (text.trim().isEmpty) return;
-    final tags = List<String>.from(_captureTags);
-    // 归属与标签都在书写时就定好了（`_captureProjectId` / `_captureTags`），
-    // 这里不再"顺手"从筛选里猜
-    final error = widget.app.run(() {
-      final created = widget.app.ws.captureInspiration(
-        text,
-        projectId: _captureProjectId,
-      );
-      if (tags.isNotEmpty) {
-        widget.app.ws.updateInspirationTags(created.id, tags);
-      }
-    });
+    // 归属在书写时就定好了（`_captureProjectId`），这里不再"顺手"从筛选里猜
+    final error = widget.app.run(
+      () => widget.app.ws.captureInspiration(text, projectId: _captureProjectId),
+    );
     if (error != null) {
       showToast(context, error, error: true);
       return;
@@ -773,11 +567,10 @@ class InspirationTabState extends State<InspirationTab> {
     _capture.clear();
     _focus.requestFocus();
     // 记下了却看不见，必须当场说明 —— 否则用户以为没记上（实机反馈）
-    final hiddenByProject = _onlySelectedProject &&
+    final hidden = _onlySelectedProject &&
         _selectedProjectId != null &&
         _captureProjectId != _selectedProjectId;
-    final hiddenByTag = _filterTag != null && !tags.contains(_filterTag);
-    if ((hiddenByProject || hiddenByTag) && mounted) {
+    if (hidden && mounted) {
       showToast(context, '已记下，但被当前筛选挡住了，清除筛选就能看到');
     }
   }
@@ -788,8 +581,6 @@ class _InspirationTile extends StatelessWidget {
     required this.app,
     required this.inspiration,
     required this.onFilterProject,
-    this.onFilterTag,
-    required this.onEditTags,
     this.selecting = false,
     this.selected = false,
     this.editing = false,
@@ -802,13 +593,6 @@ class _InspirationTile extends StatelessWidget {
   final AppController app;
   final Inspiration inspiration;
   final ValueChanged<String> onFilterProject;
-
-  /// 点条目上的标签 → 只看这个标签（标签就是灵感的分类）
-  final ValueChanged<String>? onFilterTag;
-
-  /// 打开标签面板并把它写回这一条（面板本体在 Tab 那层，标签是"分类"这件事
-  /// 需要用到"用过的标签"清单，属于页面级状态）
-  final Future<void> Function(Inspiration inspiration) onEditTags;
 
   /// 多选模式：整条变成"勾选行"，点它只切换选中
   final bool selecting;
@@ -857,41 +641,25 @@ class _InspirationTile extends StatelessWidget {
         maxLines: 4,
         overflow: TextOverflow.ellipsis,
       ),
-      // 归属 + 时间一行说完；标签单独一行（多了会挤，换行更清楚）。
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      // 归属 + 时间一行说完（标签系统已于 2026-09-27 移除，
+      // 所以这里不再有第二行标签胶囊）。
+      subtitle: Row(
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              // 项目标识色也体现在这里：灵感列表里就能按颜色认项目。
-              // 未分配 / 未设色时是灰色空心圆（`ProjectMarker` 自己处理）
-              ProjectMarker(color: project?.color, size: 14),
-              const SizedBox(width: 4),
-              Expanded(
-                child: GestureDetector(
-                  onTap: project == null ? null : () => onFilterProject(project.id),
-                  child: Text(
-                    project?.title ?? '未分配',
-                    style: theme.textTheme.labelSmall,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ),
-              Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
-            ],
-          ),
-          if (inspiration.tags.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                children: <Widget>[
-                  for (final tag in inspiration.tags)
-                    _TagChip(label: tag, onTap: () => onFilterTag?.call(tag)),
-                ],
+          // 项目标识色也体现在这里：灵感列表里就能按颜色认项目。
+          // 未分配 / 未设色时是灰色空心圆（`ProjectMarker` 自己处理）
+          ProjectMarker(color: project?.color, size: 14),
+          const SizedBox(width: 4),
+          Expanded(
+            child: GestureDetector(
+              onTap: project == null ? null : () => onFilterProject(project.id),
+              child: Text(
+                project?.title ?? '未分配',
+                style: theme.textTheme.labelSmall,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+          ),
+          Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
         ],
       ),
       selected: selecting && selected,
@@ -926,14 +694,6 @@ class _InspirationTile extends StatelessWidget {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.sell_outlined),
-              title: const Text('标签…'),
-              onTap: () async {
-                Navigator.of(sheetContext).pop();
-                await onEditTags(inspiration);
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.drive_file_move_outline),
               title: const Text('分配到项目…'),
               onTap: () async {
@@ -964,14 +724,6 @@ class _InspirationTile extends StatelessWidget {
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 _run(context, () => ws.discardInspiration(inspiration.id));
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.checklist),
-              title: const Text('多选…'),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                onLongPress?.call();
               },
             ),
             ListTile(
@@ -1022,38 +774,6 @@ class _InspirationTile extends StatelessWidget {
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
     if (error != null) showToast(context, error, error: true);
-  }
-}
-
-/// 灵感的标签小胶囊（《界面规范》：标签用胶囊）。
-///
-/// 点它就是"只看这一类" —— 标签是灵感唯一的分类维度，所以必须点得动。
-class _TagChip extends StatelessWidget {
-  const _TagChip({required this.label, this.onTap});
-
-  final String label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppShapes.pillRadius),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(AppShapes.pillRadius),
-        ),
-        child: Text(
-          '#$label',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.primary,
-          ),
-        ),
-      ),
-    );
   }
 }
 

@@ -47,6 +47,21 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// 日历网格里**第一个能点的日号**（1~28 一定每个月都有，闰月也不怕）。
+  ///
+  /// 不写死"点 15 号"那类断言：日历显示的是当前月，写死的日号会随运行日期漂。
+  Finder firstTappableDay(WidgetTester tester) {
+    final days = find.byWidgetPredicate(
+      (widget) =>
+          widget is Text &&
+          widget.data != null &&
+          int.tryParse(widget.data!) != null &&
+          int.parse(widget.data!) >= 1 &&
+          int.parse(widget.data!) <= 28,
+    );
+    return days.first;
+  }
+
   testWidgets('有未处理子任务时，父任务的状态按钮是锁形', (tester) async {
     final app = await appWithTask(withSubtask: true);
     await openEvent(tester, app);
@@ -101,10 +116,62 @@ void main() {
     // 「接后续任务…」那个折线入口跟着分叉 / 合流一起删了：链上不再有"走向"
     expect(find.byIcon(Icons.timeline), findsNothing);
 
-    // 设到期日：点开的是日期选择器（不再走"更多"菜单）
+    // 点开的是**日期面板**（日历本体 + 底部动作），不是系统的 `showDatePicker`
     await tester.tap(find.byIcon(Icons.event_outlined));
     await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsOneWidget);
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+  });
+
+  testWidgets('日期面板里选一天 → 真的设上到期日', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    await openEvent(tester, app);
+
+    await tester.tap(find.byIcon(Icons.event_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('现在还没有日期'), findsOneWidget, reason: '没设过就说清"还没有"');
+    expect(find.text('清除日期'), findsNothing, reason: '没有值就不该出现清除键');
+
+    await tester.tap(firstTappableDay(tester));
+    await tester.pumpAndSettle();
+
+    final due = app.ws.liveTasks.single.dueAt;
+    expect(due, isNotNull, reason: '选了那一天就该落盘');
+    expect(RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(due!), isTrue);
+    expect(find.byIcon(Icons.event_available_outlined), findsOneWidget, reason: '图标换成"已设"');
+  });
+
+  testWidgets('日期面板底部的「清除日期」真的把到期日清掉（实机反馈：设了取消不掉）',
+      (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    final task = app.ws.liveTasks.single;
+    app.run(() => app.ws.updateTask(task.id, dueAt: '2099-05-01'));
+
+    await openEvent(tester, app);
+    await tester.tap(find.byIcon(Icons.event_available_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('当前：'), findsOneWidget, reason: '有值时报出当前值');
+    await tester.tap(find.text('清除日期'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.liveTasks.single.dueAt, isNull, reason: '清除键必须真的清得掉');
+    expect(find.byIcon(Icons.event_outlined), findsOneWidget, reason: '图标回到"没排期"');
+  });
+
+  testWidgets('到期日的两个动作都只在日期面板里，动作面板里不再有日期项', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    final task = app.ws.liveTasks.single;
+    app.run(() => app.ws.updateTask(task.id, dueAt: '2099-05-01'));
+
+    await openEvent(tester, app);
+    await tester.tap(find.text('主线任务'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('清除到期日'),
+      findsNothing,
+      reason: '实机反馈：改日期与清除日期都收进图标里，不要再挂在动作面板下',
+    );
   });
 
   testWidgets('任务行尾那个到期日图标不贴边：离卡片右缘留出余量', (tester) async {

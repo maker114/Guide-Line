@@ -12,6 +12,7 @@ class UiPrefs {
     this.compactTaskView = false,
     this.lastExportedAt,
     this.themeId = defaultThemeId,
+    this.themeMode = defaultThemeMode,
     this.backgroundImagePath,
     this.backgroundOpacity = defaultBackgroundOpacity,
     this.backgroundBlur = 0,
@@ -27,6 +28,29 @@ class UiPrefs {
   ///
   /// 这里放一个字面量而不是 import 主题表：core 层是纯 Dart，不认识 Flutter 的 `Color`。
   static const String defaultThemeId = 'default';
+
+  /// 深色 / 亮色的三种取法：**跟系统 / 只要亮色 / 只要深色**。
+  ///
+  /// 存字符串而不是 Dart `enum`：这个字段进出的是**偏好文件**（`ui_prefs.json`），
+  /// 契约上它与 `themeId` 同一档 —— 都是"面向上层的一段标识"，不是数据层枚举。
+  /// 界面侧在 `main.dart` 里把它翻成 `ThemeMode`，core 层不认识 Flutter。
+  static const String themeModeSystem = 'system';
+  static const String themeModeLight = 'light';
+  static const String themeModeDark = 'dark';
+
+  /// 三种取法的全集（界面按它排选项，免得两边各写一份）。
+  static const List<String> themeModes = <String>[
+    themeModeSystem,
+    themeModeLight,
+    themeModeDark,
+  ];
+
+  /// 默认：**跟随系统**。
+  ///
+  /// 选它当默认值是为了老偏好文件：主题模式是新加的字段，老文件里没有这个键，
+  /// 读进来必须落到与从前**完全一样**的行为上（从前没给 `MaterialApp.themeMode`，
+  /// 那就是跟系统）。
+  static const String defaultThemeMode = themeModeSystem;
 
   /// 背景图默认不透明度：够看出图，又不影响读正文。
   static const double defaultBackgroundOpacity = 0.30;
@@ -67,6 +91,12 @@ class UiPrefs {
 
   /// 主题 id；`follow-background` 表示"跟随背景图取色"。
   final String themeId;
+
+  /// 深色 / 亮色怎么取；取值为 [themeModes] 之一。
+  ///
+  /// 与 [themeId] 是两个互不相干的维度：那个决定**用哪套配色**，
+  /// 这个决定**用它的亮色还是深色**。四个组合都成立。
+  final String themeMode;
 
   /// 背景图在应用私有目录里的路径；`null` 表示没有背景图。
   final String? backgroundImagePath;
@@ -127,6 +157,7 @@ class UiPrefs {
     bool? compactTaskView,
     Object? lastExportedAt = _unset,
     String? themeId,
+    String? themeMode,
     Object? backgroundImagePath = _unset,
     double? backgroundOpacity,
     double? backgroundBlur,
@@ -143,6 +174,7 @@ class UiPrefs {
         lastExportedAt:
             lastExportedAt == _unset ? this.lastExportedAt : lastExportedAt as int?,
         themeId: themeId ?? this.themeId,
+        themeMode: themeMode ?? this.themeMode,
         backgroundImagePath: backgroundImagePath == _unset
             ? this.backgroundImagePath
             : backgroundImagePath as String?,
@@ -163,6 +195,7 @@ class UiPrefs {
         'compactTaskView': compactTaskView,
         'lastExportedAt': lastExportedAt,
         'themeId': themeId,
+        'themeMode': themeMode,
         'backgroundImagePath': backgroundImagePath,
         'backgroundOpacity': backgroundOpacity,
         'backgroundBlur': backgroundBlur,
@@ -184,6 +217,8 @@ class UiPrefs {
       compactTaskView: json['compactTaskView'] == true,
       lastExportedAt: json['lastExportedAt'] is int ? json['lastExportedAt'] as int : null,
       themeId: themeId is String && themeId.isNotEmpty ? themeId : defaultThemeId,
+      // 坏值 / 老文件里没有这个键 → 收回"跟随系统"，与从前的行为一致
+      themeMode: _readThemeMode(json['themeMode']),
       backgroundImagePath:
           backgroundPath is String && backgroundPath.isNotEmpty ? backgroundPath : null,
       backgroundOpacity: _readUnitDouble(json['backgroundOpacity'], defaultBackgroundOpacity),
@@ -197,8 +232,12 @@ class UiPrefs {
     );
   }
 
-  static String _readNonEmpty(Object? value, String fallback) {
-    if (value is! String) return fallback;
+  /// 读主题模式：只认 [themeModes] 里那三个字面量，别的（含缺键、类型不对）一律
+  /// 收回默认值。与其它偏好字段同一套"坏值不抛、静默回默认"的口径。
+  static String _readThemeMode(Object? value) =>
+      value is String && themeModes.contains(value) ? value : defaultThemeMode;
+
+  static String _readNonEmpty(Object? value, String fallback) {    if (value is! String) return fallback;
     final trimmed = value.trim();
     return trimmed.isEmpty ? fallback : trimmed;
   }

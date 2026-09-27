@@ -10,6 +10,12 @@ import '../theme/shape_tokens.dart';
 /// 所以这里是一个**就地展开**的开关，两边都用它：
 ///   · 事件列表页：卡里那一行；
 ///   · 事件详情页：任务线顶部那一行。
+///
+/// 记号的位置与大小（2026-09-27 实机反馈：调整展开与收起箭头的位置和大小）：
+///   · **挪到行尾** —— 行尾是"这里可以展开"的通用位置，而放在文案左边时，
+///     图标与文字挤在一起，看着像一句话的开头而不是一个开关；
+///   · **15 → 20dp** —— 与任务框那个 `expand_more`（18）以及行尾 ⋮ 的份量对齐，
+///     15dp 在 360dp 屏上明显偏小、点不准。
 class FoldToggleRow extends StatelessWidget {
   const FoldToggleRow({
     super.key,
@@ -40,12 +46,6 @@ class FoldToggleRow extends StatelessWidget {
         padding: EdgeInsets.fromLTRB(compact ? 40 : 8, 2, 12, compact ? 8 : 6),
         child: Row(
           children: <Widget>[
-            Icon(
-              expanded ? Icons.unfold_less : Icons.unfold_more,
-              size: 15,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(width: 5),
             Expanded(
               child: Text(
                 expanded ? '收起已完成节点' : '另有 $hiddenCount 个已完成节点',
@@ -55,6 +55,14 @@ class FoldToggleRow extends StatelessWidget {
                   color: theme.colorScheme.primary,
                 ),
               ),
+            ),
+            const SizedBox(width: 6),
+            // 与任务框的折叠箭头同一个节奏：转动而不是换图标（`unfold_more`
+            // 朝上下，展开时转成收拢那一版）
+            Icon(
+              expanded ? Icons.unfold_less : Icons.unfold_more,
+              size: 20,
+              color: theme.colorScheme.primary,
             ),
           ],
         ),

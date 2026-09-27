@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../../core/models/project_item.dart';
 import '../../features/workspace.dart';
 import '../common/dialogs.dart';
 import '../common/project_picker.dart';
@@ -98,19 +99,26 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   /// 编辑框的初值 = **当前的「如何解决」**（不是灵感原文）
   late final TextEditingController _implementation =
       TextEditingController(text: widget.project.implementation);
-  bool _referenceExpanded = false;
 
-  @override
-  void initState() {
-    super.initState();
-    // 多条一起并时，"这次并的是哪几条"必须一眼看得见（新版修改计划 Q37 的那一条）→ 默认展开；
-    // 单条维持原样（默认收起，想看得自己点一下）。
-    _referenceExpanded = widget.inspirations.length > 1;
-  }
+  /// 两块参考面板是否展开。
+  ///
+  /// **两块都默认展开**（2026-09-27 实机反馈："追加新灵感时默认展开灵感内容，
+  /// 同时显示已有的清单"）。从前单条合并时灵感原文是收起的 ——
+  /// 而"这次并的是哪一句"正是合并时最要看的东西，收起它等于让人凭记忆核对。
+  /// 参考区有 `maxHeight: 200` 兜着，展开也不会把编辑框挤没。
+  bool _referenceExpanded = true;
+  bool _checklistExpanded = true;
 
   /// 这次要并的灵感原文，**顺序即列表顺序**（参考面板与落点三共用一份）。
   List<String> get _originalTexts =>
       <String>[for (final inspiration in widget.inspirations) inspiration.text];
+
+  /// 这个项目**已有的清单条目**，供参考（只读）。
+  ///
+  /// 为什么要露出来：三选一里的「作为清单条目」是**往后追加**，用户在按之前
+  /// 得先看得见已经有哪些条目，否则同一个意思很容易并成两条。
+  /// 这里只读 —— 打勾与改字都在项目详情页，编辑器不做第二处清单编辑。
+  List<ProjectItem> get _existingItems => widget.project.items;
 
   @override
   void dispose() {
@@ -175,6 +183,11 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
               texts: _originalTexts,
               expanded: _referenceExpanded,
               onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
+            ),
+            _ExistingChecklistPanel(
+              items: _existingItems,
+              expanded: _checklistExpanded,
+              onToggle: () => setState(() => _checklistExpanded = !_checklistExpanded),
             ),
           ],
         ),
@@ -248,6 +261,13 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
             ),
           ),
           const SizedBox(height: 8),
+          // 已有的清单摆在灵感原文**下面**：先看清"这次要并的是什么"，
+          // 再对照"项目里已经有什么"决定落点（实机反馈：同时显示已有的清单）
+          _ExistingChecklistPanel(
+            items: _existingItems,
+            expanded: _checklistExpanded,
+            onToggle: () => setState(() => _checklistExpanded = !_checklistExpanded),
+          ),
           _ReferencePanel(
             texts: _originalTexts,
             expanded: _referenceExpanded,
@@ -327,6 +347,94 @@ class _ReferencePanel extends StatelessWidget {
                         ],
                       ),
                     ],
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 项目**已有的实现清单**（只读参考）。
+///
+/// 为什么要有这一块：三选一里的「作为清单条目」是往后追加，按之前得先看得见
+/// 已经有哪些条目 —— 不然同一个意思并两次，而且没有任何地方提示"已经有了"。
+///
+/// **只读**：打勾、改字、上移下移都在项目详情页。一个参考面板里再塞一套编辑
+/// 动作，用户在合并这一页就分不清自己在动哪一层（与分类页展开区的取舍同一条口径）。
+class _ExistingChecklistPanel extends StatelessWidget {
+  const _ExistingChecklistPanel({
+    required this.items,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final List<ProjectItem> items;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // 一条都没有就整块不画：空面板只会白占一屏
+    if (items.isEmpty) return const SizedBox.shrink();
+    final done = items.where((item) => item.done).length;
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.checklist, size: 18),
+            // 进度写进标题：并之前先知道"这个项目已经做了多少"
+            title: Text(
+              '项目已有的清单 $done/${items.length}',
+              style: theme.textTheme.labelLarge,
+            ),
+            trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),
+            onTap: onToggle,
+          ),
+          if (expanded)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (final item in items)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Icon(
+                              item.done
+                                  ? Icons.check_box_outlined
+                                  : Icons.check_box_outline_blank,
+                              size: 16,
+                              color: item.done
+                                  ? theme.colorScheme.outline
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                item.text,
+                                style: item.done
+                                    ? theme.textTheme.bodyMedium?.copyWith(
+                                        decoration: TextDecoration.lineThrough,
+                                        color: theme.colorScheme.outline,
+                                      )
+                                    : theme.textTheme.bodyMedium,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
