@@ -470,9 +470,12 @@ class _AnimatedCapturePillState extends State<_AnimatedCapturePill>
     if (widget.visible) {
       _controller.forward(from: 0);
     } else {
-      // 退场**不播动画**：切到灵感页时这一页整个就是速记，再演一遍"收回去"
-      // 只是多一段要等的东西。
-      _controller.value = 0;
+      // 退场**也播动画**（实机反馈"消失的时候没有动画"）。
+      // 原来这里直接把值设成 0 —— 胶囊"啪"地没了。当时的想法是"切到灵感页时
+      // 这一页整个就是速记，再演一遍收回去只是多一段要等的东西"，但实机上看着就是闪，
+      // 所以改成反向播放：与进场同一时长（130ms）、同一条曲线倒着走。
+      // 这一页会被 PageView 切走，所以这 130ms 不会挡住任何操作。
+      _controller.reverse();
     }
   }
 
@@ -865,18 +868,18 @@ class _AppShellState extends State<AppShell> {
               // 灵感页不显示（那一页整个就是速记）。
               //
               // 位置与入场动画**都自己来**（2026-09-27）：
-              //   · 位置：底栏顶边往上 [_pillMarginAboveNav]（原来交给 Scaffold 的
-              //     FAB 槽位算）。**body 的底边本来就在底栏顶边之上**（`Scaffold`
-              //     是这样摆 body 的），所以这里只需"底栏高度 + 底栏下缘 + 上边空隙"；
+              //   · 位置：底栏顶边往上 [_pillMarginAboveNav]。**body 的底边本来就在
+              //     底栏顶边之上**（`Scaffold` 是这样摆 body 的），所以这里**只加那个空隙** ——
+              //     一开始照抄了老公式（`_navHeight + _navBottomPadding + 空隙`），
+              //     于是实机上胶囊被抬高了整整一条底栏（实测空隙 82 = 48 + 18 + 16），
+              //     用户反馈"位置有点高"。现在实测空隙就是 16。
               //     键盘弹起时 body 被再压上去，偏移里要加 `viewInsets.bottom`，
               //     胶囊才不会落在键盘底下（FAB 槽位原本也是这个行为）。
               //     **不要再减 `viewPadding.bottom`**：那一段是 `bottomNavigationBar`
-              //     自己避开的，body 已经不在它里面了 —— 减了会白抬一条系统栏的高度。
+              //     自己避开的，body 已经不在它里面了。
               Positioned(
                 right: navHorizontalPadding,
                 bottom: MediaQuery.viewInsetsOf(context).bottom +
-                    _navHeight +
-                    _navBottomPadding +
                     _pillMarginAboveNav,
                 child: _AnimatedCapturePill(
                   visible: _index != 0,

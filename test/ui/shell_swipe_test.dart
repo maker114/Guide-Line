@@ -268,6 +268,84 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('速记胶囊距底栏顶边 16：body 底边已在底栏之上，别再减一遍底栏高度（实机反馈"位置有点高"）', (tester) async {
+    await boot(tester);
+    await swipe(tester, 1); // 到项目页：非灵感页才有速记按钮
+
+    final nav = tester.getRect(find.byType(AppBottomNav));
+    final pill = tester.getRect(find.byType(CapturePillButton));
+
+    // 原来这里写的是 `_navHeight + _navBottomPadding + 空隙` —— 那套算法来自它还挂在
+    // Scaffold 的 FAB 槽位时的实测。改成自己摆之后，**body 的底边本来就在底栏顶边之上**，
+    // 于是再多加 48 + 18 就把胶囊抬高了整整一条底栏：实测空隙 82。
+    expect(
+      nav.top - pill.bottom,
+      closeTo(16, 0.5),
+      reason: '空隙应当只有那 16dp（`_pillMarginAboveNav`），不是 48 + 18 + 16',
+    );
+    expect(pill.bottom, lessThan(nav.top), reason: '仍然要抬在底栏上方，不能压住底栏');
+  });
+
+  testWidgets('速记胶囊的**退场**也是动画：切回灵感页时逐帧淡出、不是啪地没了（实机反馈）', (tester) async {
+    await boot(tester);
+    await swipe(tester, 1); // 到项目页，胶囊进场并停稳
+    await tester.pumpAndSettle();
+
+    Animation<double> pillOpacity() => tester
+        .widget<FadeTransition>(
+          find
+              .ancestor(
+                of: find.byType(CapturePillButton),
+                matching: find.byType(FadeTransition),
+              )
+              .first,
+        )
+        .opacity;
+
+    Animation<double> pillScale() => tester
+        .widget<ScaleTransition>(
+          find
+              .ancestor(
+                of: find.byType(CapturePillButton),
+                matching: find.byType(ScaleTransition),
+              )
+              .first,
+        )
+        .scale;
+
+    expect(pillOpacity().value, closeTo(1, 0.01), reason: '先确认它在项目页是显示着的');
+
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('灵感')),
+    );
+
+    // 逐帧采样：必须经过**中间值**。原来是直接把动画值设成 0（一帧之内就没了），
+    // 所以这里只要出现一个"既不是 1 也不是 0"的采样就证明退场有过程。
+    final opacities = <double>[];
+    for (var i = 0; i < 8; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+      opacities.add(pillOpacity().value);
+    }
+
+    expect(
+      opacities.any((v) => v > 0.02 && v < 0.98),
+      isTrue,
+      reason: '退场途中要有中间态；一帧从 1 到 0 就是"没有动画"：$opacities',
+    );
+    // 单调下降：不能回弹
+    for (var i = 1; i < opacities.length; i += 1) {
+      expect(
+        opacities[i],
+        lessThanOrEqualTo(opacities[i - 1] + 1e-6),
+        reason: '淡出途中不该变大：$opacities',
+      );
+    }
+
+    await tester.pumpAndSettle();
+    expect(pillOpacity().value, closeTo(0, 0.01), reason: '最终要收干净');
+    expect(pillScale().value, lessThan(1), reason: '缩回起始比例，与进场对称');
+  });
+
   testWidgets('窄屏 + 1.6 倍字体：一格放不下就只画图标，但 tooltip 与语义标签仍是「速记」', (tester) async {
     // 360 × 780 逻辑像素（常见手机）；1.6 倍字体下一格只有 (360 − 40) / 4 = 80dp
     tester.view.physicalSize = const Size(1080, 2340);
