@@ -774,7 +774,18 @@ class _AppShellState extends State<AppShell> {
   }
 
   /// 滑动结束时（或滑过一半时）由 `PageView` 通知：标题、FAB、偏好都跟着走。
+  ///
+  /// **点按动画在飞的时候一律不认**（实机反馈"速记按钮会闪两下"）：
+  /// 点按的那一刻就把 `_index` 设成目标页了，而 `animateToPage` 跨越多页时会
+  /// 依次报出中间页（从第 3 页回第 0 页会报 2、1）。旧实现照收不误，于是
+  /// `_index` 走了 `0 → 1 → 2 → 1 → 0`：胶囊先隐藏（因为目标页是灵感页）、
+  /// 又被中间页改回非 0 而**重新进场** —— 实测不透明度 `1.0 → 0.0 → 0.33 → 0.59 → 0.76`。
+  /// 页签与标题也跟着抖。
+  ///
+  /// 落位之后 `_selectTab` 的 `whenComplete` 会收掉 `_tapAnimating`，
+  /// 此后滑动的通知照常生效（用户用手滑动时它一直是 false）。
   void _onPageChanged(int index) {
+    if (_tapAnimating) return;
     if (index == _index) return;
     setState(() => _index = index);
     widget.app.setLastTab(index);
@@ -868,21 +879,28 @@ class _AppShellState extends State<AppShell> {
               // 灵感页不显示（那一页整个就是速记）。
               //
               // 位置与入场动画**都自己来**（2026-09-27）：
-              //   · 位置：底栏顶边往上 [_pillMarginAboveNav]。**body 的底边本来就在
-              //     底栏顶边之上**（`Scaffold` 是这样摆 body 的），所以这里**只加那个空隙** ——
-              //     一开始照抄了老公式（`_navHeight + _navBottomPadding + 空隙`），
-              //     于是实机上胶囊被抬高了整整一条底栏（实测空隙 82 = 48 + 18 + 16），
-              //     用户反馈"位置有点高"。现在实测空隙就是 16。
-              //     键盘弹起时 body 被再压上去，偏移里要加 `viewInsets.bottom`，
-              //     胶囊才不会落在键盘底下（FAB 槽位原本也是这个行为）。
-              //     **不要再减 `viewPadding.bottom`**：那一段是 `bottomNavigationBar`
-              //     自己避开的，body 已经不在它里面了。
+              //   · 位置：底栏顶边往上 [_pillMarginAboveNav]。
+              //   · **必须补上 `viewInsets.bottom`**：胶囊是挂在 body 那个 `Stack` 的
+              //     底边上的，而键盘弹出时 `Scaffold` 会把 body 压缩、**底栏却不动** ——
+              //     于是 Stack 底边与底栏顶边之间会裂开一整个键盘的高度，胶囊跟着被顶飞。
+              //     实测（键盘 300）：Stack 底边 714 → 480、底栏顶边不动，
+              //     胶囊底边到屏幕底 698 → 164（飞到上半屏）。
+              //     补上这一份，正好把裂开的距离填回去。
+              //   · **不要减 `viewPadding.bottom`**：那是 `bottomNavigationBar`
+              //     自己避开的系统栏，body 已经不在它里面了。
               Positioned(
                 right: navHorizontalPadding,
-                bottom: MediaQuery.viewInsetsOf(context).bottom +
-                    _pillMarginAboveNav,
+                // **键盘弹出时干脆收起来**（实机反馈"打开输入框时胶囊飞到顶上"）。
+                //
+                // 为什么不跟着键盘走：胶囊挂在 body 那个 `Stack` 的底边上，而键盘弹出时
+                // `Scaffold` 会压缩 body、底栏却不动 —— 两者之间裂开一整个键盘的高度，
+                // 胶囊就被顶到上半屏。试过三种公式去补这个差额，都在"有键盘 / 无键盘"
+                // 之间来回翻（补多了就跑到屏幕外，补少了就飞上去），根因是**参照物本身在动**。
+                // 而这一刻用户正在打字，不需要这个入口：直接不显示最干净。
+                bottom: _pillMarginAboveNav,
                 child: _AnimatedCapturePill(
-                  visible: _index != 0,
+                  visible: _index != 0 &&
+                      MediaQuery.viewInsetsOf(context).bottom == 0,
                   onPressed: _goCapture,
                 ),
               ),

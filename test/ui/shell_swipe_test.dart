@@ -346,6 +346,103 @@ void main() {
     expect(pillScale().value, lessThan(1), reason: '缩回起始比例，与进场对称');
   });
 
+  testWidgets('从最后一页点回灵感页：速记胶囊只该隐藏一次，不能闪（实机反馈"会闪两下"）', (tester) async {
+    await boot(tester);
+    // 走到最后一页（更多）—— 这样点回灵感页要跨过中间两页
+    await swipe(tester, 3);
+    await tester.pumpAndSettle();
+
+    Animation<double> pillOpacity() => tester
+        .widget<FadeTransition>(
+          find
+              .ancestor(
+                of: find.byType(CapturePillButton),
+                matching: find.byType(FadeTransition),
+              )
+              .first,
+        )
+        .opacity;
+
+    expect(pillOpacity().value, closeTo(1, 0.01), reason: '更多页是显示着的');
+
+    // 点底栏的「灵感」
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('灵感')),
+    );
+
+    // 逐帧记录不透明度：只允许"单调降到 0"。
+    // 点按会立刻把 `_index` 设成 0（胶囊隐藏），但 PageView 滑过中间页时会依次报
+    // 2、1，`onPageChanged` 又把 `_index` 改回非 0 —— 于是胶囊又冒出来：
+    // 实测会出现 1 → 0 → 0.8(又出现) → 0 这种"闪"，单调性正好能抓住它。
+    final samples = <double>[];
+    for (var i = 0; i < 14; i += 1) {
+      await tester.pump(const Duration(milliseconds: 16));
+      samples.add(pillOpacity().value);
+    }
+
+    for (var i = 1; i < samples.length; i += 1) {
+      expect(
+        samples[i],
+        lessThanOrEqualTo(samples[i - 1] + 1e-6),
+        reason: '胶囊不该在退场途中又变大（那就是"闪"）：$samples',
+      );
+    }
+    expect(samples.last, closeTo(0, 0.01), reason: '最终要收干净');
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('键盘弹出时速记胶囊收起来（实机反馈"开输入框时它飞到顶上"）', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pumpAndSettle();
+
+    double opacity() => tester
+        .widget<FadeTransition>(
+          find
+              .ancestor(
+                of: find.byType(CapturePillButton),
+                matching: find.byType(FadeTransition),
+              )
+              .first,
+        )
+        .opacity
+        .value;
+    double gapToNav() {
+      final nav = tester.getRect(find.byType(AppBottomNav));
+      final pill = tester.getRect(find.byType(CapturePillButton));
+      return nav.top - pill.bottom;
+    }
+
+    expect(opacity(), closeTo(1, 0.01), reason: '先在项目页显示着');
+    expect(gapToNav(), closeTo(16, 0.5), reason: '距底栏顶边 16');
+
+    // 键盘弹出：**它必须收起来**。
+    // 为什么不做成"跟着键盘上移"：胶囊挂在 body 那个 Stack 的底边上，而键盘弹出时
+    // `Scaffold` 会压缩 body、底栏不动 —— 两者裂开一整个键盘的高度，胶囊被顶到上半屏。
+    // 试过三种补正公式都在"有/无键盘"之间来回翻，根因是参照物本身在动。
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300 * 3);
+    await tester.pumpAndSettle();
+    expect(
+      opacity(),
+      closeTo(0, 0.01),
+      reason: '打字时这个入口不该占着屏幕，更不该飞到上半屏',
+    );
+
+    // 键盘收起：回来，位置照旧
+    tester.view.viewInsets = FakeViewPadding.zero;
+    await tester.pumpAndSettle();
+    expect(opacity(), closeTo(1, 0.01), reason: '收起键盘后要回来');
+    expect(gapToNav(), closeTo(16, 0.5), reason: '位置不变');
+  });
+
   testWidgets('窄屏 + 1.6 倍字体：一格放不下就只画图标，但 tooltip 与语义标签仍是「速记」', (tester) async {
     // 360 × 780 逻辑像素（常见手机）；1.6 倍字体下一格只有 (360 − 40) / 4 = 80dp
     tester.view.physicalSize = const Size(1080, 2340);
