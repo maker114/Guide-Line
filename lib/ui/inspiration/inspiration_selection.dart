@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
+import '../../core/models/project.dart';
 import '../common/dialogs.dart';
 import '../common/project_picker.dart';
 import 'merge_editor_page.dart';
@@ -52,20 +53,17 @@ class InspirationSelectionBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
         child: Row(
           children: <Widget>[
-            // 版式（2026-09-28 实机反馈："多选界面的顶部标签栏同样做成由胶囊和
-            // 圆形元素组成的界面"）：
-            //   · **圆形**＝退出、全选（纯记号，一个动作）；
-            //   · **胶囊**＝四个批量动作（有文字 / 有分量）。
-            // 原来那个方形 `Checkbox` 是这一条里唯一的方角元素，也是唯一的
-            // "表单控件"质感 —— 换成圆形的勾选记号，与分类页展开区同一个形状。
-            _CircleAction(
+            // 版式（2026-09-28 实机反馈）：**全是胶囊** —— 退出与全选原来用的是
+            // 正圆，现在也改成胶囊外框；全选带上文字（胶囊里只放一枚图标会显空）。
+            _PillAction(
               tooltip: '退出多选',
               icon: Icons.close,
               onPressed: onExit,
             ),
-            _CircleAction(
+            _PillAction(
               tooltip: allSelected ? '取消全选' : '全选',
               icon: allSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              label: '全选',
               active: allSelected,
               onPressed: canSelectAll ? onToggleAll : null,
             ),
@@ -97,44 +95,68 @@ class InspirationSelectionBar extends StatelessWidget {
   }
 }
 
-/// 动作条上的一个**圆形**图标按钮（退出 / 全选：只有一个记号，没有文字）。
+/// 动作条上的一个**胶囊**图标按钮（退出 / 全选：一个记号，可带文字）。
 ///
-/// [active] 为真时用主题色的低透明底 —— 与「未完成 / 已完成 / 已搁置」那枚
-/// 胶囊的选中态同一条口径：能点的用形状区分，选中的才加底。
-class _CircleAction extends StatelessWidget {
-  const _CircleAction({
+/// 2026-09-28 实机反馈：这两个也要是**胶囊外框**（原来用的是正圆），
+/// 与四个批量动作、与全应用的"能点的用胶囊"对齐。
+/// [active] 为真时给主题色的低透明底 —— 与「未完成 / 已完成 / 已搁置」
+/// 那枚胶囊的选中态同一条口径。
+class _PillAction extends StatelessWidget {
+  const _PillAction({
     required this.tooltip,
     required this.icon,
     required this.onPressed,
+    this.label,
     this.active = false,
   });
 
   final String tooltip;
   final IconData icon;
   final VoidCallback? onPressed;
+
+  /// 有文字时按钮更宽（「全选」需要说出来；`✕` 自己就够明白）。
+  final String? label;
   final bool active;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final foreground = active
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurfaceVariant;
     return Padding(
-      padding: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.only(right: 6),
       child: Tooltip(
         message: tooltip,
-        child: IconButton(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 20),
-          style: IconButton.styleFrom(
-            backgroundColor:
-                active ? theme.colorScheme.primary.withValues(alpha: 0.16) : null,
-            foregroundColor: active
-                ? theme.colorScheme.primary
-                : theme.colorScheme.onSurfaceVariant,
-            shape: const CircleBorder(),
-            minimumSize: const Size(40, 40),
-            padding: EdgeInsets.zero,
-          ),
-        ),
+        child: label == null
+            ? IconButton(
+                onPressed: onPressed,
+                icon: Icon(icon, size: 20),
+                style: IconButton.styleFrom(
+                  backgroundColor: active
+                      ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                      : null,
+                  foregroundColor: foreground,
+                  // **胶囊**（不是正圆）：高度撑开成一条，与旁边四个动作一致
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  minimumSize: const Size(44, 40),
+                ),
+              )
+            : TextButton.icon(
+                onPressed: onPressed,
+                icon: Icon(icon, size: 20),
+                label: Text(label!),
+                style: TextButton.styleFrom(
+                  backgroundColor: active
+                      ? theme.colorScheme.primary.withValues(alpha: 0.16)
+                      : null,
+                  foregroundColor: foreground,
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  minimumSize: const Size(44, 40),
+                ),
+              ),
       ),
     );
   }
@@ -213,43 +235,134 @@ class InspirationBatchActions {
     onDone();
   }
 
-  /// 多选合并：选中的多条**一次带进合并编辑器**，并进用户选定的目标。
+  /// 多选合并（2026-09-28 实机反馈："点击合并时直接将已经分配了项目的灵感
+  /// 直接合并进对应项目"，并按"拆成几次合并，流水作业"落地）。
   ///
-  /// 三条口径（与灵感页那版一字不差）：
-  ///   · **顺序 = 列表当前顺序**；
-  ///   · **落点项目先选**：多选可能跨项目，走同一个 `pickProject`，分类不可选；
-  ///   · 合并完退出多选 —— 那些灵感已经不在这一页了。
+  /// 流程：
+  /// ```
+  /// 选中的灵感按「所属项目」分组
+  ///   ├─ 只有一个**有效**目标  → 不问落点，直接进那个项目的合并编辑器
+  ///   ├─ 有没分配的 / 有无效目标（分类、已删）→ 退回"问一次落点"那条路，
+  ///   │     把这一批一起并进用户选的那一个（否则那些灵感没有落点可选）
+  ///   └─ 分成几组有效目标      → 一组一组流水做完，最后给一句汇总
+  /// ```
+  ///
+  /// 边界（刻意定的，不是漏做）：
+  ///   · **分类不是落点**（Q2：分类只回答"归哪一类"）—— 灵感挂在分类上时，
+  ///     那一组不算"有效目标"，会走"问一次"那条路，用户自己挑一个真目标；
+  ///   · 一组内部走**一次批量合并**（`MergeLanding` 同一个方向），不逐条弹编辑器。
   Future<void> merge(BuildContext context, List<Inspiration> ordered) async {
     final picks = ordered
         .where((inspiration) => selectedIds.contains(inspiration.id))
         .toList(growable: false);
     if (picks.isEmpty) return;
 
+    // 按归属项目分组（保持列表顺序：同一个项目里的先后就是用户看到的先后）
+    final byProject = <String?, List<Inspiration>>{};
+    for (final inspiration in picks) {
+      byProject.putIfAbsent(inspiration.projectId, () => <Inspiration>[]).add(inspiration);
+    }
+
+    // 哪些组是**有效落点**：项目在、没删、而且不是分类
+    final valid = <Project>[];
+    var hasUnassigned = false;
+    for (final entry in byProject.entries) {
+      final id = entry.key;
+      if (id == null) {
+        hasUnassigned = true;
+        continue;
+      }
+      final project = app.ws.findProject(id);
+      if (project == null || project.deleted || app.ws.isProjectCategory(id)) continue;
+      valid.add(project);
+    }
+
+    // 只有一个有效目标、而且没有"没着落"的那些：**不问，直接并**
+    if (!hasUnassigned && valid.length == 1) {
+      await _mergeInto(context, valid.single, picks);
+      onDone();
+      return;
+    }
+    // 没得推断（全未分配 / 目标全是分类或已删）：照旧问一次落点
+    if (valid.isEmpty) {
+      await _mergeIntoPicked(context, picks);
+      return;
+    }
+    // 只剩一组有效目标、但有未分配的：一起并进它（不问）
+    if (valid.length == 1) {
+      await _mergeInto(context, valid.single, picks);
+      onDone();
+      return;
+    }
+
+    // 分成几组：一条一组、流水做完
+    var groups = 0;
+    var merged = 0;
+    final skipped = <String>[];
+    for (final project in valid) {
+      final group = byProject[project.id] ?? const <Inspiration>[];
+      final ok = await _mergeInto(context, project, group);
+      if (ok) {
+        groups += 1;
+        merged += group.length;
+      } else {
+        skipped.add('${group.length} 条（${project.title}）');
+      }
+      if (!context.mounted) return;
+    }
+
+    if (!context.mounted) return;
+    if (merged == 0) {
+      showToast(context, '这一批都没并进去', error: true);
+      return;
+    }
+    final skipNote = skipped.isEmpty ? '' : '；未处理 ${skipped.join('、')}';
+    showToast(context, '已并进 $groups 个项目，共 $merged 条$skipNote');
+    onDone();
+  }
+
+  /// 问一次落点再合并（"全都没分配"那条路，以及单条时的老行为）。
+  Future<void> _mergeIntoPicked(BuildContext context, List<Inspiration> picks) async {
     final picked = await pickProject(context, app, title: '合并到哪个项目');
     if (picked == null || !context.mounted) return;
     final project = app.ws.findProject(picked);
     if (project == null || !context.mounted) return;
+    if (await _mergeInto(context, project, picks)) onDone();
+  }
 
+  /// 把 [group] 并进 [project]（一个项目的合并编辑器 + 落盘）。
+  ///
+  /// 每一步都会**推一次合并编辑器**：流水作业就是这样走的 —— 用户在第一组里
+  /// 选好落点（改写 / 追加 / 作为清单条目），返回之后自动进下一组。
+  /// 收尾只给**一句汇总**（每组各弹一次提示会连成一串，最后那条反而看不清）。
+  ///
+  /// 返回是否真的并进去了（用户中途返回 = `false`，那一组会记进"未处理"）。
+  Future<bool> _mergeInto(
+    BuildContext context,
+    Project project,
+    List<Inspiration> group,
+  ) async {
+    if (group.isEmpty) return false;
     final result = await Navigator.of(context).push<MergeResult>(
       MaterialPageRoute<MergeResult>(
         builder: (_) => MergeEditorPage.many(
           project: project,
-          inspirations: picks,
+          inspirations: group,
           isCategory: app.ws.isProjectCategory(project.id),
         ),
       ),
     );
-    if (result == null || !context.mounted) return;
+    if (result == null || !context.mounted) return false;
 
-    final merged = await applyMergeResultFor(
+    // `applyMergeResultFor` 自己会给一句"已并进…"的提示；流水时它每步都会弹，
+    // 但那正是"一组一组做完"的即时反馈 —— 最后由汇总那句收口。
+    return applyMergeResultFor(
       context,
       app,
       project,
-      inspirations: picks,
+      inspirations: group,
       result: result,
     );
-    if (!merged || !context.mounted) return;
-    onDone();
   }
 
   Future<void> discard(BuildContext context) async {

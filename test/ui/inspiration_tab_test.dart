@@ -275,9 +275,9 @@ void main() {
     // 多选动作条上的「合并…」（与其它动作同一套胶囊图标按钮）
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
-    // 先选落点项目（多选可能跨项目）
-    await tester.tap(find.text('目标项目').last);
-    await tester.pumpAndSettle();
+    // **不再问落点**（2026-09-28 实机反馈：已经分配了项目的灵感直接并进对应项目）
+    // —— 两条都归「目标项目」，所以直接进它的编辑器
+    expect(find.text('合并到哪个项目'), findsNothing, reason: '有唯一归属时不问落点');
 
     // 编辑器里要能看出"这次并的是哪几条"：多条按顺序列出来、默认展开
     expect(find.textContaining('合并进「目标项目」'), findsOneWidget);
@@ -322,8 +322,8 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('目标项目').last);
-    await tester.pumpAndSettle();
+    // 两条都归「目标项目」→ 不问落点，直接进编辑器
+    expect(find.text('合并到哪个项目'), findsNothing);
 
     await tester.tap(find.text('作为清单条目'));
     await tester.pumpAndSettle();
@@ -336,7 +336,8 @@ void main() {
     expect(find.textContaining('已把 2 条灵感追加到「目标项目」的清单'), findsOneWidget);
   });
 
-  testWidgets('合并先选目标：分类点不动，只给一句「分类不装灵感」（Q37 / Q2）', (tester) async {
+  testWidgets('合并落在分类上时回退到"问一次"：分类点不动，只给一句「分类不装灵感」（Q37 / Q2）',
+      (tester) async {
     final app = await boot();
     final category = app.ws.createProject(title: '工作');
     app.ws.createProject(title: '发布 v1', parentId: category.id);
@@ -352,6 +353,10 @@ void main() {
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
 
+    // 它们挂在**分类**上，而分类不是落点（Q2）→ 没有可推断的目标，
+    // 于是退回"问一次落点"，让用户自己挑一个真目标
+    expect(find.text('合并到哪个项目'), findsOneWidget, reason: '分类不能当落点，只能问');
+
     // 分类行明说"不装灵感"：点它只给提示，不往下走
     expect(find.text('分类，这里不装灵感'), findsOneWidget);
     await tester.tap(find.text('工作').last);
@@ -366,6 +371,43 @@ void main() {
     await tester.tap(find.text('发布 v1').last);
     await tester.pumpAndSettle();
     expect(find.textContaining('合并进「发布 v1」'), findsOneWidget);
+  });
+
+  testWidgets('合并自动分组流水作业：跨两个项目的灵感各组并回自己那个项目', (tester) async {
+    final app = await boot();
+    final alpha = app.ws.createProject(title: '项目甲');
+    final beta = app.ws.createProject(title: '项目乙');
+    // 每个项目一条，避免"同一组两条"带来的顺序问题
+    app.run(() => app.ws.captureInspiration('甲的那条', projectId: alpha.id));
+    app.run(() => app.ws.captureInspiration('乙的那条', projectId: beta.id));
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('甲的那条'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('乙的那条'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 条'), findsWidgets);
+
+    await tester.tap(find.byIcon(Icons.merge_type));
+    await tester.pumpAndSettle();
+
+    // 分成两组 → 不问落点，直接进第一组的编辑器；一组做完返回后自动进下一组
+    expect(find.text('合并到哪个项目'), findsNothing, reason: '两组都有归属，不需要再问');
+    expect(find.text('作为清单条目'), findsOneWidget, reason: '第一组的编辑器');
+
+    // 流水做完两组：每一组都用「作为清单条目」这个落点
+    await tester.tap(find.text('作为清单条目'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('作为清单条目'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findProject(alpha.id)!.items.map((i) => i.text), <String>['甲的那条']);
+    expect(app.ws.findProject(beta.id)!.items.map((i) => i.text), <String>['乙的那条']);
+    expect(app.ws.inspirationInbox, isEmpty, reason: '两条都被合掉了');
+    expect(app.ws.archiveZone.mergedInspirations.length, 2);
+    expect(find.text('已选 2 条'), findsNothing, reason: '流水做完要退出多选');
   });
 
   testWidgets('写下来的时候就选好项目：选完「记下」直接就是已分配', (tester) async {

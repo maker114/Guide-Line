@@ -143,27 +143,14 @@ class InspirationTabState extends State<InspirationTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // 书写区 ↔ 多选动作条：**换的时候要顺**（2026-09-28 实机反馈：
-        // 多选时切换要流畅）—— `AnimatedSize` 吃掉两者高度差，`AnimatedSwitcher`
-        // 交叉淡入，视觉上像同一条栏"变形"过去
-        AnimatedSize(
-          duration: expandCollapseDuration,
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: AnimatedSwitcher(
-            duration: expandCollapseDuration,
-            transitionBuilder: (child, animation) =>
-                FadeTransition(opacity: animation, child: child),
-            child: _selecting
-                ? KeyedSubtree(
-                    key: const ValueKey<String>('bar'),
-                    child: _buildSelectionBar(context),
-                  )
-                : KeyedSubtree(
-                    key: const ValueKey<String>('capture'),
-                    child: _buildCaptureArea(),
-                  ),
-          ),
+        // 书写区**一直在**（2026-09-28 实机反馈："多选时不必收起灵感输入框，
+        // 保持原来的坐标就好"）—— 原来多选是整块把它换成动作条，一进多选
+        // 输入框就跳走了；现在动作条**接在它下面**，书写区一个像素都不动。
+        _buildCaptureArea(),
+        // 动作条**滑出来**（多选时切换要流畅）
+        AnimatedCollapse(
+          expanded: _selecting,
+          child: _buildSelectionBar(context),
         ),
         if (!_selecting && filtering)
           Padding(
