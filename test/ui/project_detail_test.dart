@@ -408,6 +408,91 @@ void main() {
     expect(find.text('发布页还差一个回滚口径'), findsOneWidget);
   });
 
+  testWidgets('下级还是分类时递归展开：一直能看到最底层目标的条目', (tester) async {
+    final app = await boot();
+    // 三层：工作（分类）→ 发布 v1（分类）→ 前端（目标，带条目）
+    final top = app.ws.createProject(title: '工作');
+    final mid = app.ws.createProject(title: '发布 v1', parentId: top.id);
+    final leaf = app.ws.createProject(title: '前端', parentId: mid.id);
+    app.run(() => app.ws.addProjectItem(leaf.id, '冻结契约'));
+
+    await openProject(tester, app, '工作');
+
+    // 收起时什么都看不到
+    expect(find.text('前端'), findsNothing);
+    expect(find.text('冻结契约'), findsNothing);
+
+    // 展开「发布 v1」：它本身也是分类，所以露出的是下一层
+    // （按 tooltip 找开关，不用按图标 —— AppBar 的返回箭头是同一个图标码）
+    await tester.tap(find.byTooltip('展开').first);
+    await tester.pumpAndSettle();
+    expect(find.text('前端'), findsOneWidget, reason: '下级是分类时，接着往下展');
+    expect(find.text('冻结契约'), findsNothing, reason: '再下一层还没展开');
+
+    // 再展开「前端」：它是叶子，直接给出它的条目
+    await tester.tap(find.byTooltip('展开').last);
+    await tester.pumpAndSettle();
+    expect(find.text('冻结契约'), findsOneWidget, reason: '一路递归到最底层目标的条目');
+    expect(
+      find.byTooltip('展开'),
+      findsNothing,
+      reason: '叶子不再给箭头 —— 点了没反应比没有箭头更糟',
+    );
+  });
+
+  testWidgets('递归展开：底层目标没有条目时给一句，而不是留白', (tester) async {
+    final app = await boot();
+    final top = app.ws.createProject(title: '工作');
+    final mid = app.ws.createProject(title: '发布 v1', parentId: top.id);
+    app.ws.createProject(title: '空目标', parentId: mid.id);
+
+    await openProject(tester, app, '工作');
+    await tester.tap(find.byTooltip('展开').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('展开').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('空目标'), findsOneWidget);
+    expect(find.text('还没有条目'), findsOneWidget);
+  });
+
+  testWidgets('待处理灵感可以长按多选，批量丢弃与灵感页同一套口径', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '目标甲');
+    app.run(() => app.ws.captureInspiration('灵感甲', projectId: project.id));
+    app.run(() => app.ws.captureInspiration('灵感乙', projectId: project.id));
+
+    await openProject(tester, app, '目标甲');
+    await tester.scrollUntilVisible(
+      find.text('灵感甲'),
+      150,
+      scrollable: verticalScrollable,
+    );
+    await tester.pumpAndSettle();
+
+    // 长按进多选（与灵感页同一套习惯）
+    await tester.longPress(find.text('灵感甲'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 条'), findsOneWidget);
+    expect(find.byTooltip('退出多选'), findsOneWidget, reason: '动作条是共用的那一枚');
+
+    // 多选态下点条目 = 切换选中（不再进合并编辑器）
+    await tester.tap(find.text('灵感乙'));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 2 条'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('丢弃'));
+    await tester.pumpAndSettle();
+
+    expect(
+      app.ws.liveInspirations.where((i) => i.isPending).length,
+      0,
+      reason: '批量丢弃与灵感页走同一批 Workspace 方法',
+    );
+    expect(app.ws.archiveZone.discardedInspirations.length, 2);
+    expect(find.text('已选 2 条'), findsNothing, reason: '动作完要退出多选');
+  });
+
   testWidgets('空态只剩计数：下级 0 与"待处理灵感 0"，不再配说明性文字', (tester) async {
     final app = await boot();
     app.ws.createProject(title: '光杆目标');

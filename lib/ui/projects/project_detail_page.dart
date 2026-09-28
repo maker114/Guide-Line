@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
+import '../../core/rules/cascade.dart';
 import '../../core/rules/handoff_export.dart';
 import '../../features/workspace.dart';
 import '../common/color_picker.dart';
@@ -12,6 +13,7 @@ import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/status_selector.dart';
+import '../inspiration/inspiration_selection.dart';
 import '../inspiration/merge_editor_page.dart';
 import '../theme/shape_tokens.dart';
 import 'ai_preview_page.dart';
@@ -198,9 +200,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                           value: 'move',
                           child: Text(isCategory ? '移到其它分类' : '移动到…'),
                         ),
-                        // 重置**单独一组**（上下各一条分隔线）：它是这一页里
-                        // 唯一"会一次抹掉很多字"的动作，与上面的日常操作不是一类
-                        // （2026-09-28 实机反馈：把重置放进 ⋮，并明确警告）。
+                        // 重置与清理**单独一组**（只在它上面留一条分隔线，
+                        // 与归档 / 删除分开）：它俩是这一页里唯一"会一次抹掉很多字"
+                        // 的动作。**两项之间不再画线**（2026-09-28 实机反馈：去掉分割线）。
                         const PopupMenuDivider(),
                         PopupMenuItem<String>(
                           value: 'clearDone',
@@ -208,15 +210,21 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                           enabled: clearDoneScopeOf(project, app).items > 0,
                           child: const Text('清除已完成条目…'),
                         ),
+                        // **分类与项目对应不同的重置**（2026-09-28 实机反馈）：
+                        //   · 项目：先"只清实现"，再"连问题 / 思路一起清"；
+                        //   · 分类：只清下面那些目标的实现 —— 分类自己的「总纲领」
+                        //     是它的定义，清掉等于把这个分类注销（同一批反馈的另一条）。
                         PopupMenuItem<String>(
                           value: 'resetImplementation',
-                          child: const Text('重置所有实现…'),
+                          child: Text(
+                            isCategory ? '重置下级所有实现…' : '重置所有实现…',
+                          ),
                         ),
-                        const PopupMenuItem<String>(
-                          value: 'resetProject',
-                          child: Text('重置所有项目…'),
-                        ),
-                        const PopupMenuDivider(),
+                        if (!isCategory)
+                          const PopupMenuItem<String>(
+                            value: 'resetProject',
+                            child: Text('重置整个项目…'),
+                          ),
                         const PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                         const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                       ],
@@ -314,9 +322,11 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   /// 一次「重置」（2026-09-28 实机反馈：放进 ⋮ 里，注意二次确认、明确警告，
   /// 并区分「重置所有项目」与「重置所有实现」）。
   ///
-  /// 两个范围的区别就是**清几个字段**：
-  ///   · 「重置所有实现」= 清 `implementation` + `items`（做法）；
-  ///   · 「重置所有项目」= 再加上 `purpose`（问题 / 思路，分类页叫总纲领）。
+  /// 分类与项目**对应不同的重置**（同一批反馈的另一条）：
+  ///   · **项目**：「重置所有实现」＝清正文 + 清单条目；「重置整个项目」＝再加上
+  ///     「有什么问题 / 思路」；
+  ///   · **分类**：只有「重置下级所有实现」—— 分类自己的「总纲领」是它的定义，
+  ///     清掉等于把这个分类注销，所以**不重置**。它自己本来也没有实现字段。
   ///
   /// 范围（本级 + 所有**直属**下级）与影响条数都在确认框里说清 —— 这句话涉及
   /// "会丢多少东西"，必须让用户在按下之前看得见。执行前还会留一份可退回的档
@@ -328,16 +338,23 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   }) async {
     final impact = app.resetImpactOf(project.id);
     final scope = app.resetScopeOf(project.id);
-    final nested = scope.length - 1;
+    // 分类页那一条只动下级，不动分类自己
+    final isCategory = app.ws.childProjectsOf(project.id).isNotEmpty;
+    final affected = isCategory && implementationsOnly
+        ? impact.projects - 1
+        : impact.projects;
 
-    final title = implementationsOnly ? '重置所有实现' : '重置所有项目';
+    final title = isCategory
+        ? '重置下级所有实现'
+        : (implementationsOnly ? '重置所有实现' : '重置整个项目');
     final what = implementationsOnly
         ? '正文与清单条目会被清空'
         : '「有什么问题 / 思路」与实现（正文 + 清单）都会被清空';
-    // 分类页上的"范围"必须写出来：用户看到的是几个目标的行，而不是这些目标的字段
-    final range = nested <= 0
-        ? '只会动「${project.title}」这一个项目'
-        : '会连同它的 $nested 个下级目标一起动，共 ${impact.projects} 个项目';
+    final range = isCategory
+        ? '会动它下面 $affected 个目标的实现；分类自己的「总纲领」不动'
+        : (affected <= 1
+            ? '只会动「${project.title}」这一个项目'
+            : '会连同它的 ${affected - 1} 个下级目标一起动，共 $affected 个项目');
 
     final ok = await confirmAction(
       context,
@@ -350,40 +367,66 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     );
     if (!ok || !context.mounted) return;
 
-    final error = app.resetProject(project.id, implementationsOnly: implementationsOnly);
+    // 分类页只清下级：把自己从范围里摘掉
+    final ids = <String>[
+      for (final each in scope)
+        if (!(isCategory && each.id == project.id)) each.id,
+    ];
+    final error = app.resetProject(
+      project.id,
+      implementationsOnly: implementationsOnly,
+      overrideIds: isCategory ? ids : null,
+    );
     if (!context.mounted) return;
     if (error != null) {
       showToast(context, error, error: true);
       return;
     }
-    _announceReset(context, title, impact.projects);
+    _announceReset(context, title, affected);
   }
 
   /// 重置之后的提示：**带上一次反悔的入口**。
   ///
-  /// 用 `SnackBar` 的 action 而不是轻提示：这条提示要给一个"点一下就退回去"的落点，
-  /// 而 `showToast` 给不了按钮。一份留档只值一次反悔，所以点完就销掉
-  /// （`revertProjectReset` 自己会销）。
+  /// 三条实机反馈都在这一个 `SnackBar` 上（2026-09-28）：
+  ///   · **"弹窗是黑色的"** —— `SnackBar` 的默认底色取 `inverseSurface`
+  ///     （深色主题下就是一块黑），与这一页的其它提示不是一个观感。
+  ///     这里改成与 `showToast` 同一套：`inverseSurface` 只用于普通提示，
+  ///     而这条要**长期留着让用户能点**，所以给它明确的 `surfaceContainerHighest`
+  ///     底 + `onSurface` 字，深浅两套主题下都是"应用自己的面板"。
+  ///   · **"返回上一版的提示不太清楚"** —— 文案改成动词开头、把后果写全。
+  ///   · **"似乎不会自行消失"** —— 带 `action` 的 `SnackBar` 默认**要用户处理**
+  ///     （`SnackBarAction` 会让它一直挂着）；而且原来点完按钮还会 `showToast`，
+  ///     那是**又排一条**在后面，第一条不消失、第二条永远出不来。
+  ///     现在显式给 8 秒（够看清、够点），并且不再往里塞第二条提示。
   void _announceReset(BuildContext context, String title, int projectCount) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('已重置 $projectCount 个项目'),
-        action: SnackBarAction(
-          label: '退回上一版',
-          onPressed: () {
-            final error = app.revertProjectReset();
-            if (!context.mounted) return;
-            showToast(
-              context,
-              error ?? '$title已退回（留档只值一次反悔）',
-              error: error != null,
-            );
-          },
+    final scheme = Theme.of(context).colorScheme;
+    // 先把还在排队 / 正在显示的那条收掉：否则这一条要排队，看起来"点了没反应"
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          backgroundColor: scheme.surfaceContainerHighest,
+          content: Text(
+            '$title完成：$projectCount 个项目已清空。点右边可以退回来（只值一次）',
+            style: TextStyle(color: scheme.onSurface),
+          ),
+          action: SnackBarAction(
+            label: '退回上一版',
+            textColor: scheme.primary,
+            onPressed: () {
+              final error = app.revertProjectReset();
+              if (error == null) return;
+              // 只在这一种情况下再给一句：退回**没成功**是用户必须知道的
+              // （成功时列表自己就变回去了，不需要多说一句 —— 多说一句就会
+              //  把这条带按钮的提示挤掉，那是上一版"提示不消失"的另一半原因）
+              showToast(context, error, error: true);
+            },
+          ),
         ),
-      ),
-    );
+      );
   }
 
   /// 生成并把用户送到**交接说明预览页**（真正写文件在那一步）。
@@ -1112,13 +1155,18 @@ class _TextField extends StatelessWidget {
   }
 }
 
-/// 「下级」列表：**点一行就地展开**（ADR-070），展开后直接看到并勾选
-/// 那个下级的实现清单。
+/// 「下级」列表：**点一行就地展开**（ADR-070 / ADR-085），展开后按**整棵子树**
+/// 递归铺开 —— 下级如果本身还是分类，就接着往下展，一直到最底层的目标，
+/// 并列出那个目标的实现清单。
 ///
-/// 分类里装的是同一个方向上的几件事（Q2）：在这一层要回答的是"这个方向走到哪了"，
-/// 所以一行下级只给三样东西 —— 名字、进度 `清单 n/m`、展开后的清单本体。
-/// 完整字段（问题 / 思路、如何解决、灵感）仍旧在下级自己的详情页里，
-/// 入口放在展开区的最后一步（「打开这个目标」）。
+/// 为什么递归（2026-09-28 实机反馈："当分类的下级还有分类的时候在父分类对应的
+/// 下拉菜单应当显示子分类所包含的项目，以此类推"）：在这一层要回答的是
+/// "这个方向走到哪了"，而三层结构下"下级的清单"往往还挂在更深一层 ——
+/// 从前展开只走一层，看到的是"这里还有一个分类"，等于没回答那个问题。
+///
+/// 每层缩进一档（每档 20dp），最底层的目标是叶子：列出它的清单条目，可勾。
+/// 完整字段（问题 / 思路、如何解决、灵感）仍旧在下级自己的详情页里 ——
+/// 点那一行的标题进去。
 class _ChildrenField extends StatefulWidget {
   const _ChildrenField({required this.app, required this.project, required this.children});
 
@@ -1131,9 +1179,14 @@ class _ChildrenField extends StatefulWidget {
 }
 
 class _ChildrenFieldState extends State<_ChildrenField> {
+  /// 每往下一层的缩进（dp）。
+  static const double _indentPerLevel = 20;
+
   /// 已展开的下级（按 id 记）。勾一条清单就会触发整页重建，
   /// 展开状态不能挂在临时变量上，否则勾一下就自己收起来了。
   final Set<String> _expanded = <String>{};
+
+  AppController get app => widget.app;
 
   @override
   Widget build(BuildContext context) {
@@ -1143,7 +1196,7 @@ class _ChildrenFieldState extends State<_ChildrenField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         // 下级区整体收在左边距 16 的一条线上，与上面的字段卡左缘对齐；
-        // 条目行本身再往里缩 8，用"缩进"而不是"大间距"表达它是下级。
+        // 条目行本身再往里缩，用"缩进"而不是"大间距"表达它是下级。
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
           child: Row(
@@ -1154,28 +1207,7 @@ class _ChildrenFieldState extends State<_ChildrenField> {
             ],
           ),
         ),
-        if (children.isNotEmpty)
-          for (final child in children) ...<Widget>[
-            _ChildRow(
-              key: ValueKey<String>(child.id),
-              child: child,
-              expanded: _expanded.contains(child.id),
-              onToggle: () => setState(() {
-                // `remove` 返回 false = 原本没展开，那就展开
-                if (!_expanded.remove(child.id)) _expanded.add(child.id);
-              }),
-              onOpen: () => Navigator.of(context).push<void>(
-                MaterialPageRoute<void>(
-                  builder: (_) => ProjectDetailPage(
-                    app: widget.app,
-                    projectId: child.id,
-                  ),
-                ),
-              ),
-            ),
-            if (_expanded.contains(child.id))
-              _ChildChecklist(app: widget.app, child: child),
-          ],
+        for (final child in children) ..._subtree(child, 0),
         // 新建下级：文案随层级走（Q2）—— 在**分类**下新建的是「目标」。
         // 用现成的 `InlineComposer`，不新增控件；放在下级列表**末尾**
         // （与「实现清单」的「添加条目」同一个位置习惯）。
@@ -1189,14 +1221,54 @@ class _ChildrenFieldState extends State<_ChildrenField> {
           leading: Icons.add,
           dense: true,
           onCreate: (title) {
-            final error = widget.app.run(
-              () => widget.app.ws.createProject(title: title, parentId: widget.project.id),
+            final error = app.run(
+              () => app.ws.createProject(title: title, parentId: widget.project.id),
             );
             if (error != null) showToast(context, error, error: true);
           },
         ),
       ],
     );
+  }
+
+  /// 一个节点连同它的展开区（递归）。
+  ///
+  /// [depth] 从 0 起：本级的下级是 0，再下一层是 1。
+  List<Widget> _subtree(Project node, int depth) {
+    final children = app.ws.childProjectsOf(node.id);
+    // 还能不能再往下：先看**结构**上有没有下一层（`depth + 2` 才是这一层的深度
+    // —— `depthOf` 把根算作 1），再看有没有子节点。
+    final canNest = depth + 2 < maxProjectDepth && children.isNotEmpty;
+    final expanded = _expanded.contains(node.id);
+
+    return <Widget>[
+      _ChildRow(
+        key: ValueKey<String>('child-${node.id}'),
+        child: node,
+        depth: depth,
+        expanded: expanded,
+        // 叶子（最底层的目标）没有可展开的东西，不给箭头
+        collapsible: canNest,
+        onToggle: () => setState(() {
+          if (!_expanded.remove(node.id)) _expanded.add(node.id);
+        }),
+        onOpen: () => Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => ProjectDetailPage(app: app, projectId: node.id),
+          ),
+        ),
+      ),
+      if (expanded) ...<Widget>[
+        // 有下级：接着递归铺下去
+        if (canNest)
+          for (final grand in children) ..._subtree(grand, depth + 1)
+        // 叶子：列出它自己的清单条目（可勾）
+        else if (node.items.isNotEmpty)
+          _ChildChecklist(app: app, child: node, depth: depth, indentPerLevel: _indentPerLevel),
+        if (!canNest && node.items.isEmpty)
+          _ChildEmptyHint(depth: depth, indentPerLevel: _indentPerLevel),
+      ],
+    ];
   }
 }
 
@@ -1218,6 +1290,8 @@ class _ChildRow extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.onOpen,
+    this.depth = 0,
+    this.collapsible = true,
   });
 
   final Project child;
@@ -1227,13 +1301,20 @@ class _ChildRow extends StatelessWidget {
   /// 进下级自己的详情页。
   final VoidCallback onOpen;
 
+  /// 第几层（0 = 本级的下级）。每层多缩进 20dp。
+  final int depth;
+
+  /// 还有没有下一层可展。**叶子（最底层的目标）不给箭头** ——
+  /// 一个点了没反应的箭头比没有箭头更糟。
+  final bool collapsible;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final subtitle = _childSubtitle(theme, child);
     return Padding(
-      // 比主项目行更紧凑：缩进 24 表达层级，字号降一档
-      padding: const EdgeInsets.fromLTRB(24, 6, 12, 6),
+      // 比主项目行更紧凑：缩进表达层级，字号降一档
+      padding: EdgeInsets.fromLTRB(24.0 + depth * 20, 6, 12, 6),
       child: Row(
         children: <Widget>[
           ProjectMarker(color: child.color, size: 12),
@@ -1283,18 +1364,28 @@ class _ChildRow extends StatelessWidget {
 /// 改字、加条目、删条目、上移下移、建成任务都留在下级自己的详情页
 /// —— 一个展开区里塞两套操作，用户在分类页就分不清自己在改哪一层。
 class _ChildChecklist extends StatelessWidget {
-  const _ChildChecklist({required this.app, required this.child});
+  const _ChildChecklist({
+    required this.app,
+    required this.child,
+    this.depth = 0,
+    this.indentPerLevel = 20,
+  });
 
   final AppController app;
   final Project child;
 
+  /// 这一批条目所属目标在第几层（与 `_ChildRow` 的 depth 同一套）。
+  final int depth;
+  final double indentPerLevel;
+
   @override
   Widget build(BuildContext context) {
-    // 一条都没有就不占位：空态由上面那一行的「清单 x/y」进度表达
+    // 一条都没有就不占位（`_ChildrenField` 会补一句提示）
     if (child.items.isEmpty) return const SizedBox.shrink();
-    // 缩进对齐上级那一行的标题文字（24 缩进 + 12 标识色 + 12 间距 = 48）
+    // 缩进对齐上级那一行的标题文字（24 缩进 + 12 标识色 + 12 间距 = 48），
+    // 再按层级往下让
     return Padding(
-      padding: const EdgeInsets.fromLTRB(40, 0, 12, 6),
+      padding: EdgeInsets.fromLTRB(40 + depth * indentPerLevel, 0, 12, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -1315,6 +1406,25 @@ class _ChildChecklist extends StatelessWidget {
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
     if (error != null && context.mounted) showToast(context, error, error: true);
+  }
+}
+
+/// 展到底层的目标却一条条目都没有时的一句话。
+///
+/// 加了递归之后这是**常见**情况（三层结构里最底下那层还没开工），
+/// 什么都不画会让人以为"展开坏了"。
+class _ChildEmptyHint extends StatelessWidget {
+  const _ChildEmptyHint({required this.depth, required this.indentPerLevel});
+
+  final int depth;
+  final double indentPerLevel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(40 + depth * indentPerLevel, 0, 12, 6),
+      child: Text('还没有条目', style: Theme.of(context).textTheme.bodySmall),
+    );
   }
 }
 
@@ -1391,7 +1501,13 @@ Text? _childSubtitle(ThemeData theme, Project child) {
   );
 }
 
-class _InspirationsField extends StatelessWidget {
+/// 项目详情页的「待处理灵感」。
+///
+/// 点一条**直接进合并编辑器**（入口在项目侧，不用绕回灵感页）；
+/// **长按进多选**（2026-09-28 实机反馈："项目界面的待处理灵感也应当可以长按多选"），
+/// 动作条与批量动作跟灵感页**共用同一份**（`inspiration_selection.dart`）——
+/// 两处各写一套，"批量丢弃到底进不进归档区"这种口径迟早会漂。
+class _InspirationsField extends StatefulWidget {
   const _InspirationsField({
     required this.app,
     required this.project,
@@ -1403,28 +1519,118 @@ class _InspirationsField extends StatelessWidget {
   final List<Inspiration> inspirations;
 
   @override
+  State<_InspirationsField> createState() => _InspirationsFieldState();
+}
+
+class _InspirationsFieldState extends State<_InspirationsField> {
+  bool _selecting = false;
+  final Set<String> _selectedIds = <String>{};
+
+  AppController get app => widget.app;
+
+  void _enterSelection(String id) {
+    setState(() {
+      _selecting = true;
+      _selectedIds
+        ..clear()
+        ..add(id);
+    });
+  }
+
+  void _exitSelection() {
+    if (!mounted) return;
+    setState(() {
+      _selecting = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (!_selectedIds.remove(id)) _selectedIds.add(id);
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIds.length == widget.inspirations.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(widget.inspirations.map((each) => each.id));
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final inspirations = widget.inspirations;
+    // 选中项可能在别处被改掉了（例如在灵感页合并走），每次构建清一遍幽灵选中
+    _selectedIds.removeWhere((id) => !inspirations.any((each) => each.id == id));
+
+    final actions = InspirationBatchActions(
+      app: app,
+      selectedIds: _selectedIds.toList(growable: false),
+      onDone: _exitSelection,
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-          child: Text('待处理灵感 ${inspirations.length}', style: theme.textTheme.labelLarge),
+          child: Row(
+            children: <Widget>[
+              Text(
+                _selecting ? '已选 ${_selectedIds.length} 条' : '待处理灵感 ${inspirations.length}',
+                style: theme.textTheme.labelLarge,
+              ),
+            ],
+          ),
         ),
-        if (inspirations.isNotEmpty) ...<Widget>[
-          // 点一条**直接进合并编辑器**。
+        if (_selecting)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: InspirationSelectionBar(
+              selectedCount: _selectedIds.length,
+              allSelected: inspirations.isNotEmpty &&
+                  _selectedIds.length == inspirations.length,
+              canSelectAll: inspirations.isNotEmpty,
+              onToggleAll: _toggleSelectAll,
+              onExit: _exitSelection,
+              onAssign: () => actions.assign(context),
+              onMerge: () => actions.merge(context, inspirations),
+              onDiscard: () => actions.discard(context),
+              onDelete: () => actions.delete(context),
+            ),
+          ),
+        if (inspirations.isNotEmpty)
+          // 点一条**直接进合并编辑器**（多选态下点它只切换选中）。
           // 原来这里是只读列表，还让用户"去灵感页合并"——入口绕了一圈。
           for (final inspiration in inspirations)
             ListTile(
               dense: true,
-              leading: const Icon(Icons.lightbulb_outline, size: 18),
+              // 多选时把行首图标换成勾选框：位置不变、不跳
+              leading: _selecting
+                  ? Checkbox(
+                      value: _selectedIds.contains(inspiration.id),
+                      onChanged: (_) => _toggleSelection(inspiration.id),
+                    )
+                  : const Icon(Icons.lightbulb_outline, size: 18),
               title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),
               subtitle: Text(relativeTime(inspiration.createdAt), style: theme.textTheme.labelSmall),
-              trailing: const Icon(Icons.merge_type, size: 18),
-              onTap: () => _merge(context, inspiration),
+              trailing: _selecting ? null : const Icon(Icons.merge_type, size: 18),
+              selected: _selecting && _selectedIds.contains(inspiration.id),
+              onTap: _selecting
+                  ? () => _toggleSelection(inspiration.id)
+                  : () => _merge(context, inspiration),
+              // 长按进多选；已经在多选里就直接切换（与灵感页同一套习惯）
+              onLongPress: _selecting
+                  ? () => _toggleSelection(inspiration.id)
+                  : () => _enterSelection(inspiration.id),
             ),
-        ],
       ],
     );
   }
@@ -1434,10 +1640,10 @@ class _InspirationsField extends StatelessWidget {
   Future<void> _merge(BuildContext context, Inspiration inspiration) async {
     final result = await Navigator.of(context).push<MergeResult>(
       MaterialPageRoute<MergeResult>(
-        builder: (_) => MergeEditorPage(project: project, inspiration: inspiration),
+        builder: (_) => MergeEditorPage(project: widget.project, inspiration: inspiration),
       ),
     );
     if (result == null || !context.mounted) return;
-    await applyMergeResult(context, app, project, inspiration, result);
+    await applyMergeResult(context, app, widget.project, inspiration, result);
   }
 }

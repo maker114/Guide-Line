@@ -20,6 +20,7 @@ class UiPrefs {
     this.aiBaseUrl = defaultAiBaseUrl,
     this.aiModel = defaultAiModel,
     this.aiEnabled = true,
+    this.emptyBoxSeed,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -127,6 +128,14 @@ class UiPrefs {
   /// 与这个字段无关。
   final bool aiEnabled;
 
+  /// 灵感箱空态那句轮换文案的**抽签种子**（`null` = 还没抽过）。
+  ///
+  /// 「随机展示」选的是**每次启动抽一次、本次会话固定**（ADR-084）：
+  /// 抽签结果存进偏好，所以同一个会话里切页签 / 重建 / 返回都不会变，
+  /// 下次启动才重抽。存种子而不是存那一句话 —— 文案表改了之后老偏好
+  /// 会自然落到新表上，不会留着一句已经从代码里删掉的话。
+  final int? emptyBoxSeed;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -165,6 +174,7 @@ class UiPrefs {
     String? aiBaseUrl,
     String? aiModel,
     bool? aiEnabled,
+    Object? emptyBoxSeed = _unset,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -186,6 +196,8 @@ class UiPrefs {
         aiBaseUrl: aiBaseUrl ?? this.aiBaseUrl,
         aiModel: aiModel ?? this.aiModel,
         aiEnabled: aiEnabled ?? this.aiEnabled,
+        emptyBoxSeed:
+            emptyBoxSeed == _unset ? this.emptyBoxSeed : emptyBoxSeed as int?,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -203,6 +215,7 @@ class UiPrefs {
         'aiBaseUrl': aiBaseUrl,
         'aiModel': aiModel,
         'aiEnabled': aiEnabled,
+        'emptyBoxSeed': emptyBoxSeed,
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -229,6 +242,8 @@ class UiPrefs {
       aiModel: _readNonEmpty(json['aiModel'], defaultAiModel),
       // 老偏好文件里没有这个键 → 保持默认开（加了开关不该把功能悄悄关掉）
       aiEnabled: json['aiEnabled'] != false,
+      // 老偏好文件里没有这个键 → `null`，界面首帧自己抽一次
+      emptyBoxSeed: json['emptyBoxSeed'] is int ? json['emptyBoxSeed'] as int : null,
     );
   }
 

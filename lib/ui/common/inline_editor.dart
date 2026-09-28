@@ -150,11 +150,55 @@ class _InlineTextFieldState extends State<InlineTextField> {
     if (!mounted) return;
     setState(() => _editing = true);
     _focus.requestFocus();
+    _scrollIntoView();
+  }
+
+  /// 把这一行滚到键盘之上。
+  ///
+  /// 实机反馈："在修改靠近屏幕下方的灵感的时候，弹出的键盘会挡住输入框"。
+  ///
+  /// 为什么必须自己滚：`AppShell` 用的是 `resizeToAvoidBottomInset: false`
+  /// （键盘只覆盖、不压缩布局，否则底栏与内容之间会裂开一条键盘高的空档），
+  /// 所以**系统不会替我们把光标挪进可见区** —— 靠 `ListView` 的自动滚动也只在
+  /// `EditableText` 自己触发的场景下生效，而这里的编辑态是**整块换widget**，
+  /// 那一套不接管。于是焦点一到手就主动滚一次。
+  ///
+  /// 推一帧再滚：`_editing = true` 之后编辑框才被建出来，同一帧里还没有它的位置。
+  void _scrollIntoView() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final box = context.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) return;
+      final target = box.localToGlobal(Offset.zero) & box.size;
+      // 键盘高度只能从 `viewInsets` 拿（布局没被压缩，得自己算可用区）
+      final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+      final screen = MediaQuery.sizeOf(context).height;
+      final visibleBottom = screen - keyboard;
+      // 已经整个露在键盘之上就不用动
+      if (target.bottom <= visibleBottom - 8) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 1,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _commit() {
     final next = _controller.text.trim();
     setState(() => _editing = false);
+    // **提交之后必须自己放掉焦点**（2026-09-28 实机反馈："点确认之后输入框不会消失，
+    // 手动关掉键盘后每次切回该界面就会弹出键盘"）。
+    //
+    // 崩溃点在于：`_editing = false` 只是把编辑框从树上换成只读文字，而 `FocusNode`
+    // 是 State 的字段、**不会因为控件被换掉就释放** —— 于是 primaryFocus 一直挂在
+    // 这个已经不在屏幕上的输入框上：键盘不收，页面被 KeepAlive 保活之后再切回来
+    // 又是一副"正在编辑"的样子。实测 `primaryFocus.hasFocus == true`。
+    //
+    // 顺序要紧：先落 `_editing` 再 unfocus —— 焦点监听里"失焦即提交"那条只认编辑态，
+    // 反了会再走一次 `_commit`（与 `_cancel` 同一个坑）。
+    _focus.unfocus();
     if (next == widget.value) {
       widget.onEditClosed?.call();
       return;
@@ -285,10 +329,32 @@ class _EditorAction extends StatelessWidget {
       tooltip: tooltip,
       icon: Icon(icon, size: 18),
       onPressed: onPressed,
+      // **不要接管焦点**：这一对按钮一按，编辑会话就结束了，而 `IconButton`
+      // 默认会 `requestFocus` —— 于是"提交时 unfocus"立刻被它自己抢回去，
+      // 焦点留在一个即将被换掉的按钮上（实机表现：确认之后键盘不收）。
+      // 关掉之后焦点就真的放掉了，`_commit` 里那次 unfocus 才算数。
+      focusNode: _NoFocusNode(),
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints.tightFor(width: 32, height: 32),
     );
+  }
+}
+
+/// 一个**永不接受焦点**的 `FocusNode`，给"按完就结束"的按钮用。
+///
+/// `FocusNode(skipTraversal: true)` + 覆写 `canRequestFocus` 是唯一能把
+/// `IconButton` 自带的 `requestFocus` 彻底关掉的做法（`focusNode` 传 null 时
+/// 它会自己造一个能聚焦的）。
+class _NoFocusNode extends FocusNode {
+  _NoFocusNode() : super(skipTraversal: true, canRequestFocus: false);
+
+  @override
+  bool get canRequestFocus => false;
+
+  @override
+  void requestFocus([FocusNode? node]) {
+    // 什么都不做：按完就结束的按钮不该抢走输入框的焦点
   }
 }
 
@@ -339,6 +405,26 @@ class _InlineComposerState extends State<InlineComposer> {
   void _expand() {
     setState(() => _expanded = true);
     _focus.requestFocus();
+    _scrollIntoView();
+  }
+
+  /// 把这一行滚到键盘之上（与 `InlineTextField` 同一个理由，见那边的注释）。
+  void _scrollIntoView() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final box = context.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) return;
+      final target = box.localToGlobal(Offset.zero) & box.size;
+      final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+      final visibleBottom = MediaQuery.sizeOf(context).height - keyboard;
+      if (target.bottom <= visibleBottom - 8) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 1,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _collapse() {
@@ -347,14 +433,18 @@ class _InlineComposerState extends State<InlineComposer> {
     setState(() => _expanded = false);
   }
 
+  /// 提交一条：**收起来**，不留着输入框继续记。
+  ///
+  /// 2026-09-28 实机反馈："输入完一个内容点击确认之后输入框不会消失，当手动关掉
+  /// 键盘后每次切回该界面就会弹出键盘"。原来这里刻意保持展开（"像系统备忘录那样
+  /// 连着记几条"），但那个便利带来的代价更大：一个常驻的、**带着焦点的**输入框
+  /// 会让键盘一直挂着，页面被保活之后再切回来又是一副正在输入的样子。
+  /// 要再记一条就再点一次「添加条目」—— 一次点击换掉一个常驻的键盘，划算。
   void _submit() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     widget.onCreate(text);
-    // 保持展开，方便接着记下一条
-    _controller.clear();
-    _focus.requestFocus();
-    setState(() {});
+    _collapse();
   }
 
   @override

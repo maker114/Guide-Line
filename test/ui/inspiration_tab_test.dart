@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/inspiration/empty_box_lines.dart';
 
 import 'scroll_finders.dart';
 
@@ -498,12 +499,48 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    expect(find.text('灵感箱是空的'), findsOneWidget);
+    // 空箱文案是**轮换**的（ADR-084），所以这里断言"是表里的某一句"，
+    // 而不是钉死一句话；种子存在偏好里，本次会话固定
+    expect(
+      emptyBoxLines.any((line) => find.text(line).evaluate().isNotEmpty),
+      isTrue,
+      reason: '空箱应当显示轮换文案里的某一句',
+    );
+    expect(app.prefs.emptyBoxSeed, isNotNull, reason: '启动时应当抽过一次并落进偏好');
     expect(
       find.textContaining('另有 1 条在已归档项目下'),
       findsWidgets,
       reason: '"空"是算出来的空 —— 不说清楚，用户会以为灵感被删了'
           '（提示条与空态各说一次，说明这条信息确实显眼）',
     );
+  });
+
+  testWidgets('空箱文案：同一个会话里切走再回来不变（每次启动才重抽）', (tester) async {
+    final app = await boot();
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    String? shown() {
+      for (final line in emptyBoxLines) {
+        if (find.text(line).evaluate().isNotEmpty) return line;
+      }
+      return null;
+    }
+
+    final first = shown();
+    expect(first, isNotNull);
+
+    // 切到项目页再切回来
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('灵感')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(shown(), first, reason: '本次会话里不许换句 —— 每进一次换一句会晃眼');
   });
 }

@@ -651,6 +651,46 @@ void main() {
   });
 
   group('项目标志色自动分配', () {
+    test('用量统计：按**小写**色值数，项目 / 分类 / 事件一起数（实机反馈的角标数据源）', () {
+      // 色板写的是大写（`#AD6868`），落盘的色值是小写 —— 两边的口径差一位就会
+      // 让面板上每个角标都是 0（2026-09-28 实机反馈："色盘下的小数字似乎没有被
+      // 正确显示"）。这里把那个口径钉死。
+      final hex = ProjectPalette.hexes.first;
+      final lower = hex.toLowerCase();
+
+      final a = ws.createProject(title: '项目甲');
+      final b = ws.createProject(title: '项目乙');
+      final category = ws.createProject(title: '分类');
+      ws.createProject(title: '下级', parentId: category.id);
+      final event = ws.createEvent(name: '一件事');
+      ws.setProjectColor(a.id, lower);
+      ws.setProjectColor(b.id, lower);
+      ws.setProjectColor(category.id, lower);
+      ws.setEventColor(event.id, lower);
+
+      final usage = ws.markerColorUsage();
+      expect(
+        usage[lower],
+        4,
+        reason: '两个项目 + 一个分类 + 一个事件；分类与项目一起数，键是小写',
+      );
+      expect(usage.keys.every((k) => k == k.toLowerCase()), isTrue, reason: '键一律小写');
+      expect(
+        usage[ProjectPalette.hexes.first.toLowerCase()],
+        4,
+        reason: '面板查表时用的是**色板那个大写值** —— 先 toLowerCase 再查，必须命中',
+      );
+    });
+
+    test('用量统计不数已删除的', () {
+      final hex = ProjectPalette.hexes.first.toLowerCase();
+      final gone = ws.createProject(title: '待删');
+      ws.setProjectColor(gone.id, hex);
+      expect(ws.markerColorUsage()[hex], 1);
+      ws.deleteProject(gone.id);
+      expect(ws.markerColorUsage()[hex], isNull, reason: '删掉的项目不该继续占着色');
+    });
+
     test('新建项目自动拿到一个色板里的颜色', () {
       final project = ws.createProject(title: '第一个');
       expect(project.color, isNotNull);

@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -254,7 +254,7 @@ void main() {
 
     // 重置**单独一组**，且名字带省略号（表示还会再问一次）
     expect(find.text('重置所有实现…'), findsOneWidget);
-    expect(find.text('重置所有项目…'), findsOneWidget);
+    expect(find.text('重置整个项目…'), findsOneWidget);
 
     await tester.tap(find.text('重置所有实现…'));
     await tester.pumpAndSettle();
@@ -287,7 +287,7 @@ void main() {
     expect(reverted.items.single.text, '一条条目', reason: '清单条目也退回来了');
   });
 
-  testWidgets('「重置所有项目」连「有什么问题 / 思路」一起清，且留档只值一次反悔',
+  testWidgets('「重置整个项目」连「有什么问题 / 思路」一起清，且留档只值一次反悔',
       (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目丑');
@@ -301,7 +301,7 @@ void main() {
     await openProject(tester, app, '清单项目丑');
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('重置所有项目…'));
+    await tester.tap(find.text('重置整个项目…'));
     await tester.pumpAndSettle();
 
     // 与「重置所有实现」的差别必须写在警告里

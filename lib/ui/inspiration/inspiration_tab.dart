@@ -12,6 +12,8 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/project_picker.dart';
 import '../theme/shape_tokens.dart';
+import 'empty_box_lines.dart';
+import 'inspiration_selection.dart';
 import 'merge_editor_page.dart';
 
 /// 灵感 Tab：**速记优先**（手机端的主要场景）。
@@ -220,9 +222,12 @@ class InspirationTabState extends State<InspirationTab> {
               ? (all.isEmpty
                   ? EmptyState(
                       icon: Icons.lightbulb_outline,
-                      title: '灵感箱是空的',
+                      // 空箱文案**每次启动抽一句、本次会话固定**（ADR-084）。
+                      // 种子存在偏好里，所以切页签 / 返回都不会变。
+                      title: emptyBoxLineFor(widget.app.prefs.emptyBoxSeed),
                       // 全被归档项目遮住时，"空"是**算出来的空**：不说清楚，
-                      // 用户会以为灵感没了（Q10）
+                      // 用户会以为灵感没了（Q10）—— 这一句是**必须留**的，
+                      // 与上面那句趣味文案不是一回事
                       hint: hiddenCount > 0
                           ? '另有 $hiddenCount 条在已归档项目下，去归档区看'
                           : null,
@@ -391,166 +396,28 @@ class InspirationTabState extends State<InspirationTab> {
     setState(() => _captureProjectId = picked == pickNone ? null : picked);
   }
 
-  /// 多选时的批量动作条：胶囊形按钮，动作少而明确。
+  /// 多选动作条（共用控件，项目详情页的待处理灵感用的是同一个）。
   Widget _buildSelectionBar(BuildContext context) {
-    final theme = Theme.of(context);
     final count = _selectedIds.length;
     final allSelected = _visibleIds.isNotEmpty && count == _visibleIds.length;
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
-        child: Row(
-          children: <Widget>[
-            IconButton(
-              tooltip: '退出多选',
-              icon: const Icon(Icons.close),
-              onPressed: _exitSelection,
-            ),
-            // 全选只作用于**当前可见**的那些：有筛选时就是筛出来的那些。
-            // "全选"若连看不见的也选上，用户不知道自己提交了什么。
-            // 勾选框放在前面（"已选 n 条"已经由标题行显示，这里不重复）。
-            Checkbox(
-              value: allSelected,
-              tristate: false,
-              onChanged: _visibleIds.isEmpty ? null : (_) => _toggleSelectAll(),
-            ),
-            Tooltip(
-              message: allSelected ? '取消全选' : '全选',
-              child: const Icon(Icons.done_all, size: 18),
-            ),
-            const Spacer(),
-            _BarAction(
-              tooltip: '分配到项目…',
-              icon: Icons.drive_file_move_outline,
-              onPressed: count == 0 ? null : () => _batchAssign(context),
-            ),
-            // 多选合并（Q37）：≥2 条时是"一次并几条"，只剩 1 条时行为
-            // 与单条合并完全一样 —— 所以不按条数禁用，只按"有没有选中"。
-            _BarAction(
-              tooltip: '合并…',
-              icon: Icons.merge_type,
-              onPressed: count == 0 ? null : () => _batchMerge(context),
-            ),
-            _BarAction(
-              tooltip: '丢弃',
-              icon: Icons.visibility_off_outlined,
-              onPressed: count == 0 ? null : () => _batchDiscard(context),
-            ),
-            _BarAction(
-              tooltip: '删除',
-              icon: Icons.delete_outline,
-              onPressed: count == 0 ? null : () => _batchDelete(context),
-            ),
-          ],
-        ),
-      ),
+    final actions = InspirationBatchActions(
+      app: widget.app,
+      selectedIds: _selectedIds.toList(growable: false),
+      onDone: _exitSelection,
     );
-  }
-
-  Future<void> _batchAssign(BuildContext context) async {
-    final picked = await pickProject(
-      context,
-      widget.app,
-      title: '分配到项目',
-      allowNone: true,
-      noneLabel: '解除分配',
+    return InspirationSelectionBar(
+      selectedCount: count,
+      allSelected: allSelected,
+      canSelectAll: _visibleIds.isNotEmpty,
+      onToggleAll: _toggleSelectAll,
+      onExit: _exitSelection,
+      onAssign: () => actions.assign(context),
+      // 顺序取列表顺序：`inspirationInbox` 与页面上那份列表是同一个排序，
+      // 用选中的 id 过滤出来即可（Set 本身没有顺序）
+      onMerge: () => actions.merge(context, widget.app.ws.inspirationInbox),
+      onDiscard: () => actions.discard(context),
+      onDelete: () => actions.delete(context),
     );
-    if (picked == null || !context.mounted) return;
-    final projectId = picked == pickNone ? null : picked;
-    final ids = _selectedIds.toList(growable: false);
-    final error = widget.app.run(() => widget.app.ws.assignInspirations(ids, projectId));
-    if (error != null) {
-      if (context.mounted) showToast(context, error, error: true);
-      return;
-    }
-    if (context.mounted) {
-      showToast(
-        context,
-        projectId == null ? '已解除 ${ids.length} 条的分配' : '已分配 ${ids.length} 条',
-      );
-    }
-    _exitSelection();
-  }
-
-  /// 多选合并（Q37）：选中的多条**一次带进合并编辑器**，并进用户选定的目标。
-  ///
-  /// 三条口径：
-  ///   · **顺序 = 列表当前顺序**（灵感列表按创建时间倒序，也就是用户看到的
-  ///     从上到下）—— 追加原文各占一行、作为清单条目各成一条，都按它来；
-  ///   · **落点项目先选**：多选可能跨项目，所以不沿用"某一条"的归属；
-  ///     走的是同一个 `pickProject`，**分类不可选**（点了只给 Q2 那句提示）；
-  ///   · 合并完退出多选 —— 那些灵感已经不在这一页了（都进了归档区「已合并」）。
-  Future<void> _batchMerge(BuildContext context) async {
-    // 顺序取列表顺序：`inspirationInbox` 与页面上那份列表是同一个排序，
-    // 用选中的 id 过滤出来即可（Set 本身没有顺序）
-    final picks = widget.app.ws.inspirationInbox
-        .where((inspiration) => _selectedIds.contains(inspiration.id))
-        .toList(growable: false);
-    if (picks.isEmpty) return;
-
-    final picked = await pickProject(context, widget.app, title: '合并到哪个项目');
-    if (picked == null || !context.mounted) return;
-    final project = widget.app.ws.findProject(picked);
-    if (project == null || !context.mounted) return;
-
-    final result = await Navigator.of(context).push<MergeResult>(
-      MaterialPageRoute<MergeResult>(
-        builder: (_) => MergeEditorPage.many(
-          project: project,
-          inspirations: picks,
-          isCategory: widget.app.ws.isProjectCategory(project.id),
-        ),
-      ),
-    );
-    if (result == null || !context.mounted) return;
-
-    final merged = await applyMergeResultFor(
-      context,
-      widget.app,
-      project,
-      inspirations: picks,
-      result: result,
-    );
-    // 一句"并进了哪个项目、几条"的提示由 `applyMergeResultFor` 给；
-    // 只有真的并进去了才退出多选 —— 被 Q8 之类拦下时要留在原地重选
-    if (!merged || !context.mounted) return;
-    _exitSelection();
-  }
-
-  Future<void> _batchDiscard(BuildContext context) async {
-    final ids = _selectedIds.toList(growable: false);
-    final error = widget.app.run(() => widget.app.ws.discardInspirations(ids));
-    if (error != null) {
-      if (context.mounted) showToast(context, error, error: true);
-      return;
-    }
-    if (context.mounted) {
-      showToast(context, '已丢弃 ${ids.length} 条，可在归档区「已丢弃」找回');
-    }
-    _exitSelection();
-  }
-
-  Future<void> _batchDelete(BuildContext context) async {
-    final ids = _selectedIds.toList(growable: false);
-    final ok = await confirmAction(
-      context,
-      title: '删除 ${ids.length} 条灵感',
-      // 灵感是扁平实体，**不进回收站**（回收站只装项目 / 事件 / 任务），
-      // 所以这里不能写"可恢复" —— 删除就是删除；备份里可能仍有原文，但只能整库退回。
-      message: '灵感不进回收站，删除后无法在应用里找回。\n'
-          '备份与历次导出里可能仍有，但只能整库退回。',
-      confirmLabel: '删除',
-      danger: true,
-    );
-    if (!ok || !context.mounted) return;
-    final error = widget.app.run(() => widget.app.ws.deleteInspirations(ids));
-    if (error != null) {
-      if (context.mounted) showToast(context, error, error: true);
-      return;
-    }
-    if (context.mounted) showToast(context, '已删除 ${ids.length} 条');
-    _exitSelection();
   }
 
   void _save() {
@@ -774,38 +641,5 @@ class _InspirationTile extends StatelessWidget {
   void _run(BuildContext context, void Function() action) {
     final error = app.run(action);
     if (error != null) showToast(context, error, error: true);
-  }
-}
-
-/// 批量动作条上的一个**胶囊图标按钮**（三处共用，外观一致）。
-///
-/// 按实机反馈把批量动作条从"裸图标排一排"改成胶囊按钮：
-/// 每个按钮有自己的底色与圆角，边界清楚，也更符合全应用的形状规范。
-class _BarAction extends StatelessWidget {
-  const _BarAction({required this.tooltip, required this.icon, required this.onPressed});
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(left: 6),
-      child: Tooltip(
-        message: tooltip,
-        child: IconButton(
-          onPressed: onPressed,
-          icon: Icon(icon, size: 20),
-          style: IconButton.styleFrom(
-            backgroundColor: theme.colorScheme.surface,
-            shape: const StadiumBorder(),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            minimumSize: const Size(44, 36),
-          ),
-        ),
-      ),
-    );
   }
 }

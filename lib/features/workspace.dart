@@ -629,12 +629,18 @@ class Workspace {
   ///   · 事件也一起数 —— 虽然事件不在项目树里，但同一支色在两个地方都出现时，
   ///     用户仍然会把它当成"同一个东西"。
   ///
+  /// **键一律小写**（`#78d2ca`）：落盘的色值经 `Canonical.normalizeHexColor`
+  /// 规范成小写，而色板 `ProjectPalette.hexes` 写的是大写 —— 两边的口径必须对齐，
+  /// 否则查表时每个数都是 0（2026-09-28 实机反馈"色盘下的小数字似乎没有被正确
+  /// 显示"，根因就是这一条：表里是 `#78D2CA`，查的是 `#78d2ca`）。
+  ///
   /// 没设色（`color == null`）的不进这张表。
   Map<String, int> markerColorUsage() {
     final out = <String, int>{};
     void count(String? hex) {
       if (hex == null || hex.isEmpty) return;
-      out[hex] = (out[hex] ?? 0) + 1;
+      final key = hex.toLowerCase();
+      out[key] = (out[key] ?? 0) + 1;
     }
 
     for (final project in allProjects) {
@@ -1301,6 +1307,10 @@ class Workspace {
   ///
   /// 比「重置所有实现」多清一个 `purpose` —— 它是"把这一条彻底想清楚、
   /// 从头再来"，所以两个可写字段都归零。名字仍然是项目自己的名字。
+  ///
+  /// **分类页不做这一件事**（2026-09-28 实机反馈：重置的时候不应重置分类的总纲领）。
+  /// 「总纲领」是分类自己的定义，把它清掉等于把这个分类注销；分类页上能重置的
+  /// 只是它下面那些目标的实现（见 [resetImplementations]）。
   void resetProjects(Iterable<String> projectIds) {
     final now = Ids.nowMillis();
     var changed = false;

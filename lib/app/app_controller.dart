@@ -74,6 +74,9 @@ class AppController extends ChangeNotifier {
       credentialStore: credentialStore,
       shareFile: shareFile,
     ).._loadBackgroundBytes();
+    // 灵感箱空态那句轮换文案**在启动时抽一次**，本次会话固定（ADR-084）。
+    // 落进偏好是为了"同一个会话里不再变" —— 界面只读它，不自己抽。
+    controller._rollEmptyBoxLineIfNeeded();
     // 有事故时**不动磁盘**：清理过期墓碑会写盘，而"载入过程中发现问题"这一刻
     // 最不该再往盘上写东西（P0-3）。数据没问题的正常路径照旧清理。
     if (!report.hasProblems && !report.storeLockedByNewerSchema) {
@@ -436,11 +439,26 @@ class AppController extends ChangeNotifier {
   /// [implementationsOnly] 为真 = 只清「实现」（正文 + 清单）；
   /// 为假 = 连「有什么问题 / 思路」（分类页的「总纲领」）一起清。
   ///
+  /// [overrideIds] 把范围收窄：分类页的「重置下级所有实现」要**把自己摘掉**
+  /// —— 分类的总纲领是它的定义，清掉等于把分类注销（2026-09-28 实机反馈：
+  /// 重置的时候不应重置分类的总纲领）。
+  ///
   /// 留档**先于**重置写盘，且写失败不阻断（与 AI 覆盖正文那一套同一条口径：
   /// 护栏失败不该挡住用户本来要做的事）。返回 `null` 表示成功。
-  String? resetProject(String projectId, {required bool implementationsOnly}) {
-    final scope = resetScopeOf(projectId);
-    final ids = <String>[for (final project in scope) project.id];
+  String? resetProject(
+    String projectId, {
+    required bool implementationsOnly,
+    List<String>? overrideIds,
+  }) {
+    final ids = overrideIds ?? <String>[for (final p in resetScopeOf(projectId)) p.id];
+    final byId = <String, Project>{
+      for (final project in workspace.liveProjects) project.id: project,
+    };
+    final scope = <Project>[];
+    for (final id in ids) {
+      final each = byId[id];
+      if (each != null) scope.add(each);
+    }
     storage.saveResetSnapshot(<String, Map<String, dynamic>>{
       for (final project in scope)
         project.id: ProjectResetSnapshot(
@@ -785,6 +803,19 @@ class AppController extends ChangeNotifier {
     } catch (error) {
       return (text: null, error: '拆分失败：$error');
     }
+  }
+
+  /// 灵感箱空态那句轮换文案：**启动时抽一次**，种子落进偏好（ADR-084）。
+  ///
+  /// 为什么抽签放在这里而不是灵感页：灵感页会被反复重建（切页签、勾选、
+  /// KeepAlive 回来），在那儿抽等于"每进一次换一句"，晃眼而且像看错了。
+  /// 启动抽一次 = 一次冷启动一句，切来切去都稳定。
+  ///
+  /// **已经有种子就不重抽**：这样 `bootstrap` 被再调一次（测试、恢复备份）
+  /// 不会把当前这一句换掉 —— 用户看到的文案只在他重开 App 时才会换。
+  void _rollEmptyBoxLineIfNeeded() {
+    if (prefs.emptyBoxSeed != null) return;
+    updatePrefs(prefs.copyWith(emptyBoxSeed: DateTime.now().microsecondsSinceEpoch));
   }
 
   /// 启动告警：把加载报告翻译成人能看懂的话。

@@ -223,7 +223,9 @@ Iterable<Widget> _swatchGrid({
                   key: colorSwatchKey(row[i]),
                   hex: row[i],
                   selected: current == row[i],
-                  usage: usage[row[i]] ?? 0,
+                  // 用量表的键是**小写**（落盘口径 `Canonical.normalizeHexColor`），
+                  // 而色板写的是大写 —— 这里把两边对齐，否则角标恒为 0
+                  usage: usage[row[i].toLowerCase()] ?? 0,
                   onTap: () => onPick(row[i]),
                 ),
               ),
