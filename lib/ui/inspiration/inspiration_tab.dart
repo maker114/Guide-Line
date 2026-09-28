@@ -11,6 +11,7 @@ import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../common/project_picker.dart';
 import '../theme/shape_tokens.dart';
 import 'empty_box_lines.dart';
@@ -290,6 +291,20 @@ class InspirationTabState extends State<InspirationTab> {
   /// 底部一行是**书写时就选项目**（实机反馈的原意：归类应该在写下来的那一刻做，
   /// 而不是事后一条条补）+ 「记下」。
   Widget _buildCaptureArea() {
+    // 速记框是**常驻**的（这一页整个就是速记），所以"键盘收起"在这里的含义
+    // 与页内编辑器不同：**不收起输入框**（收掉它等于把主功能藏了），
+    // 只让它不再占着键盘 —— 再点一下就能接着打，内容一个字都不动。
+    //
+    // 关键是**放掉焦点**：不放的话，用户之后碰任何一下都会让框架回头补一次
+    // 输入连接，键盘就自己回来了（2026-09-28 实机反馈）。
+    return KeyboardDismissGuard(
+      isFocused: () => _focus.hasFocus,
+      onKeyboardDismissed: _focus.unfocus,
+      child: _captureCard(),
+    );
+  }
+
+  Widget _captureCard() {
     final theme = Theme.of(context);
     final project = _captureProjectId == null
         ? null

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/shape_tokens.dart';
 import 'animated_collapse.dart';
+import 'keyboard_dismiss_guard.dart';
 
 /// 输入框的形状：**单行用胶囊，多行用卡片圆角**（《界面规范》§4）。
 ///
@@ -228,23 +229,29 @@ class _InlineTextFieldState extends State<InlineTextField> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 只读态 ↔ 编辑态：**高度变化要平滑**（2026-09-28 实机反馈：输入框的展开要流畅）。
-    // 外层 `AnimatedSize` 吃掉两者高度差，内层 `AnimatedSwitcher` 交叉淡入 ——
-    // 单靠 `AnimatedSize` 会像"抽屉被拉开一条缝"，配上淡入才像"变过去"。
     final Widget body = _editing
         ? _buildEditor(theme)
         : _buildReadOnly(theme);
-    return AnimatedSize(
-      duration: expandCollapseDuration,
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: AnimatedSwitcher(
+    return KeyboardDismissGuard(
+      // 焦点还在自己身上、"编辑态"也还在 → 是收键盘，不是换输入框
+      isFocused: () => _focus.hasFocus && _editing,
+      // **键盘一收起就收掉这次编辑会话**（2026-09-28 实机反馈）：按"确认"处理，
+      // 与点键盘上那个完成键一模一样 —— 用户敲完一句、按返回键收键盘，
+      // 意思通常是"我写完了"，再让他点一次「确认」是多余的。
+      // 代价：收键盘等于保存，想放弃改动只能点「取消」。
+      onKeyboardDismissed: _commit,
+      child: AnimatedSize(
         duration: expandCollapseDuration,
-        transitionBuilder: (child, animation) =>
-            FadeTransition(opacity: animation, child: child),
-        child: KeyedSubtree(
-          key: ValueKey<bool>(_editing),
-          child: body,
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: AnimatedSwitcher(
+          duration: expandCollapseDuration,
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: KeyedSubtree(
+            key: ValueKey<bool>(_editing),
+            child: body,
+          ),
         ),
       ),
     );
@@ -480,15 +487,26 @@ class _InlineComposerState extends State<InlineComposer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final body = _expanded ? _buildExpanded(theme) : _buildCollapsed(theme);
-    return AnimatedSize(
-      duration: expandCollapseDuration,
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: AnimatedSwitcher(
+    return KeyboardDismissGuard(
+      isFocused: () => _focus.hasFocus && _expanded,
+      // 键盘收起 = 这次输入结束：**空的直接收起，有字的按「添加」处理**
+      onKeyboardDismissed: () {
+        if (_controller.text.trim().isEmpty) {
+          _collapse();
+          return;
+        }
+        _submit();
+      },
+      child: AnimatedSize(
         duration: expandCollapseDuration,
-        transitionBuilder: (child, animation) =>
-            FadeTransition(opacity: animation, child: child),
-        child: KeyedSubtree(key: ValueKey<bool>(_expanded), child: body),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: AnimatedSwitcher(
+          duration: expandCollapseDuration,
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: KeyedSubtree(key: ValueKey<bool>(_expanded), child: body),
+        ),
       ),
     );
   }

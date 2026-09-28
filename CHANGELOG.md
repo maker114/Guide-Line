@@ -36,6 +36,34 @@
 
 ---
 
+## [1.8.3] - 2026-09-29
+
+> 实机反馈：在灵感页打完字、用系统返回键收起键盘之后，**碰任何东西键盘都会自己回来**。
+
+### Fixed
+
+- **键盘收起 = 结束这次编辑会话**（新增 `lib/ui/common/keyboard_dismiss_guard.dart`）。
+  成因：返回键只收掉"输入连接"，**焦点仍留在输入框上**；此后任何一次重建
+  （切页签、滚动、勾选）都会让 `EditableText` 回头补一次输入连接，键盘于是又弹出来。
+  现在键盘一收起、而焦点还在自家输入框上时，护栏就收掉这次会话：
+  - 页内编辑器（`InlineTextField` / `InlineComposer`）**按「确认」处理** ——
+    与键盘上那个完成键走同一条路（内容为空时只收起、不提交）；
+  - 灵感速记框**只放掉焦点**：它是这一页的主功能，输入框不收起、内容一个字不动，
+    再点一下能接着打；
+  - 想放弃改动仍然点「取消」：收键盘的含义是"我写完了"，不是"我不要了"。
+- **键盘高度改成从 `View` 上读**（原来取 `MediaQuery`，那一路根本读不到）。
+  `Scaffold` 会把 body 那一层的 `MediaQuery` 底部 insets **抹掉**
+  （`scaffold.dart` 的 `_addIfNonNull`：`resizeToAvoidBottomInset` 为真时调
+  `removeViewInsets(removeBottom: true)`），所以在页面里 `MediaQuery.viewInsets.bottom`
+  **恒为 0** —— 拿它判断"键盘收没收起"永远是"没收起"。
+  现在读 `View.of(context).viewInsets`（引擎原始值），并监听
+  `WidgetsBindingObserver.didChangeMetrics`（`didChangeDependencies` 只在首帧跑一次）。
+- 新增 `test/ui/keyboard_dismiss_test.dart`（5 条）：焦点还在时一次普通重建不会重开键盘、
+  收键盘后切页签不重开、速记框只失焦且不落盘、页内编辑器与清单条目收键盘即提交。
+  把护栏临时停掉跑一遍，后面三条会红 —— 它们真的钉住了行为。
+
+---
+
 ## [1.8.2] - 2026-09-28
 
 > 实机反馈的第七批：多选那一块的三处调整（外框形状、书写区不再让位、
