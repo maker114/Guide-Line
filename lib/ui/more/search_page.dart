@@ -7,6 +7,7 @@ import '../../core/models/task.dart';
 import '../../features/workspace.dart';
 import '../common/dialogs.dart';
 import '../common/empty_state.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../common/labels.dart';
 import '../events/event_detail_page.dart';
 import '../events/task_actions.dart';
@@ -32,6 +33,7 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focus = FocusNode();
   String _query = '';
 
   /// 多选模式（只作用于任务命中）。
@@ -44,6 +46,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -127,34 +130,43 @@ class _SearchPageState extends State<SearchPage> {
               // 第一眼根本认不出"这里能打字"。
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-                child: TextField(
-                  controller: _controller,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  decoration: InputDecoration(
-                    hintText: '搜项目 / 事件 / 任务 / 灵感',
-                    // 能点的用胶囊（《界面规范》§4）
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(
-                        Radius.circular(AppShapes.pillRadius),
+                // 键盘收起 = **只放掉焦点**（ADR-087）：搜索框是这一页的主入口，
+                // 收掉它等于把主功能藏了；查询与结果一个字都不动，再点一下接着搜。
+                // 放焦点不是为了好看 —— 不放的话，之后碰任何一处都会让框架回头补一次
+                // 输入连接，键盘自己就回来了（2026-09-29 修复的同一类缺陷）。
+                child: KeyboardDismissGuard(
+                  isFocused: () => _focus.hasFocus,
+                  onKeyboardDismissed: _focus.unfocus,
+                  child: TextField(
+                    controller: _controller,
+                    focusNode: _focus,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: '搜项目 / 事件 / 任务 / 灵感',
+                      // 能点的用胶囊（《界面规范》§4）
+                      border: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(
+                          Radius.circular(AppShapes.pillRadius),
+                        ),
+                        borderSide: BorderSide.none,
                       ),
-                      borderSide: BorderSide.none,
+                      filled: true,
+                      fillColor: theme.colorScheme.surfaceContainerHighest,
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: hasQuery
+                          ? IconButton(
+                              tooltip: '清空',
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _controller.clear();
+                                setState(() => _query = '');
+                              },
+                            )
+                          : null,
                     ),
-                    filled: true,
-                    fillColor: theme.colorScheme.surfaceContainerHighest,
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: hasQuery
-                        ? IconButton(
-                            tooltip: '清空',
-                            icon: const Icon(Icons.close),
-                            onPressed: () {
-                              _controller.clear();
-                              setState(() => _query = '');
-                            },
-                          )
-                        : null,
+                    onChanged: (value) => setState(() => _query = value),
                   ),
-                  onChanged: (value) => setState(() => _query = value),
                 ),
               ),
               if (_selecting)

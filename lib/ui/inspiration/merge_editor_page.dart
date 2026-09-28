@@ -6,6 +6,7 @@ import '../../core/models/project.dart';
 import '../../core/models/project_item.dart';
 import '../../features/workspace.dart';
 import '../common/dialogs.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../common/project_picker.dart';
 
 /// 合并编辑器交回去的结果：**这次并的灵感落在哪、落了什么文本**。
@@ -100,6 +101,8 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   late final TextEditingController _implementation =
       TextEditingController(text: widget.project.implementation);
 
+  final FocusNode _implementationFocus = FocusNode();
+
   /// 两块参考面板是否展开。
   ///
   /// **两块都默认展开**（2026-09-27 实机反馈："追加新灵感时默认展开灵感内容，
@@ -123,6 +126,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
   @override
   void dispose() {
     _implementation.dispose();
+    _implementationFocus.dispose();
     super.dispose();
   }
 
@@ -234,16 +238,23 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: TextField(
-                controller: _implementation,
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                textAlignVertical: TextAlignVertical.top,
-                keyboardType: TextInputType.multiline,
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  hintText: '改成你要的样子',
+              // 键盘收起 = **只放掉焦点**（ADR-087）：这一页有明确的「保存」键，
+              // 自动落盘比"键盘回来"更危险；正文一个字都不动，收完键盘接着改也行。
+              child: KeyboardDismissGuard(
+                isFocused: () => _implementationFocus.hasFocus,
+                onKeyboardDismissed: _implementationFocus.unfocus,
+                child: TextField(
+                  controller: _implementation,
+                  focusNode: _implementationFocus,
+                  expands: true,
+                  maxLines: null,
+                  minLines: null,
+                  textAlignVertical: TextAlignVertical.top,
+                  keyboardType: TextInputType.multiline,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    hintText: '改成你要的样子',
+                  ),
                 ),
               ),
             ),

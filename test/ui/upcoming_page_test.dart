@@ -42,6 +42,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// 把某一天所在的月份翻出来。
+  ///
+  /// 日历**只画当月**，而「今天 + N 天」一旦跨月就落在下一个月里 ——
+  /// 不翻页那一格根本不存在。这条以前是按"测试当天恰好不在月末"过的，
+  /// 每个月的月末都会假红一次（2026-09-29 实测：`今天 + 2` = 10-01，找不到格子）。
+  Future<void> gotoMonthOf(WidgetTester tester, String date) async {
+    final target = DateTime.parse(date);
+    for (var i = 0; i < 3; i += 1) {
+      if (find.text('${target.year} 年 ${target.month} 月').evaluate().isNotEmpty) {
+        return;
+      }
+      await tester.tap(find.byTooltip('下个月'));
+      await tester.pumpAndSettle();
+    }
+  }
+
   testWidgets('按紧迫度分组，只列未完成：已搁置与已完成不出现', (tester) async {
     final app = await boot();
     final event = app.ws.createEvent(name: '一件事');
@@ -119,6 +135,8 @@ void main() {
 
     expect(find.text('日历'), findsOneWidget);
     final date = dateOffset(2);
+    // 「+2 天」可能已经跨月：先把那一格所在的月份翻出来再找
+    await gotoMonthOf(tester, date);
     expect(find.byKey(calendarDayKey(date)), findsOneWidget);
 
     await tester.tap(find.byKey(calendarDayKey(date)));

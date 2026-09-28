@@ -10,6 +10,7 @@ import '../common/dialogs.dart';
 import '../common/due_label.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../common/labels.dart';
 import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
@@ -68,6 +69,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   final TextEditingController _titleController = TextEditingController();
 
+  final FocusNode _titleFocus = FocusNode();
+
   /// 正在原地重命名的任务 id
   String? _renamingTaskId;
 
@@ -83,6 +86,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
   @override
   void dispose() {
     _titleController.dispose();
+    _titleFocus.dispose();
     super.dispose();
   }
 
@@ -218,17 +222,24 @@ class _EventDetailPageState extends State<EventDetailPage> {
           appBar: AppBar(
             // 改名态：标题栏**原地变成输入框**（与项目详情页同一套交互）
             title: _renaming
-                ? TextField(
-                    controller: _titleController,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    style: Theme.of(context).textTheme.titleLarge,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: '事件名',
-                      border: InputBorder.none,
+                // 键盘收起 = **按「保存」处理**（ADR-087）：与项目详情页那个改名框
+                // 同一套语义 —— 就地确认式的改名，收键盘就是"改好了"。
+                ? KeyboardDismissGuard(
+                    isFocused: () => _titleFocus.hasFocus && _renaming,
+                    onKeyboardDismissed: () => _commitRename(event),
+                    child: TextField(
+                      controller: _titleController,
+                      focusNode: _titleFocus,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      style: Theme.of(context).textTheme.titleLarge,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        hintText: '事件名',
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _commitRename(event),
                     ),
-                    onSubmitted: (_) => _commitRename(event),
                   )
                 // 平时：标题旁立一根事件标识色的竖条（与项目详情页同一个控件、同一套系统）
                 : Row(

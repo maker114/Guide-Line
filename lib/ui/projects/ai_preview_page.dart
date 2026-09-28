@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../features/workspace.dart';
 import '../common/dialogs.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import 'ai_settings_page.dart';
 
 /// AI 整理的结果**写到哪儿**（2026-09-28：同一个功能两个方向）。
@@ -48,6 +49,8 @@ class AiPreviewPage extends StatefulWidget {
 class _AiPreviewPageState extends State<AiPreviewPage> {
   late final TextEditingController _text = TextEditingController(text: widget.generated);
 
+  final FocusNode _focus = FocusNode();
+
   /// 有没有一份可以退回的旧正文（进这一页时先看一眼，写入之后再更新）。
   String? _snapshot;
 
@@ -75,6 +78,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
   @override
   void dispose() {
     _text.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -138,16 +142,23 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: TextField(
-                controller: _text,
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                textAlignVertical: TextAlignVertical.top,
-                keyboardType: TextInputType.multiline,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.all(12),
+              // 键盘收起 = **只放掉焦点**（ADR-087）：写入由标题栏那颗按钮决定，
+              // 收键盘不是"写入"的意思，草稿一个字都不动。
+              child: KeyboardDismissGuard(
+                isFocused: () => _focus.hasFocus,
+                onKeyboardDismissed: _focus.unfocus,
+                child: TextField(
+                  controller: _text,
+                  focusNode: _focus,
+                  expands: true,
+                  maxLines: null,
+                  minLines: null,
+                  textAlignVertical: TextAlignVertical.top,
+                  keyboardType: TextInputType.multiline,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.all(12),
+                  ),
                 ),
               ),
             ),

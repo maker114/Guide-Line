@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../common/dialogs.dart';
+import '../common/keyboard_dismiss_guard.dart';
 
 /// 交接说明的**预览页**（《定义与边界》§11）。
 ///
@@ -28,11 +29,13 @@ class HandoffPreviewPage extends StatefulWidget {
 
 class _HandoffPreviewPageState extends State<HandoffPreviewPage> {
   late final TextEditingController _text = TextEditingController(text: widget.markdown);
+  final FocusNode _focus = FocusNode();
   bool _busy = false;
 
   @override
   void dispose() {
     _text.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -62,17 +65,24 @@ class _HandoffPreviewPageState extends State<HandoffPreviewPage> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: TextField(
-                controller: _text,
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                textAlignVertical: TextAlignVertical.top,
-                keyboardType: TextInputType.multiline,
-                style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.all(12),
+              // 键盘收起 = **只放掉焦点**（ADR-087）：正文是自己改的草稿，
+              // 落盘只由右上角「导出为 .md」决定；收键盘不动一个字。
+              child: KeyboardDismissGuard(
+                isFocused: () => _focus.hasFocus,
+                onKeyboardDismissed: _focus.unfocus,
+                child: TextField(
+                  controller: _text,
+                  focusNode: _focus,
+                  expands: true,
+                  maxLines: null,
+                  minLines: null,
+                  textAlignVertical: TextAlignVertical.top,
+                  keyboardType: TextInputType.multiline,
+                  style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.all(12),
+                  ),
                 ),
               ),
             ),

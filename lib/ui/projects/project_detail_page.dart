@@ -13,6 +13,7 @@ import '../common/dialogs.dart';
 import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../common/status_selector.dart';
 import '../inspiration/inspiration_selection.dart';
 import '../inspiration/merge_editor_page.dart';
@@ -47,12 +48,14 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   /// 标题栏是否处于"改名字"状态
   bool _renaming = false;
   final TextEditingController _titleController = TextEditingController();
+  final FocusNode _titleFocus = FocusNode();
 
   AppController get app => widget.app;
 
   @override
   void dispose() {
     _titleController.dispose();
+    _titleFocus.dispose();
     super.dispose();
   }
 
@@ -107,17 +110,25 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
         return Scaffold(
           appBar: AppBar(
             title: _renaming
-                ? TextField(
-                    controller: _titleController,
-                    autofocus: true,
-                    textInputAction: TextInputAction.done,
-                    style: Theme.of(context).textTheme.titleLarge,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      hintText: '项目名',
-                      border: InputBorder.none,
+                // 键盘收起 = **按「保存」处理**（ADR-087）：这个框是"就地确认"式的
+                // 改名（textInputAction 就是 done），敲完按返回键收键盘的意思
+                // 通常是"改好了"，与页内编辑器同一条路。空名字不提交、保持原名。
+                ? KeyboardDismissGuard(
+                    isFocused: () => _titleFocus.hasFocus && _renaming,
+                    onKeyboardDismissed: () => _commitRename(project),
+                    child: TextField(
+                      controller: _titleController,
+                      focusNode: _titleFocus,
+                      autofocus: true,
+                      textInputAction: TextInputAction.done,
+                      style: Theme.of(context).textTheme.titleLarge,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        hintText: '项目名',
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _commitRename(project),
                     ),
-                    onSubmitted: (_) => _commitRename(project),
                   )
                 : _DetailTitle(project: project),
             actions: _renaming

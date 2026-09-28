@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
 import '../common/dialogs.dart';
+import '../common/keyboard_dismiss_guard.dart';
 import '../theme/shape_tokens.dart';
 
 /// AI 设置（《定义与边界》§10）。
@@ -288,7 +289,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
   }
 }
 
-class _Field extends StatelessWidget {
+class _Field extends StatefulWidget {
   const _Field({
     required this.label,
     required this.hint,
@@ -304,25 +305,46 @@ class _Field extends StatelessWidget {
   final bool obscure;
 
   @override
+  State<_Field> createState() => _FieldState();
+}
+
+class _FieldState extends State<_Field> {
+  /// 每个框自己一个焦点节点：护栏要靠它分清"收键盘"与"换到隔壁那个框"。
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(label, style: Theme.of(context).textTheme.labelLarge),
+          Text(widget.label, style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 6),
-          TextField(
-            controller: controller,
-            obscureText: obscure,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: hint,
-              helperText: helper,
-              helperMaxLines: 2,
-              border: const OutlineInputBorder(),
+          // 键盘收起 = **只放掉焦点**（ADR-087）：写盘只由右上角「保存」决定，
+          // 收键盘不是"存好了"的意思，框里的字一个字都不动。
+          KeyboardDismissGuard(
+            isFocused: () => _focus.hasFocus,
+            onKeyboardDismissed: _focus.unfocus,
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focus,
+              obscureText: widget.obscure,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: widget.hint,
+                helperText: widget.helper,
+                helperMaxLines: 2,
+                border: const OutlineInputBorder(),
+              ),
             ),
           ),
         ],
