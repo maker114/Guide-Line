@@ -52,21 +52,22 @@ class InspirationSelectionBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
         child: Row(
           children: <Widget>[
-            IconButton(
+            // 版式（2026-09-28 实机反馈："多选界面的顶部标签栏同样做成由胶囊和
+            // 圆形元素组成的界面"）：
+            //   · **圆形**＝退出、全选（纯记号，一个动作）；
+            //   · **胶囊**＝四个批量动作（有文字 / 有分量）。
+            // 原来那个方形 `Checkbox` 是这一条里唯一的方角元素，也是唯一的
+            // "表单控件"质感 —— 换成圆形的勾选记号，与分类页展开区同一个形状。
+            _CircleAction(
               tooltip: '退出多选',
-              icon: const Icon(Icons.close),
+              icon: Icons.close,
               onPressed: onExit,
             ),
-            // 全选只作用于**当前可见**的那些：有筛选时就是筛出来的那些。
-            // 勾选框放在前面（"已选 n 条"由标题行显示，这里不重复）。
-            Checkbox(
-              value: allSelected,
-              tristate: false,
-              onChanged: canSelectAll ? (_) => onToggleAll() : null,
-            ),
-            Tooltip(
-              message: allSelected ? '取消全选' : '全选',
-              child: const Icon(Icons.done_all, size: 18),
+            _CircleAction(
+              tooltip: allSelected ? '取消全选' : '全选',
+              icon: allSelected ? Icons.check_circle : Icons.radio_button_unchecked,
+              active: allSelected,
+              onPressed: canSelectAll ? onToggleAll : null,
             ),
             const Spacer(),
             _BarAction(
@@ -90,6 +91,49 @@ class InspirationSelectionBar extends StatelessWidget {
               onPressed: enabled ? onDelete : null,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 动作条上的一个**圆形**图标按钮（退出 / 全选：只有一个记号，没有文字）。
+///
+/// [active] 为真时用主题色的低透明底 —— 与「未完成 / 已完成 / 已搁置」那枚
+/// 胶囊的选中态同一条口径：能点的用形状区分，选中的才加底。
+class _CircleAction extends StatelessWidget {
+  const _CircleAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.active = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Tooltip(
+        message: tooltip,
+        child: IconButton(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 20),
+          style: IconButton.styleFrom(
+            backgroundColor:
+                active ? theme.colorScheme.primary.withValues(alpha: 0.16) : null,
+            foregroundColor: active
+                ? theme.colorScheme.primary
+                : theme.colorScheme.onSurfaceVariant,
+            shape: const CircleBorder(),
+            minimumSize: const Size(40, 40),
+            padding: EdgeInsets.zero,
+          ),
         ),
       ),
     );

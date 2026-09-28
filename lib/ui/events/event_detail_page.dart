@@ -4,6 +4,7 @@ import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
+import '../common/animated_collapse.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/due_label.dart';
@@ -534,23 +535,33 @@ class _TaskBox extends StatelessWidget {
               count: children.length,
               onTap: () => app.setExpanded(task.id, expanded: true),
             ),
-          if (expanded)
-            for (final child in children)
-              KeyedSubtree(
-                key: ValueKey<String>('child-${child.id}'),
-                child: _TaskLine(
-                  host: host,
-                  task: child,
-                  indent: 1,
-                  blocked: host._blocked(child),
-                ),
-              ),
+          // 子任务列表**长出来**而不是啪地出现（2026-09-28 实机反馈：
+          // 给所有展开 / 收起动作加动画）
+          AnimatedCollapse(
+            expanded: expanded,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (final child in children)
+                  KeyedSubtree(
+                    key: ValueKey<String>('child-${child.id}'),
+                    child: _TaskLine(
+                      host: host,
+                      task: child,
+                      indent: 1,
+                      blocked: host._blocked(child),
+                    ),
+                  ),
+              ],
+            ),
+          ),
           // 正在录下级时**不受折叠状态影响**：已完成 / 已搁置的任务默认是折叠的，
           // 如果这里再串上 `expanded`，「点新建子任务」就会什么都不发生 ——
           // 用户只会觉得"这个功能坏了"（实测复现过一次）。
-          if (addingSubtask)
-            Padding(
-              padding: const EdgeInsets.only(left: 20),
+          Padding(
+            padding: const EdgeInsets.only(left: 20),
+            child: AnimatedCollapse(
+              expanded: addingSubtask,
               child: InlineComposer(
                 label: '新建子任务',
                 hint: '子任务名',
@@ -563,6 +574,7 @@ class _TaskBox extends StatelessWidget {
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -783,11 +795,11 @@ class _TaskLine extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           // 压到 30×30 是有意的：默认 48×48 的按钮几个就把标题挤没了
-      //
-      // **只留这一个日期图标**（实机反馈：改日期与清除日期都要在图标里，
-      // 不要藏在动作面板下）。点它弹的是 `pickDateSheet` —— 日历 + 底部的
-      // 「清除日期」，所以这一颗同时管"设 / 改 / 清"三件事，
-      // 长按清除那条路已经取消（提示与动作曾经是同一个手势，等于没有提示）。
+      // 日期**由这一颗按钮承担**（2026-09-28 实机反馈："事件详情页中改到期日
+      // 由按钮实现，删去下拉菜单中的那个"）：点它弹 `pickDateSheet`
+      // （日历 + 底部「清除日期」），所以"设 / 改 / 清"三件事都在这一个落点上，
+      // 动作面板里**不再重复一份**日期项。
+      // 长按清除那条路早已取消（提示与动作曾经是同一个手势，等于没有提示）。
           _TaskIcon(
             tooltip: task.dueAt == null
                 ? '设到期日'
@@ -971,13 +983,9 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
     actions.add(const TaskAction('moveUp', '往上挪一格', Icons.arrow_upward));
     actions.add(const TaskAction('moveDown', '往下挪一格', Icons.arrow_downward));
   }
-  actions.add(
-    TaskAction(
-      'due',
-      task.dueAt == null ? '设到期日' : '改到期日',
-      Icons.event_outlined,
-    ),
-  );
+  // 到期日**不在这里**（2026-09-28 实机反馈：由行内那颗按钮实现，
+  // 删去下拉菜单中的那个）。理由：面板里再放一份就是两个入口做同一件事，
+  // 而日期那颗图标本来就常驻在行尾、还带"有值"的小叉提示。
   // 归属：提到主线 / 挂到某个节点下（Q27）。与「移到其它事件…」是两件事 ——
   // 一个改"属于哪条线"，一个改"挂在线上的哪一层"。
   actions.add(const TaskAction('parent', '改归属…', Icons.account_tree_outlined));

@@ -69,8 +69,12 @@ void main() {
     await tester.longPress(find.text('灵感甲'));
     await tester.pumpAndSettle();
     expect(find.text('已选 1 条'), findsWidgets);
-    // 多选模式：每条前面一个勾选框，**外加动作条里的「全选」**那个
-    expect(find.byType(Checkbox), findsNWidgets(3));
+    // 多选模式下的勾选记号是**圆形**的（2026-09-28 实机反馈：动作条与条目都用
+    // 胶囊 / 圆形元素）：两条里选中的那个是实心圆、没选的是空心圆，
+    // 动作条里的「全选」默认也是空心圆
+    expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
+    expect(find.byIcon(Icons.check_circle), findsOneWidget, reason: '选中的那条是实心圆');
+    expect(find.byType(Checkbox), findsNothing, reason: '方形勾选框已经换掉了');
 
     // 再点第二条 → 选中两条
     await tester.tap(find.text('灵感乙'));
@@ -123,14 +127,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('已选 1 条'), findsWidgets, reason: '进多选默认选中第一条');
 
-    // 动作条里的「全选」勾选框是那一排里最靠左的那个
-    final selectAll = find.byType(Checkbox).first;
-    await tester.tap(selectAll);
+    // 动作条里的「全选」是那个圆形记号（tooltip 说得出它现在是什么）
+    await tester.tap(find.byTooltip('全选'));
     await tester.pumpAndSettle();
     expect(find.text('已选 3 条'), findsWidgets, reason: '全选应当把可见的都选上');
 
     // 再点一次 = 取消全选
-    await tester.tap(find.byType(Checkbox).first);
+    await tester.tap(find.byTooltip('取消全选'));
     await tester.pumpAndSettle();
     expect(find.text('已选 0 条'), findsWidgets);
   });

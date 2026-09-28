@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/shape_tokens.dart';
+import 'animated_collapse.dart';
 
 /// 输入框的形状：**单行用胶囊，多行用卡片圆角**（《界面规范》§4）。
 ///
@@ -227,7 +228,30 @@ class _InlineTextFieldState extends State<InlineTextField> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (_editing) {
+    // 只读态 ↔ 编辑态：**高度变化要平滑**（2026-09-28 实机反馈：输入框的展开要流畅）。
+    // 外层 `AnimatedSize` 吃掉两者高度差，内层 `AnimatedSwitcher` 交叉淡入 ——
+    // 单靠 `AnimatedSize` 会像"抽屉被拉开一条缝"，配上淡入才像"变过去"。
+    final Widget body = _editing
+        ? _buildEditor(theme)
+        : _buildReadOnly(theme);
+    return AnimatedSize(
+      duration: expandCollapseDuration,
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: expandCollapseDuration,
+        transitionBuilder: (child, animation) =>
+            FadeTransition(opacity: animation, child: child),
+        child: KeyedSubtree(
+          key: ValueKey<bool>(_editing),
+          child: body,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditor(ThemeData theme) {
+    {
       final field = TextField(
         controller: _controller,
         focusNode: _focus,
@@ -265,7 +289,9 @@ class _InlineTextFieldState extends State<InlineTextField> {
             : field,
       );
     }
+  }
 
+  Widget _buildReadOnly(ThemeData theme) {
     final empty = widget.value.trim().isEmpty;
     final box = BoxDecoration(
       // 只给底色与圆角，**不描边**：这一页的卡片已经有一圈圆角了，
@@ -447,66 +473,86 @@ class _InlineComposerState extends State<InlineComposer> {
     _collapse();
   }
 
+  /// 展开成输入框那一行：**外面套一层 `AnimatedSize`**，
+  /// 这样点「＋ 添加条目」时输入框是"长出来"的（2026-09-28 实机反馈：
+  /// 输入框的展开要流畅）。壳挂在这里而不是各调用点 —— 改一处，七处都受益。
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    if (!_expanded) {
-      if (widget.compact) {
-        // 只给一个加号按钮：新建子项目这类入口不必占一整行文字
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton.filledTonal(
-              tooltip: widget.label,
-              icon: Icon(widget.leading ?? Icons.add, size: 20),
-              onPressed: _expand,
-            ),
-          ),
-        );
-      }
-      return ListTile(
-        dense: widget.dense,
-        leading: Icon(widget.leading ?? Icons.add, color: theme.colorScheme.primary),
-        title: Text(widget.label, style: TextStyle(color: theme.colorScheme.primary)),
-        onTap: _expand,
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: <Widget>[
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              focusNode: _focus,
-              minLines: widget.minLines,
-              maxLines: widget.maxLines,
-              textInputAction:
-                  widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
-              decoration: InputDecoration(
-                hintText: widget.hint,
-                isDense: true,
-                border: inputBorderForLines(widget.maxLines),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-              ),
-              onSubmitted: widget.maxLines > 1 ? null : (_) => _submit(),
-            ),
-          ),
-          IconButton(
-            tooltip: '添加',
-            icon: const Icon(Icons.check),
-            onPressed: _submit,
-          ),
-          IconButton(
-            tooltip: '收起',
-            icon: const Icon(Icons.close),
-            onPressed: _collapse,
-          ),
-        ],
+    final body = _expanded ? _buildExpanded(theme) : _buildCollapsed(theme);
+    return AnimatedSize(
+      duration: expandCollapseDuration,
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.topCenter,
+      child: AnimatedSwitcher(
+        duration: expandCollapseDuration,
+        transitionBuilder: (child, animation) =>
+            FadeTransition(opacity: animation, child: child),
+        child: KeyedSubtree(key: ValueKey<bool>(_expanded), child: body),
       ),
     );
+  }
+
+  Widget _buildCollapsed(ThemeData theme) {
+    if (widget.compact) {
+      // 只给一个加号按钮：新建子项目这类入口不必占一整行文字
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: IconButton.filledTonal(
+            tooltip: widget.label,
+            icon: Icon(widget.leading ?? Icons.add, size: 20),
+            onPressed: _expand,
+          ),
+        ),
+      );
+    }
+    return ListTile(
+      dense: widget.dense,
+      leading: Icon(widget.leading ?? Icons.add, color: theme.colorScheme.primary),
+      title: Text(widget.label, style: TextStyle(color: theme.colorScheme.primary)),
+      onTap: _expand,
+    );
+  }
+
+  Widget _buildExpanded(ThemeData theme) {
+    {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                focusNode: _focus,
+                minLines: widget.minLines,
+                maxLines: widget.maxLines,
+                textInputAction:
+                    widget.maxLines > 1 ? TextInputAction.newline : TextInputAction.done,
+                decoration: InputDecoration(
+                  hintText: widget.hint,
+                  isDense: true,
+                  border: inputBorderForLines(widget.maxLines),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                ),
+                onSubmitted: widget.maxLines > 1 ? null : (_) => _submit(),
+              ),
+            ),
+            IconButton(
+              tooltip: '添加',
+              icon: const Icon(Icons.check),
+              onPressed: _submit,
+            ),
+            IconButton(
+              tooltip: '收起',
+              icon: const Icon(Icons.close),
+              onPressed: _collapse,
+            ),
+          ],
+        ),
+      );
+    }
   }
 }

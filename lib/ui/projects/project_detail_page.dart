@@ -7,6 +7,7 @@ import '../../core/models/project.dart';
 import '../../core/rules/cascade.dart';
 import '../../core/rules/handoff_export.dart';
 import '../../features/workspace.dart';
+import '../common/animated_collapse.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/due_sheet.dart';
@@ -165,13 +166,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             );
                             break;
                           case 'resetImplementation':
-                          case 'resetProject':
                             if (!context.mounted) return;
-                            await _reset(
-                              context,
-                              project,
-                              implementationsOnly: value == 'resetImplementation',
-                            );
+                            await _reset(context, project);
                             break;
                           case 'clearDone':
                             if (!context.mounted) return;
@@ -200,31 +196,28 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                           value: 'move',
                           child: Text(isCategory ? '移到其它分类' : '移动到…'),
                         ),
-                        // 重置与清理**单独一组**（只在它上面留一条分隔线，
-                        // 与归档 / 删除分开）：它俩是这一页里唯一"会一次抹掉很多字"
-                        // 的动作。**两项之间不再画线**（2026-09-28 实机反馈：去掉分割线）。
-                        const PopupMenuDivider(),
+                        // 清理与重置**不再单独分组**（2026-09-28 实机反馈：把
+                        // 「移动…」与「清除已完成条目」之间那条分割线去掉）——
+                        // 菜单项本身已经把动作说清了，多一条横线只是切碎视线。
                         PopupMenuItem<String>(
                           value: 'clearDone',
                           // 只在有已勾选条目时给：一个永远点不动的项只会让人猜
                           enabled: clearDoneScopeOf(project, app).items > 0,
                           child: const Text('清除已完成条目…'),
                         ),
-                        // **分类与项目对应不同的重置**（2026-09-28 实机反馈）：
-                        //   · 项目：先"只清实现"，再"连问题 / 思路一起清"；
+                        // 分类与项目的重置**范围不同**：
                         //   · 分类：只清下面那些目标的实现 —— 分类自己的「总纲领」
-                        //     是它的定义，清掉等于把这个分类注销（同一批反馈的另一条）。
+                        //     是它的定义，清掉等于把这个分类注销；
+                        //   · 项目：清它自己的实现。
+                        // 「重置整个项目」已按实机反馈**去掉**（2026-09-28）：
+                        // 清空「有什么问题 / 思路」用编辑框自己删更直接，
+                        // 而菜单里摆一个"会把这一条彻底清干净"的项太容易误点。
                         PopupMenuItem<String>(
                           value: 'resetImplementation',
                           child: Text(
                             isCategory ? '重置下级所有实现…' : '重置所有实现…',
                           ),
                         ),
-                        if (!isCategory)
-                          const PopupMenuItem<String>(
-                            value: 'resetProject',
-                            child: Text('重置整个项目…'),
-                          ),
                         const PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                         const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                       ],
@@ -319,37 +312,30 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     showToast(context, '已清除 ${scope.items} 条已完成条目');
   }
 
-  /// 一次「重置」（2026-09-28 实机反馈：放进 ⋮ 里，注意二次确认、明确警告，
-  /// 并区分「重置所有项目」与「重置所有实现」）。
+  /// 一次「重置」（2026-09-28 实机反馈：放进 ⋮ 里，注意二次确认、明确警告）。
   ///
-  /// 分类与项目**对应不同的重置**（同一批反馈的另一条）：
-  ///   · **项目**：「重置所有实现」＝清正文 + 清单条目；「重置整个项目」＝再加上
-  ///     「有什么问题 / 思路」；
-  ///   · **分类**：只有「重置下级所有实现」—— 分类自己的「总纲领」是它的定义，
-  ///     清掉等于把这个分类注销，所以**不重置**。它自己本来也没有实现字段。
+  /// 现在**只有一种范围**：清「实现」（正文 + 清单条目）。分类与项目的差别只在
+  /// "动谁"：
+  ///   · **项目**：清它自己的实现；
+  ///   · **分类**：清它下面所有目标的实现 —— 分类自己的「总纲领」是它的定义，
+  ///     清掉等于把这个分类注销，所以不动（同一批反馈的另一条）。
+  ///
+  /// 「重置整个项目」（连「有什么问题 / 思路」一起清）已按实机反馈**去掉**：
+  /// 清空那个字段用编辑框自己删更直接，而菜单里摆一个"会把这一条彻底清干净"的
+  /// 项太容易误点。
   ///
   /// 范围（本级 + 所有**直属**下级）与影响条数都在确认框里说清 —— 这句话涉及
   /// "会丢多少东西"，必须让用户在按下之前看得见。执行前还会留一份可退回的档
   /// （一份只值一次反悔），确认之后给一句带「退回上一版」的提示。
-  Future<void> _reset(
-    BuildContext context,
-    Project project, {
-    required bool implementationsOnly,
-  }) async {
+  Future<void> _reset(BuildContext context, Project project) async {
     final impact = app.resetImpactOf(project.id);
     final scope = app.resetScopeOf(project.id);
     // 分类页那一条只动下级，不动分类自己
     final isCategory = app.ws.childProjectsOf(project.id).isNotEmpty;
-    final affected = isCategory && implementationsOnly
-        ? impact.projects - 1
-        : impact.projects;
+    final affected = isCategory ? impact.projects - 1 : impact.projects;
 
-    final title = isCategory
-        ? '重置下级所有实现'
-        : (implementationsOnly ? '重置所有实现' : '重置整个项目');
-    final what = implementationsOnly
-        ? '正文与清单条目会被清空'
-        : '「有什么问题 / 思路」与实现（正文 + 清单）都会被清空';
+    final title = isCategory ? '重置下级所有实现' : '重置所有实现';
+    const what = '正文与清单条目会被清空';
     final range = isCategory
         ? '会动它下面 $affected 个目标的实现；分类自己的「总纲领」不动'
         : (affected <= 1
@@ -374,7 +360,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     ];
     final error = app.resetProject(
       project.id,
-      implementationsOnly: implementationsOnly,
+      implementationsOnly: true,
       overrideIds: isCategory ? ids : null,
     );
     if (!context.mounted) return;
@@ -1258,16 +1244,31 @@ class _ChildrenFieldState extends State<_ChildrenField> {
           ),
         ),
       ),
-      if (expanded) ...<Widget>[
-        // 有下级：接着递归铺下去
-        if (canNest)
-          for (final grand in children) ..._subtree(grand, depth + 1)
-        // 叶子：列出它自己的清单条目（可勾）
-        else if (node.items.isNotEmpty)
-          _ChildChecklist(app: app, child: node, depth: depth, indentPerLevel: _indentPerLevel),
-        if (!canNest && node.items.isEmpty)
-          _ChildEmptyHint(depth: depth, indentPerLevel: _indentPerLevel),
-      ],
+      // 展开区**长出来**而不是啪地出现（2026-09-28 实机反馈：所有展开 / 收起
+      // 动作都要有动画）——递归的每一层都各自有这一段，所以整棵子树都是顺的。
+      //
+      // 壳**始终在树上**（不能写 `if (expanded)`）：写成条件渲染的话，展开时
+      // 这个控件是"新挂上来"的，`AnimatedCollapse` 拿不到从收起变展开那次变化，
+      // 动画根本不会播。
+      AnimatedCollapse(
+        expanded: expanded,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (canNest)
+              for (final grand in children) ..._subtree(grand, depth + 1)
+            else if (node.items.isNotEmpty)
+              _ChildChecklist(
+                app: app,
+                child: node,
+                depth: depth,
+                indentPerLevel: _indentPerLevel,
+              ),
+            if (!canNest && node.items.isEmpty)
+              _ChildEmptyHint(depth: depth, indentPerLevel: _indentPerLevel),
+          ],
+        ),
+      ),
     ];
   }
 }
@@ -1590,8 +1591,10 @@ class _InspirationsFieldState extends State<_InspirationsField> {
             ],
           ),
         ),
-        if (_selecting)
-          Padding(
+        // 多选动作条**滑出来**（2026-09-28 实机反馈：多选时切换要流畅）
+        AnimatedCollapse(
+          expanded: _selecting,
+          child: Padding(
             padding: const EdgeInsets.only(top: 6),
             child: InspirationSelectionBar(
               selectedCount: _selectedIds.length,
@@ -1606,17 +1609,24 @@ class _InspirationsFieldState extends State<_InspirationsField> {
               onDelete: () => actions.delete(context),
             ),
           ),
+        ),
         if (inspirations.isNotEmpty)
           // 点一条**直接进合并编辑器**（多选态下点它只切换选中）。
           // 原来这里是只读列表，还让用户"去灵感页合并"——入口绕了一圈。
           for (final inspiration in inspirations)
             ListTile(
               dense: true,
-              // 多选时把行首图标换成勾选框：位置不变、不跳
+              // 多选时行首换个**圆形**勾选记号（与动作条、分类页展开区同一个形状，
+              // 不再是方形 Checkbox）
               leading: _selecting
-                  ? Checkbox(
-                      value: _selectedIds.contains(inspiration.id),
-                      onChanged: (_) => _toggleSelection(inspiration.id),
+                  ? Icon(
+                      _selectedIds.contains(inspiration.id)
+                          ? Icons.check_circle
+                          : Icons.radio_button_unchecked,
+                      size: 20,
+                      color: _selectedIds.contains(inspiration.id)
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.outline,
                     )
                   : const Icon(Icons.lightbulb_outline, size: 18),
               title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),

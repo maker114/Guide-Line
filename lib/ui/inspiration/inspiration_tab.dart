@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
+import '../common/animated_collapse.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/empty_state.dart';
@@ -142,7 +143,28 @@ class InspirationTabState extends State<InspirationTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (_selecting) _buildSelectionBar(context) else _buildCaptureArea(),
+        // 书写区 ↔ 多选动作条：**换的时候要顺**（2026-09-28 实机反馈：
+        // 多选时切换要流畅）—— `AnimatedSize` 吃掉两者高度差，`AnimatedSwitcher`
+        // 交叉淡入，视觉上像同一条栏"变形"过去
+        AnimatedSize(
+          duration: expandCollapseDuration,
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topCenter,
+          child: AnimatedSwitcher(
+            duration: expandCollapseDuration,
+            transitionBuilder: (child, animation) =>
+                FadeTransition(opacity: animation, child: child),
+            child: _selecting
+                ? KeyedSubtree(
+                    key: const ValueKey<String>('bar'),
+                    child: _buildSelectionBar(context),
+                  )
+                : KeyedSubtree(
+                    key: const ValueKey<String>('capture'),
+                    child: _buildCaptureArea(),
+                  ),
+          ),
+        ),
         if (!_selecting && filtering)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -497,10 +519,13 @@ class _InspirationTile extends StatelessWidget {
 
     return ListTile(
       // 多选时用勾选框替掉原来的项目图标，位置不变、不跳
+      // 多选时行首换个**圆形**勾选记号（与动作条、分类页展开区同一个形状，
+      // 不再是方形 Checkbox）
       leading: selecting
-          ? Checkbox(
-              value: selected,
-              onChanged: (_) => onToggleSelect?.call(),
+          ? Icon(
+              selected ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 20,
+              color: selected ? theme.colorScheme.primary : theme.colorScheme.outline,
             )
           : null,
       title: Text(

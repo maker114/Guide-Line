@@ -74,9 +74,9 @@ class AppController extends ChangeNotifier {
       credentialStore: credentialStore,
       shareFile: shareFile,
     ).._loadBackgroundBytes();
-    // 灵感箱空态那句轮换文案**在启动时抽一次**，本次会话固定（ADR-084）。
-    // 落进偏好是为了"同一个会话里不再变" —— 界面只读它，不自己抽。
-    controller._rollEmptyBoxLineIfNeeded();
+    // 灵感箱空态那句轮换文案**每次启动重抽**（ADR-084）。落进偏好是为了
+    // "同一次运行里不再变" —— 界面只读它，不自己抽。
+    controller.rollEmptyBoxLine();
     // 有事故时**不动磁盘**：清理过期墓碑会写盘，而"载入过程中发现问题"这一刻
     // 最不该再往盘上写东西（P0-3）。数据没问题的正常路径照旧清理。
     if (!report.hasProblems && !report.storeLockedByNewerSchema) {
@@ -805,16 +805,16 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 灵感箱空态那句轮换文案：**启动时抽一次**，种子落进偏好（ADR-084）。
+  /// 灵感箱空态那句轮换文案：**每次启动抽一次**，种子落进偏好（ADR-084）。
   ///
-  /// 为什么抽签放在这里而不是灵感页：灵感页会被反复重建（切页签、勾选、
-  /// KeepAlive 回来），在那儿抽等于"每进一次换一句"，晃眼而且像看错了。
-  /// 启动抽一次 = 一次冷启动一句，切来切去都稳定。
-  ///
-  /// **已经有种子就不重抽**：这样 `bootstrap` 被再调一次（测试、恢复备份）
-  /// 不会把当前这一句换掉 —— 用户看到的文案只在他重开 App 时才会换。
-  void _rollEmptyBoxLineIfNeeded() {
-    if (prefs.emptyBoxSeed != null) return;
+  /// 三个口径（2026-09-28 实机反馈定稿）：
+  ///   · **每次启动都重抽** —— 上一版只在"没有种子"时抽，于是第二次开 App
+  ///     还是同一句，看着像随机根本没生效；
+  ///   · **同一次运行里不变**：界面只读这个种子，切页签 / 重建 / KeepAlive
+  ///     回来都不会换句；
+  ///   · 抽签放在这里而不是灵感页：灵感页会被反复重建，在那儿抽等于
+  ///     "每进一次换一句"，晃眼而且像看错了。
+  void rollEmptyBoxLine() {
     updatePrefs(prefs.copyWith(emptyBoxSeed: DateTime.now().microsecondsSinceEpoch));
   }
 

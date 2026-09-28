@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -252,9 +252,11 @@ void main() {
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
 
-    // 重置**单独一组**，且名字带省略号（表示还会再问一次）
+    // 菜单里**只有**这一项重置（「重置整个项目」已按实机反馈去掉），
+    // 名字带省略号表示还会再问一次；两项之间也不再画分割线
     expect(find.text('重置所有实现…'), findsOneWidget);
-    expect(find.text('重置整个项目…'), findsOneWidget);
+    expect(find.text('重置整个项目…'), findsNothing);
+    expect(find.byType(PopupMenuDivider), findsNothing, reason: '菜单里不再有分割线');
 
     await tester.tap(find.text('重置所有实现…'));
     await tester.pumpAndSettle();
@@ -275,7 +277,7 @@ void main() {
     expect(
       reloaded.purpose,
       '把这条想法做出来',
-      reason: '「重置所有实现」**不碰**「有什么问题 / 思路」',
+      reason: '重置**不碰**「有什么问题 / 思路」—— 那个字段自己删更直接',
     );
 
     // 给了一次反悔的入口（SnackBar 上的动作）
@@ -285,50 +287,40 @@ void main() {
     final reverted = app.ws.findProject(project.id)!;
     expect(reverted.implementation, '- 第一步\n- 第二步', reason: '正文退回来了');
     expect(reverted.items.single.text, '一条条目', reason: '清单条目也退回来了');
+    // 一份留档只值一次反悔
+    expect(app.hasResetSnapshot, isFalse);
   });
 
-  testWidgets('「重置整个项目」连「有什么问题 / 思路」一起清，且留档只值一次反悔',
-      (tester) async {
+  testWidgets('分类页的重置只动下级，分类自己的总纲领一个字不动', (tester) async {
     final app = await boot();
-    final project = app.ws.createProject(title: '清单项目丑');
-    app.run(() => app.ws.updateProject(
-          project.id,
-          purpose: '把这条想法做出来',
-          implementation: '- 甲\n- 乙',
-        ));
-    app.run(() => app.ws.addProjectItem(project.id, '旧的条目'));
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    app.run(() => app.ws.updateProject(category.id, purpose: '这一类都为了把 v1 发出去'));
+    app.run(() => app.ws.updateProject(target.id, implementation: '- 冻结契约'));
 
-    await openProject(tester, app, '清单项目丑');
+    await openProject(tester, app, '工作');
     await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('重置整个项目…'));
-    await tester.pumpAndSettle();
 
-    // 与「重置所有实现」的差别必须写在警告里
-    expect(
-      find.textContaining('「有什么问题 / 思路」与实现（正文 + 清单）都会被清空'),
-      findsOneWidget,
-    );
+    // 分类页只有"下级"那一项（分类自己没有实现字段）
+    expect(find.text('重置下级所有实现…'), findsOneWidget);
+    expect(find.text('重置所有实现…'), findsNothing);
+    expect(find.text('重置整个项目…'), findsNothing);
+    expect(find.byType(PopupMenuDivider), findsNothing, reason: '菜单里不再有分割线');
+
+    await tester.tap(find.text('重置下级所有实现…'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('分类自己的「总纲领」不动'), findsOneWidget);
 
     await tester.tap(find.text('重置'));
     await tester.pumpAndSettle();
 
-    final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.purpose, isEmpty);
-    expect(reloaded.implementation, isEmpty);
-    expect(reloaded.items, isEmpty);
-    expect(reloaded.title, '清单项目丑', reason: '名字不动');
-
-    // 退回一次
-    await tester.tap(find.text('退回上一版'));
-    await tester.pumpAndSettle();
-    final reverted = app.ws.findProject(project.id)!;
-    expect(reverted.purpose, '把这条想法做出来');
-    expect(reverted.implementation, '- 甲\n- 乙');
-    expect(reverted.items.single.text, '旧的条目');
-
-    // 一份留档只值一次反悔：再点一次就该说"没有可退回的上一版"
-    expect(app.hasResetSnapshot, isFalse);
+    expect(
+      app.ws.findProject(category.id)!.purpose,
+      '这一类都为了把 v1 发出去',
+      reason: '分类的总纲领是它的定义，重置不该清掉它',
+    );
+    expect(app.ws.findProject(target.id)!.implementation, isEmpty, reason: '下级的实现被清空');
   });
 
   testWidgets('长按条目弹出操作，删除不弹确认', (tester) async {
