@@ -7,7 +7,6 @@ import '../common/dialogs.dart';
 import '../common/event_picker.dart';
 import '../common/inline_editor.dart';
 import '../events/event_detail_page.dart';
-import 'ai_preview_page.dart';
 
 /// 项目「实现」的**实现清单**（《数据契约》§3.2.1）。
 ///
@@ -30,14 +29,10 @@ class ProjectChecklist extends StatelessWidget {
     super.key,
     required this.app,
     required this.project,
-    required this.onSplitFromImplementation,
   });
 
   final AppController app;
   final Project project;
-
-  /// 「从正文拆成条目」——由调用方处理（它要决定拆完怎么提示）
-  final VoidCallback onSplitFromImplementation;
 
   @override
   Widget build(BuildContext context) {
@@ -47,28 +42,16 @@ class ProjectChecklist extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // 这里**没有**自己的标题工具栏：标题、进度 n/m 与「重拆 / 清空」入口
-        // 都由外面的 `_FieldCard` 给。上一批把那个入口整个删掉过（嫌它占一整行），
-        // 结果"拆错了想重来"就再没有路可走 —— 这一批按 Q32 把它恢复成
-        // 标题行里的一枚胶囊，不再独占一行。
+        // 这里**没有**标题工具栏（2026-09-28）：进度 `n/m` 已按要求从「实现」
+        // 卡片撤掉，「重拆」也交给了 AI（实机反馈：重拆功能由 AI 完成）。
+        //
+        // 一条都没有时**只留一句弱提示**：从前这里还有一个「从正文拆成条目」
+        // 按钮，现在拆这一步的出口是下面那颗「AI 整理」——
+        // 同一条路上不留两个入口，否则"该点哪个"本身就成了问题。
         if (items.isEmpty)
           Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text('还没有条目', style: theme.textTheme.bodySmall),
-                if (project.implementation.trim().isNotEmpty)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: onSplitFromImplementation,
-                      icon: const Icon(Icons.splitscreen_outlined, size: 18),
-                      label: const Text('从正文拆成条目'),
-                    ),
-                  ),
-              ],
-            ),
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Text('还没有条目', style: theme.textTheme.bodySmall),
           )
         else ...<Widget>[
           for (var i = 0; i < items.length; i += 1)
@@ -90,19 +73,8 @@ class ProjectChecklist extends StatelessWidget {
             onCreate: (text) => _run(context, () => app.ws.addProjectItem(project.id, text)),
           ),
         ),
-        // AI 整理：把清单**反向压成**一段通顺的说明（《定义与边界》§10）。
-        // 只在有清单**且 AI 总开关开着**时才给入口 —— 关掉 AI 之后，
-        // 项目里不该再出现任何"AI 整理"的字样（实机反馈）。
-        if (items.isNotEmpty && app.aiEnabled)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
-            child: ListTile(
-              dense: true,
-              leading: const Icon(Icons.auto_awesome_outlined, size: 18),
-              title: const Text('AI 整理成「如何解决」'),
-              onTap: () => startAiSummarize(context, app, project.id, project.title),
-            ),
-          ),
+        // 「AI 整理成「如何解决」」那一行**不在这里**：它由 `_ImplementationField`
+        // 统一画在卡片底部（两种模式各有一个收尾动作），见那边的注释。
       ],
     );
   }

@@ -88,6 +88,50 @@ class CategorySummary {
   final int itemDone;
 }
 
+/// 一次「重置」之前在某个项目上留下的那一份值（供"退回上一版"）。
+///
+/// 为什么不复用「实现历史正文」那一套（`implementation_history.json`）：
+/// 那份只存单个项目的**一个字符串**，而重置要一次动多个项目、每个项目两个字段
+/// （`purpose` + `implementation`），还要把清单条目**原样**带回来 ——
+/// 塞进 `Map<String, String>` 会丢掉条目的 `done` 与 id。
+///
+/// 它**不是数据**：不进主数据文件、不进导出、不进备份轮转，也没有 `schemaVersion`；
+/// 只活在应用私有目录里，用于"一次反悔"。
+class ProjectResetSnapshot {
+  const ProjectResetSnapshot({
+    required this.projectId,
+    required this.purpose,
+    required this.implementation,
+    required this.items,
+  });
+
+  final String projectId;
+  final String purpose;
+  final String implementation;
+  final List<ProjectItem> items;
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'purpose': purpose,
+        'implementation': implementation,
+        'items': <Map<String, dynamic>>[
+          for (final item in items) item.toJson(),
+        ],
+      };
+
+  static ProjectResetSnapshot? fromJson(String projectId, Object? raw) {
+    if (raw is! Map) return null;
+    final map = raw is Map<String, dynamic> ? raw : raw.cast<String, dynamic>();
+    final issues = DecodeIssues();
+    return ProjectResetSnapshot(
+      projectId: projectId,
+      purpose: Canonical.readString(map['purpose'], 'reset.purpose', issues) ?? '',
+      implementation:
+          Canonical.readString(map['implementation'], 'reset.implementation', issues) ?? '',
+      items: readProjectItems(map['items'], 'reset.items', issues),
+    );
+  }
+}
+
 /// 搜索命中。
 class SearchHit {
   const SearchHit({required this.doc, required this.entity, required this.matchedField});
@@ -571,6 +615,37 @@ class Workspace {
       itemTotal: itemTotal,
       itemDone: itemDone,
     );
+  }
+
+  /// 标识色的**用量**：每个色值被多少个「项目 / 分类 / 事件」用着（`#rrggbb` → 条数）。
+  ///
+  /// 2026-09-28 实机反馈：取色面板里要能看出"这一支色已经被多少个项目/分类/事件
+  /// 用了"，否则同一支色会被反复挑中，项目树里两个项目一个颜色就认不出来了。
+  ///
+  /// 口径：
+  ///   · **项目与分类一起数**（分类就是有下级的项目，两者共用同一套色板，
+  ///     分开数反而对不上"这一支色被占了多少"）；
+  ///   · **只数活着的**（已删除的不算）；
+  ///   · 事件也一起数 —— 虽然事件不在项目树里，但同一支色在两个地方都出现时，
+  ///     用户仍然会把它当成"同一个东西"。
+  ///
+  /// 没设色（`color == null`）的不进这张表。
+  Map<String, int> markerColorUsage() {
+    final out = <String, int>{};
+    void count(String? hex) {
+      if (hex == null || hex.isEmpty) return;
+      out[hex] = (out[hex] ?? 0) + 1;
+    }
+
+    for (final project in allProjects) {
+      if (project.deleted) continue;
+      count(project.color);
+    }
+    for (final event in allEvents) {
+      if (event.deleted) continue;
+      count(event.color);
+    }
+    return out;
   }
 
   /// 归档 / 取消归档 —— **双向级联**（ADR-051）。
@@ -1157,12 +1232,129 @@ class Workspace {
 
   /// 清空清单（**只清清单，不动正文**）。
   ///
-  /// 给"拆错了想重来"用：拆完不满意时可以清掉再拆一次。
+  /// 给"拆错了想重来"用：拆完不满意时可以清掉再让 AI 拆一次。
   void clearProjectItems(String projectId) {
     final project = _requireProject(projectId);
     if (project.items.isEmpty) return;
     _writeItems(project, const <ProjectItem>[]);
   }
+
+  // ------------------------------------------------------------ 重置（2026-09-28）
+
+  /// 清掉指定项目的**已完成**清单条目（跨项目、一次落盘）。
+  ///
+  /// 「分类界面里批量清除已完成清单」用它：分类下装的是几个目标，一个个进去清
+  /// 太碎。返回真正删掉的条数（没删到东西就不写盘）。
+  ///
+  /// 只删 `done == true` 的：没做完的条目是**还没交付的计划**，
+  /// 批量动作误伤它们的代价远大于收益。
+  int clearDoneItems(Iterable<String> projectIds) {
+    final targets = <Project>[
+      for (final id in projectIds.toSet())
+        if (findProject(id) case final Project project) project,
+    ];
+    var removed = 0;
+    final now = Ids.nowMillis();
+    for (final project in targets) {
+      final kept = project.items.where((item) => !item.done).toList(growable: false);
+      removed += project.items.length - kept.length;
+      if (kept.length == project.items.length) continue;
+      _upsert(DocName.projects, project.copyWith(items: kept, updatedAt: now));
+    }
+    if (removed == 0) return 0;
+    persist();
+    return removed;
+  }
+
+  /// 一次「重置」要动的项目集合：**本级 + 它的所有直属下级**。
+  ///
+  /// 范围由用户定死（Q-12 / Q-13）：分类页的重置连**所有下级目标**一起清，
+  /// 但**不下到第三层**（下级的下一级）—— 再深一层就超出"这个分类"的边界了。
+  /// 目标页（没有下级）就它自己。
+  List<Project> resetScopeOf(String projectId) {
+    final project = _requireProject(projectId);
+    return <Project>[project, ...childProjectsOf(projectId)];
+  }
+
+  /// 「重置所有实现」：把 [projectIds] 的**实现**清空（正文 + 清单条目）。
+  ///
+  /// 只动 `implementation` 与 `items`，**不碰** `purpose`（「有什么问题 / 思路」）。
+  void resetImplementations(Iterable<String> projectIds) {
+    final now = Ids.nowMillis();
+    var changed = false;
+    for (final project in _resetTargets(projectIds)) {
+      if (project.implementation.isEmpty && project.items.isEmpty) continue;
+      changed = true;
+      _upsert(
+        DocName.projects,
+        project.copyWith(
+          implementation: '',
+          items: const <ProjectItem>[],
+          updatedAt: now,
+        ),
+      );
+    }
+    if (changed) persist();
+  }
+
+  /// 「重置所有项目」：把 [projectIds] 的**问题 / 思路**与**实现**一起清空。
+  ///
+  /// 比「重置所有实现」多清一个 `purpose` —— 它是"把这一条彻底想清楚、
+  /// 从头再来"，所以两个可写字段都归零。名字仍然是项目自己的名字。
+  void resetProjects(Iterable<String> projectIds) {
+    final now = Ids.nowMillis();
+    var changed = false;
+    for (final project in _resetTargets(projectIds)) {
+      if (project.purpose.isEmpty &&
+          project.implementation.isEmpty &&
+          project.items.isEmpty) {
+        continue;
+      }
+      changed = true;
+      _upsert(
+        DocName.projects,
+        project.copyWith(
+          purpose: '',
+          implementation: '',
+          items: const <ProjectItem>[],
+          updatedAt: now,
+        ),
+      );
+    }
+    if (changed) persist();
+  }
+
+  /// 把"退回上一版"的留档写回（一次落盘）。
+  ///
+  /// 与 [resetImplementations] / [resetProjects] 成对：留档里存的是**动之前**
+  /// 每个项目的 `purpose` 与 `implementation`（清单条目单独一条条恢复，
+  /// 因为它们是对象数组，塞进 `Map<String, String>` 会失真）。
+  int restoreResets(Iterable<ProjectResetSnapshot> snapshots) {
+    final byId = <String, Project>{for (final p in liveProjects) p.id: p};
+    final now = Ids.nowMillis();
+    var restored = 0;
+    for (final snapshot in snapshots) {
+      final project = byId[snapshot.projectId];
+      if (project == null) continue;
+      restored += 1;
+      _upsert(
+        DocName.projects,
+        project.copyWith(
+          purpose: snapshot.purpose,
+          implementation: snapshot.implementation,
+          items: snapshot.items,
+          updatedAt: now,
+        ),
+      );
+    }
+    if (restored > 0) persist();
+    return restored;
+  }
+
+  List<Project> _resetTargets(Iterable<String> projectIds) => <Project>[
+        for (final id in projectIds.toSet())
+          if (findProject(id) case final Project project) project,
+      ];
 
   /// 把「实现清单」的一条**建成某个事件末尾的一条主线任务**（Q24：规划 → 执行的桥）。
   ///
@@ -1206,6 +1398,29 @@ class Workspace {
     final index = project.items.indexWhere((i) => i.id == itemId);
     if (index < 0) throw const RuleViolation('条目不存在');
     return index;
+  }
+
+  /// 用给定的这批文本**整体替换**清单条目（AI 拆条目那一路的落点）。
+  ///
+  /// 与 [addProjectItem] 的区别是"替换而不是追加"：AI 拆出来的是**这一份正文的
+  /// 完整分解**，与现有条目并排会出现同一件事两遍。空文本项丢掉、重复的**保留**
+  /// （用户可能真的有两件一样的事，去重是越权）。
+  ///
+  /// 条目一律 `done: false`：拆出来的是"打算怎么做"，不是"已经做完"。
+  int replaceProjectItems(String projectId, List<String> texts) {
+    final project = _requireProject(projectId);
+    final cleaned = <String>[];
+    for (final text in texts) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) continue;
+      cleaned.add(trimmed);
+    }
+    if (cleaned.isEmpty) throw const RuleViolation('没有可写入的条目');
+
+    _writeItems(project, <ProjectItem>[
+      for (final text in cleaned) ProjectItem(id: Ids.uuidV4(), text: text, done: false),
+    ]);
+    return cleaned.length;
   }
 
   void _writeItems(Project project, List<ProjectItem> items) {

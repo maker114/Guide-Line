@@ -42,6 +42,7 @@ class InlineTextField extends StatefulWidget {
     this.onEditClosed,
     this.showEditIcon = true,
     this.editorActions = true,
+    this.decorated = false,
   });
 
   /// 当前值（外部真源）
@@ -80,6 +81,13 @@ class InlineTextField extends StatefulWidget {
   /// 两条提交路径，想放弃改动还得自己改回去（实机反馈"没有确认和取消键"）。
   /// 改成默认打开，一处生效；确实不该有的地方再显式关掉并写明理由。
   final bool editorActions;
+
+  /// 只读态画一层**底色框**（`surfaceContainerHighest` 淡底 + 卡片圆角）。
+  ///
+  /// 默认关：多数字段就长在一行里，加框会平白多一圈。开着的是「实现 · 文本」——
+  /// 正文是一整段自由高度的内容，需要与清单侧的勾选骨架对称的"自己的容器"
+  /// （2026-09-28 实机反馈：正文那一侧看着像"一半有设计一半没有"）。
+  final bool decorated;
 
   @override
   State<InlineTextField> createState() => _InlineTextFieldState();
@@ -215,10 +223,22 @@ class _InlineTextFieldState extends State<InlineTextField> {
     }
 
     final empty = widget.value.trim().isEmpty;
+    final box = BoxDecoration(
+      // 只给底色与圆角，**不描边**：这一页的卡片已经有一圈圆角了，
+      // 再描一圈就成"框里套框"（与「有什么问题 / 思路」那种字段观感不一致）
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+      borderRadius: BorderRadius.circular(AppShapes.cardRadius),
+    );
     return InkWell(
       onTap: _startEditing,
-      child: Padding(
-        padding: widget.padding,
+      borderRadius: widget.decorated ? BorderRadius.circular(AppShapes.cardRadius) : null,
+      child: Container(
+        // 有框时：底色 + 圆角由这一层给，内边距固定 12/10；
+        // 没框时（默认）：内边距走调用方给的 `widget.padding`，一个像素都不多画
+        decoration: widget.decorated ? box : null,
+        padding: widget.decorated
+            ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+            : widget.padding,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
@@ -227,13 +247,15 @@ class _InlineTextFieldState extends State<InlineTextField> {
                 empty ? widget.hint : widget.value,
                 style: empty
                     ? (widget.hintStyle ??
-                        theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.outline))
+                        theme.textTheme.bodyMedium
+                            ?.copyWith(color: theme.colorScheme.outline))
                     : widget.textStyle,
               ),
             ),
             // 给一个"这里能改"的轻微提示，不做成显眼按钮
             if (widget.showEditIcon)
-              Icon(Icons.edit_outlined, size: 16, color: theme.colorScheme.outlineVariant),
+              Icon(Icons.edit_outlined,
+                  size: 16, color: theme.colorScheme.outlineVariant),
           ],
         ),
       ),

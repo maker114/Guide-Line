@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../theme/shape_tokens.dart';
 
 /// 标识色的候选色板。
 ///
@@ -112,20 +113,33 @@ class ProjectColorBar extends StatelessWidget {
 /// 选标识色。返回：
 ///   · `null` —— 用户取消（保持原值）；
 ///   · `''`   —— 用户选择"不用标识色"，调用方据此清空。
-Future<String?> pickProjectColor(BuildContext context, {String? current}) {
+///
+/// [usage] 是"每支色各被用了多少次"（`#rrggbb` → 条数），画在色块右下角 ——
+/// 让用户在挑之前就知道哪支色已经被占了几个（2026-09-28 实机反馈）。
+Future<String?> pickProjectColor(
+  BuildContext context, {
+  String? current,
+  Map<String, int> usage = const <String, int>{},
+}) {
   return _pickMarkerColor(
     context,
     current: current,
+    usage: usage,
     title: '项目标识色',
     hint: '显示在项目树与标题旁',
   );
 }
 
 /// 事件的标识色（与项目同一套色板与口径）。
-Future<String?> pickEventColor(BuildContext context, {String? current}) {
+Future<String?> pickEventColor(
+  BuildContext context, {
+  String? current,
+  Map<String, int> usage = const <String, int>{},
+}) {
   return _pickMarkerColor(
     context,
     current: current,
+    usage: usage,
     title: '事件标识色',
     hint: '任务列表里的小圆点与日历上的圆环都用它',
   );
@@ -137,6 +151,7 @@ Future<String?> _pickMarkerColor(
   required String title,
   required String hint,
   String? current,
+  Map<String, int> usage = const <String, int>{},
 }) {
   return showModalBottomSheet<String>(
     context: context,
@@ -158,6 +173,7 @@ Future<String?> _pickMarkerColor(
                 const SizedBox(height: 14),
                 ..._swatchGrid(
                   current: current,
+                  usage: usage,
                   onPick: (hex) => Navigator.of(sheetContext).pop(hex),
                 ),
                 const SizedBox(height: 12),
@@ -187,6 +203,7 @@ Future<String?> _pickMarkerColor(
 Iterable<Widget> _swatchGrid({
   required String? current,
   required void Function(String hex) onPick,
+  Map<String, int> usage = const <String, int>{},
 }) {
   final rows = <Widget>[];
   final hexes = projectColorChoices;
@@ -206,6 +223,7 @@ Iterable<Widget> _swatchGrid({
                   key: colorSwatchKey(row[i]),
                   hex: row[i],
                   selected: current == row[i],
+                  usage: usage[row[i]] ?? 0,
                   onTap: () => onPick(row[i]),
                 ),
               ),
@@ -223,11 +241,15 @@ class _Swatch extends StatelessWidget {
     required this.hex,
     required this.selected,
     required this.onTap,
+    this.usage = 0,
   });
 
   final String hex;
   final bool selected;
   final VoidCallback onTap;
+
+  /// 这一支色现在被多少个项目 / 分类 / 事件用着（0 = 不画角标）。
+  final int usage;
 
   @override
   Widget build(BuildContext context) {
@@ -235,20 +257,52 @@ class _Swatch extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       customBorder: const CircleBorder(),
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: colorOfHex(hex),
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected ? theme.colorScheme.onSurface : theme.colorScheme.outlineVariant,
-            width: selected ? 3 : 1,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: colorOfHex(hex),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.outlineVariant,
+                width: selected ? 3 : 1,
+              ),
+            ),
+            child: selected
+                ? const Icon(Icons.check, size: 18, color: Colors.white)
+                : null,
           ),
-        ),
-        child: selected
-            ? const Icon(Icons.check, size: 18, color: Colors.white)
-            : null,
+          // 用量角标：**只画正的**（0 不画 —— 一排 16 个「0」纯属噪音）。
+          //
+          // 色块尺寸与 4×4 排布**都不动**（实机反馈：不必放大），所以角标压在
+          // 圆的右下角、允许轻微出界（`Stack` 的 `clipBehavior: none`）。
+          // 底色取 `surface` 而不是透明：这支色可能很浅，数字直接压上去读不清。
+          if (usage > 0)
+            Positioned(
+              right: -4,
+              bottom: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  borderRadius: BorderRadius.circular(AppShapes.pillRadius),
+                  border: Border.all(color: theme.colorScheme.outlineVariant),
+                ),
+                child: Text(
+                  usage > 99 ? '99+' : '$usage',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -53,7 +53,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('空清单：给出引导，并说明还能从正文拆', (tester) async {
+  testWidgets('空清单：只留一句弱提示，"拆"这一步交给 AI', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目甲');
     app.run(() => app.ws.updateProject(project.id, implementation: '第一步\n第二步'));
@@ -62,33 +62,30 @@ void main() {
 
     await scrollTo(tester, find.text('实现'));
     expect(find.text('实现'), findsOneWidget);
-    // Q35 之后又按实机反馈收了一轮：空态只留一句"还没有条目"，
-    // 说明性文字整批删掉（用户自己做教程）
+    // 空态只留一句"还没有条目"（说明性文字整批删掉，用户自己做教程）
     expect(find.text('还没有条目'), findsOneWidget);
-    expect(find.text('从正文拆成条目'), findsOneWidget, reason: '正文非空时才给这个入口');
+    // 手动「从正文拆成条目」已按实机反馈拿掉（重拆交给 AI），
+    // 所以这一侧**不再有那个按钮**
+    expect(find.text('从正文拆成条目'), findsNothing);
   });
 
-  testWidgets('点「从正文拆成条目」：拆出条目，正文原样保留', (tester) async {
+  testWidgets('清单与文本两种模式：默认给清单，切到文本能看到正文', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目乙');
     app.run(() => app.ws.updateProject(project.id, implementation: '- 第一步\n- 第二步'));
 
     await openProject(tester, app, '清单项目乙');
-    await scrollTo(tester, find.text('从正文拆成条目'));
-    await tester.tap(find.text('从正文拆成条目'));
+    await scrollTo(tester, find.text('实现'));
+
+    // 默认在清单侧（哪怕条目为空 —— 那一侧才有「添加条目」）
+    expect(find.text('还没有条目'), findsOneWidget);
+    await tester.tap(find.text('文本'));
     await tester.pumpAndSettle();
 
-    final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.items.map((i) => i.text), <String>['第一步', '第二步']);
-    expect(
-      reloaded.implementation,
-      '- 第一步\n- 第二步',
-      reason: '拆是"另存一份结构"，正文不该被改写',
-    );
-    expect(find.text('第一步'), findsOneWidget);
+    expect(find.text('- 第一步\n- 第二步'), findsOneWidget, reason: '文本侧看得到正文原文');
   });
 
-  testWidgets('添加条目：真的进数据，并显示进度', (tester) async {
+  testWidgets('添加条目：真的进数据（进度 n/m 已按要求撤掉）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目丙');
 
@@ -103,8 +100,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(project.id)!.items.single.text, '写解析层');
-    // 进度文案现在是卡片标题右侧的 n/m（原来写作「n/m 已完成」）
-    expect(find.text('0/1'), findsWidgets);
+    // 「实现」卡片里**不再显示 n/m 进度**（实机反馈：不需要）
+    expect(find.text('0/1'), findsNothing);
   });
 
   testWidgets('打勾：只改勾选状态，项目状态不受影响', (tester) async {
@@ -125,7 +122,7 @@ void main() {
       NodeStatus.pending,
       reason: '勾完清单也不该把项目变成已完成 —— 清单不参与判定',
     );
-    expect(find.text('1/1'), findsWidgets);
+    expect(find.text('1/1'), findsNothing, reason: '进度已经不显示了');
   });
 
   testWidgets('编辑条目：点文本就地改，改完写回数据', (tester) async {
@@ -187,95 +184,151 @@ void main() {
     expect(find.text('改了一半'), findsNothing);
   });
 
-  testWidgets('清单标题行有「重拆 / 清空」入口（Q32）', (tester) async {
+  testWidgets('清除已完成条目：只删勾掉的，说清范围与条数，未勾的不动', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    final targetA = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    final targetB = app.ws.createProject(title: '复盘', parentId: category.id);
+    final itemA = app.ws.addProjectItem(targetA.id, '做完的那条');
+    app.run(() => app.ws.addProjectItem(targetA.id, '还没做的那条'));
+    final itemB = app.ws.addProjectItem(targetB.id, '也做完了');
+    app.run(() => app.ws.setProjectItemDone(targetA.id, itemA.id, true));
+    app.run(() => app.ws.setProjectItemDone(targetB.id, itemB.id, true));
+
+    await openProject(tester, app, '工作');
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除已完成条目…'));
+    await tester.pumpAndSettle();
+
+    // 范围与条数必须写出来（这句话涉及"会丢多少东西"）
+    expect(find.textContaining('2 个项目里'), findsOneWidget);
+    expect(find.textContaining('已勾选'), findsWidgets);
+    expect(find.textContaining('2 条'), findsOneWidget);
+    expect(find.textContaining('找不回来'), findsOneWidget);
+
+    await tester.tap(find.text('清除'));
+    await tester.pumpAndSettle();
+
+    expect(app.ws.findProject(targetA.id)!.items.map((i) => i.text), <String>['还没做的那条']);
+    expect(app.ws.findProject(targetB.id)!.items, isEmpty);
+    expect(
+      app.ws.findProject(targetA.id)!.items.single.done,
+      isFalse,
+      reason: '没勾的那条原样留着',
+    );
+  });
+
+  testWidgets('一条都没勾时，那个菜单项是灰的（点了也没用）', (tester) async {
+    final app = await boot();
+    final project = app.ws.createProject(title: '还没开工');
+    app.run(() => app.ws.addProjectItem(project.id, '没做完的一条'));
+
+    await openProject(tester, app, '还没开工');
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+
+    final entry = tester.widget<PopupMenuItem<String>>(
+      find.ancestor(
+        of: find.text('清除已完成条目…'),
+        matching: find.byType(PopupMenuItem<String>),
+      ),
+    );
+    expect(entry.enabled, isFalse, reason: '没有已勾选条目时不该让人点进去');
+  });
+
+  testWidgets('「重置所有实现」在 ⋮ 里：警告说清范围与代价，只清实现、不碰问题/思路',
+      (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目壬');
+    app.run(() => app.ws.updateProject(
+          project.id,
+          purpose: '把这条想法做出来',
+          implementation: '- 第一步\n- 第二步',
+        ));
     app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
 
     await openProject(tester, app, '清单项目壬');
-    await scrollTo(tester, find.text('重拆 / 清空'));
-
-    // 入口必须**看得见**：上一批把「重拆 / 清空」整个删掉，拆错了就再没有重来入口
-    expect(find.text('重拆 / 清空'), findsOneWidget);
-    expect(find.byTooltip('清单：按正文重拆 / 清空'), findsOneWidget);
-    // 长按那套说明已删（说明性文字整批收掉）；长按本身在下面这个用例里验
-
-    await tester.tap(find.text('重拆 / 清空'));
-    await tester.pumpAndSettle();
-    expect(find.text('整理清单'), findsOneWidget);
-    expect(find.text('按正文重拆'), findsOneWidget);
-    expect(find.text('清空清单'), findsOneWidget);
-
-    // 详情页标题栏的「更多」（交接导出等）不受影响，仍在
-    expect(find.byTooltip('更多'), findsOneWidget);
-  });
-
-  testWidgets('清空清单：二次确认说清正文不受影响；取消不动、确认才清（Q32）', (tester) async {
-    final app = await boot();
-    final project = app.ws.createProject(title: '清单项目癸');
-    app.run(() => app.ws.updateProject(project.id, implementation: '- 第一步\n- 第二步'));
-    app.run(() => app.ws.addProjectItem(project.id, '一条条目'));
-
-    await openProject(tester, app, '清单项目癸');
-    await scrollTo(tester, find.text('重拆 / 清空'));
-    await tester.tap(find.text('重拆 / 清空'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清空清单'));
+    await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
 
-    // 二次确认：说清删几条、正文一个字都不动
-    expect(find.textContaining('会删掉现在这 1 条条目'), findsOneWidget);
-    expect(find.textContaining('正文（「如何解决」）不受影响'), findsOneWidget);
+    // 重置**单独一组**，且名字带省略号（表示还会再问一次）
+    expect(find.text('重置所有实现…'), findsOneWidget);
+    expect(find.text('重置所有项目…'), findsOneWidget);
 
-    await tester.tap(find.text('取消'));
+    await tester.tap(find.text('重置所有实现…'));
     await tester.pumpAndSettle();
-    expect(app.ws.findProject(project.id)!.items, hasLength(1), reason: '取消就一条都不该动');
 
-    await tester.tap(find.text('重拆 / 清空'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清空清单'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('清空'));
+    // 明确警告（实机反馈要求）：范围、清什么、清单几条、不能撤销、退回只有一次
+    expect(find.textContaining('只会动「清单项目壬」这一个项目'), findsOneWidget);
+    expect(find.textContaining('正文与清单条目会被清空'), findsOneWidget);
+    expect(find.textContaining('清单 1 条'), findsOneWidget);
+    expect(find.textContaining('不能撤销'), findsOneWidget);
+    expect(find.textContaining('退回上一版'), findsOneWidget);
+
+    await tester.tap(find.text('重置'));
     await tester.pumpAndSettle();
 
     final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.items, isEmpty);
+    expect(reloaded.implementation, isEmpty, reason: '正文被清空');
+    expect(reloaded.items, isEmpty, reason: '清单条目被清空');
     expect(
-      reloaded.implementation,
-      '- 第一步\n- 第二步',
-      reason: '清空清单只清条目，正文（「如何解决」）不受影响',
+      reloaded.purpose,
+      '把这条想法做出来',
+      reason: '「重置所有实现」**不碰**「有什么问题 / 思路」',
     );
-    expect(find.text('一条条目'), findsNothing);
+
+    // 给了一次反悔的入口（SnackBar 上的动作）
+    await tester.tap(find.text('退回上一版'));
+    await tester.pumpAndSettle();
+
+    final reverted = app.ws.findProject(project.id)!;
+    expect(reverted.implementation, '- 第一步\n- 第二步', reason: '正文退回来了');
+    expect(reverted.items.single.text, '一条条目', reason: '清单条目也退回来了');
   });
 
-  testWidgets('按正文重拆：从入口进，说清会替换现有条目，拆完正文不动（Q32）', (tester) async {
+  testWidgets('「重置所有项目」连「有什么问题 / 思路」一起清，且留档只值一次反悔',
+      (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '清单项目丑');
-    app.run(() => app.ws.updateProject(project.id, implementation: '- 甲\n- 乙\n- 丙'));
+    app.run(() => app.ws.updateProject(
+          project.id,
+          purpose: '把这条想法做出来',
+          implementation: '- 甲\n- 乙',
+        ));
     app.run(() => app.ws.addProjectItem(project.id, '旧的条目'));
 
     await openProject(tester, app, '清单项目丑');
-    await scrollTo(tester, find.text('重拆 / 清空'));
-    await tester.tap(find.text('重拆 / 清空'));
+    await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('按正文重拆'));
+    await tester.tap(find.text('重置所有项目…'));
     await tester.pumpAndSettle();
 
-    // "不可逆的猜测 + 替换现有条目"必须写在确认框里
-    expect(find.textContaining('会先清空现在这 1 条'), findsOneWidget);
-    expect(find.textContaining('怎么拆是猜的'), findsOneWidget);
+    // 与「重置所有实现」的差别必须写在警告里
+    expect(
+      find.textContaining('「有什么问题 / 思路」与实现（正文 + 清单）都会被清空'),
+      findsOneWidget,
+    );
 
-    await tester.tap(find.text('重拆'));
+    await tester.tap(find.text('重置'));
     await tester.pumpAndSettle();
 
     final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.items.map((i) => i.text), <String>['甲', '乙', '丙']);
-    expect(
-      reloaded.implementation,
-      '- 甲\n- 乙\n- 丙',
-      reason: '重拆是"另存一份结构"，正文本身不该被改写',
-    );
-    expect(find.text('旧的条目'), findsNothing, reason: '重拆会替换掉现有条目');
+    expect(reloaded.purpose, isEmpty);
+    expect(reloaded.implementation, isEmpty);
+    expect(reloaded.items, isEmpty);
+    expect(reloaded.title, '清单项目丑', reason: '名字不动');
+
+    // 退回一次
+    await tester.tap(find.text('退回上一版'));
+    await tester.pumpAndSettle();
+    final reverted = app.ws.findProject(project.id)!;
+    expect(reverted.purpose, '把这条想法做出来');
+    expect(reverted.implementation, '- 甲\n- 乙');
+    expect(reverted.items.single.text, '旧的条目');
+
+    // 一份留档只值一次反悔：再点一次就该说"没有可退回的上一版"
+    expect(app.hasResetSnapshot, isFalse);
   });
 
   testWidgets('长按条目弹出操作，删除不弹确认', (tester) async {

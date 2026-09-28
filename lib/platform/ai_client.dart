@@ -23,6 +23,15 @@ abstract interface class AiTextGenerator {
     required AiConfig config,
     required PromptInput input,
   });
+
+  /// 把「如何解决」正文**拆成清单条目**（每条一行）。失败抛 [AiRequestException]。
+  ///
+  /// 2026-09-28：拆这一步由 AI 完成（实机反馈"重拆功能由 AI 完成"）——
+  /// 从前是本地按行硬拆，拆得对不对全看正文怎么写；模型能读懂"一句里其实有两件事"。
+  Future<String> splitIntoItems({
+    required AiConfig config,
+    required PromptInput input,
+  });
 }
 
 /// 生成提示词需要的素材（**只有这些会被发出去**）。
@@ -31,11 +40,18 @@ class PromptInput {
     required this.projectTitle,
     required this.purpose,
     required this.items,
+    this.implementation = '',
   });
 
   final String projectTitle;
   final String purpose;
   final List<({String text, bool done})> items;
+
+  /// 项目当前的「如何解决」正文 —— **只有"拆成清单条目"那一路会用它**。
+  ///
+  /// 默认空串而不是必填：整理成正文那一路本来就不该看正文（看的是清单），
+  /// 让它必填等于给那条路塞一个它用不上的字段。
+  final String implementation;
 }
 
 /// 联网失败的统一异常：文案要能直接给用户看。
@@ -100,6 +116,24 @@ class HttpAiTextGenerator implements AiTextGenerator {
   Future<String> summarizeChecklist({
     required AiConfig config,
     required PromptInput input,
+  }) =>
+      _chat(config: config, system: systemPrompt, user: buildUserPrompt(input));
+
+  @override
+  Future<String> splitIntoItems({
+    required AiConfig config,
+    required PromptInput input,
+  }) =>
+      _chat(config: config, system: splitPrompt, user: buildSplitUserPrompt(input));
+
+  /// 两条路共用的那一次请求（**只发系统提示词与用户素材，别的什么都不发**）。
+  ///
+  /// 抽出来是为了让"发什么"只有一处：三条硬边界（见类文档）里第 2 条
+  /// ——"只发项目标题 / 目的 / 清单条目"—— 靠的就是这里只有一个出口。
+  Future<String> _chat({
+    required AiConfig config,
+    required String system,
+    required String user,
   }) async {
     final error = config.validate();
     if (error != null) throw AiRequestException(error);
@@ -108,8 +142,8 @@ class HttpAiTextGenerator implements AiTextGenerator {
     final body = jsonEncode(<String, dynamic>{
       'model': config.model,
       'messages': <Map<String, String>>[
-        <String, String>{'role': 'system', 'content': systemPrompt},
-        <String, String>{'role': 'user', 'content': buildUserPrompt(input)},
+        <String, String>{'role': 'system', 'content': system},
+        <String, String>{'role': 'user', 'content': user},
       ],
       // 低温度：这是"整理"，不是"创作"，要稳不要花
       'temperature': 0.3,
@@ -228,17 +262,53 @@ class HttpAiTextGenerator implements AiTextGenerator {
 4. 不要称呼「用户」或「你」，直接陈述这个项目本身；
 5. 只输出整理后的正文，前后不要任何解释、说明或客套话。''';
 
+  /// 拆条目那一路的系统提示词（2026-09-28 加：拆这一步交给 AI）。
+  ///
+  /// 与 [systemPrompt] 同一条口径：只整理、不新增；要强调就用「」不用 Markdown。
+  /// 输出格式定成"一行一条、不加编号"：下游用 `Workspace.splitImplementationLines`
+  /// 解析，它本来就会丢掉 `-` / `1.` 这类记号，所以多一层记号也不至于出错，
+  /// 但让模型少写字更稳。
+  static const String splitPrompt = '''
+你是一个中文整理助手，任务是「拆分」，不是「创作」。
+
+用户会给你一个项目的名称、"有什么问题 / 思路"，以及一段「如何解决」正文。
+请把这段正文拆成一条条「独立的待办式条目」，讲清「这个项目打算怎么做」。要求：
+
+1. 只拆分，不新增：不得添加正文里没有的功能、步骤、数据或结论。
+   正文里没提到的东西，一个字都不要写；
+2. 一条一件事。正文里一句里说了两件事时，拆成两条；
+3. 每条都是一句可以打勾的话，不要写"第一步""然后"这类过渡词；
+4. 用编号或短横线开头都可以，但一行只放一条；
+5. 只输出这些条目，前后不要任何解释、说明、客套话或标题。''';
+
   /// 用户消息：**只有项目标题、"有什么问题 / 思路"与清单条目**（《定义与边界》§10 的边界）。
   /// 字段名与界面一致（Q4）：「目的」→"有什么问题 / 思路"、「待办清单」→「实现清单」——
   /// 界面上的"待办"只指事件里的任务，项目里那份叫清单。
+  ///
+  /// **已完成的条目不发**（2026-09-28 实机反馈：AI 整理的时候忽略已完成的项目）：
+  /// 整理的目标是把"接下来要做什么"讲清楚，把已经打勾的也发过去只会让模型
+  /// 把做完的事又说一遍。全都做完了（一条未完成都没有）时退回发全量 ——
+  /// 否则这一段会是空的、模型没有任何素材。
   static String buildUserPrompt(PromptInput input) {
+    final pending = input.items.where((item) => !item.done).toList(growable: false);
+    final sending = pending.isEmpty ? input.items : pending;
     final buffer = StringBuffer()
       ..writeln('项目名称：${input.projectTitle}')
       ..writeln('"有什么问题 / 思路"：${input.purpose.trim().isEmpty ? '（未填写）' : input.purpose.trim()}')
       ..writeln('实现清单：');
-    for (final item in input.items) {
+    for (final item in sending) {
       buffer.writeln('- [${item.done ? 'x' : ' '}] ${item.text}');
     }
+    return buffer.toString().trimRight();
+  }
+
+  /// 拆条目那一路的用户消息：**正文原文 + 标题**，不发清单（那时它本来就是空的）。
+  static String buildSplitUserPrompt(PromptInput input) {
+    final buffer = StringBuffer()
+      ..writeln('项目名称：${input.projectTitle}')
+      ..writeln('"有什么问题 / 思路"：${input.purpose.trim().isEmpty ? '（未填写）' : input.purpose.trim()}')
+      ..writeln('正文：')
+      ..writeln(input.implementation.trim());
     return buffer.toString().trimRight();
   }
 }

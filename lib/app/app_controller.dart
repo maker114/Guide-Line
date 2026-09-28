@@ -7,6 +7,7 @@ import '../core/ids.dart';
 import '../core/json/store_file.dart';
 import '../core/models/ai_config.dart';
 import '../core/models/entity.dart';
+import '../core/models/project.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
@@ -415,6 +416,88 @@ class AppController extends ChangeNotifier {
     return null;
   }
 
+  // ------------------------------------------------------------ 重置（2026-09-28）
+
+  /// 「重置」的范围：本级 + 它的所有直属下级。
+  List<Project> resetScopeOf(String projectId) => workspace.resetScopeOf(projectId);
+
+  /// 一次「重置」影响到的项目**条数**与**清单条目数**（确认框要用它说话）。
+  ({int projects, int items}) resetImpactOf(String projectId) {
+    final scope = resetScopeOf(projectId);
+    var items = 0;
+    for (final project in scope) {
+      items += project.items.length;
+    }
+    return (projects: scope.length, items: items);
+  }
+
+  /// 执行一次「重置」，并在动手**之前**留一份可退回的档。
+  ///
+  /// [implementationsOnly] 为真 = 只清「实现」（正文 + 清单）；
+  /// 为假 = 连「有什么问题 / 思路」（分类页的「总纲领」）一起清。
+  ///
+  /// 留档**先于**重置写盘，且写失败不阻断（与 AI 覆盖正文那一套同一条口径：
+  /// 护栏失败不该挡住用户本来要做的事）。返回 `null` 表示成功。
+  String? resetProject(String projectId, {required bool implementationsOnly}) {
+    final scope = resetScopeOf(projectId);
+    final ids = <String>[for (final project in scope) project.id];
+    storage.saveResetSnapshot(<String, Map<String, dynamic>>{
+      for (final project in scope)
+        project.id: ProjectResetSnapshot(
+          projectId: project.id,
+          purpose: project.purpose,
+          implementation: project.implementation,
+          items: project.items,
+        ).toJson(),
+    });
+    final error = run(
+      () => implementationsOnly
+          ? workspace.resetImplementations(ids)
+          : workspace.resetProjects(ids),
+    );
+    if (error != null) return error;
+    notifyListeners();
+    return null;
+  }
+
+  /// 「清除已完成条目」：把范围内**已勾选**的清单条目删掉（跨项目、一次落盘）。
+  ///
+  /// 与 [resetProject] 的分工：那是"这些都作废了"，这里是"做完的归档掉" ——
+  /// 清完只剩未完成项，可以接着排下一批。返回真正删掉的条数。
+  int clearDoneItems(String projectId) {
+    final scope = resetScopeOf(projectId);
+    final removed = workspace.clearDoneItems(<String>[for (final p in scope) p.id]);
+    if (removed > 0) notifyListeners();
+    return removed;
+  }
+
+  /// 把上一次「重置」退回，然后**销掉这份留档**（一份只值一次反悔）。
+  ///
+  /// 返回 `null` 表示成功。留档在，但里面的项目**一个都不在了**（例如重置之后
+  /// 又把它们删了）时也返回 `null` 并销掉留档 —— 那种情况下"没得退"是事实，
+  /// 不该报错，更不该留着一个永远退不动的档。
+  String? revertProjectReset() {
+    final raw = storage.readResetSnapshot();
+    if (raw == null) return '没有可退回的上一版';
+    final snapshots = <ProjectResetSnapshot>[];
+    for (final entry in raw.entries) {
+      final snapshot = ProjectResetSnapshot.fromJson(entry.key, entry.value);
+      if (snapshot != null) snapshots.add(snapshot);
+    }
+    if (snapshots.isEmpty) {
+      storage.clearResetSnapshot();
+      return '没有可退回的上一版';
+    }
+    final error = run(() => workspace.restoreResets(snapshots));
+    if (error != null) return error;
+    storage.clearResetSnapshot();
+    notifyListeners();
+    return null;
+  }
+
+  /// 现在有没有一份可退回的"重置之前"。
+  bool get hasResetSnapshot => storage.readResetSnapshot() != null;
+
   // ------------------------------------------------------------ 导出 / 导入
 
   /// 导出整份数据并交给系统分享面板。
@@ -662,6 +745,45 @@ class AppController extends ChangeNotifier {
       return (text: null, error: error.message);
     } catch (error) {
       return (text: null, error: '整理失败：$error');
+    }
+  }
+
+  /// 把「如何解决」正文交给模型**拆成清单条目**（**只返回结果，不写库**）。
+  ///
+  /// 与 [summarizeProjectItems] 是**同一个功能的两个方向**，由界面上同一枚
+  /// 按钮按"手上有什么"自动选（2026-09-28 实机反馈：拆这一步交给 AI）：
+  ///   · 有清单 → 整理成正文；
+  ///   · 清单为空、正文非空 → 拆成条目。
+  ///
+  /// 返回的是**一段文本，一行一条**（不是 `List`）：预览页那一个可编辑的编辑框
+  /// 两种方向共用，用户改完再点写入。解析交回给 `Workspace.splitImplementationLines`
+  /// —— 它本来就会丢掉 `-` / `1.` 这类记号，模型多写记号也不至于出错。
+  Future<({String? text, String? error})> splitProjectItems(String projectId) async {
+    final project = workspace.findProject(projectId);
+    if (project == null || project.deleted) return (text: null, error: '项目不存在');
+    if (project.implementation.trim().isEmpty) {
+      return (text: null, error: '正文还是空的，先写点东西再拆');
+    }
+
+    final config = await readAiConfig();
+    final reason = config.validate();
+    if (reason != null) return (text: null, error: reason);
+
+    try {
+      final text = await ai.splitIntoItems(
+        config: config.normalized(),
+        input: PromptInput(
+          projectTitle: project.title,
+          purpose: project.purpose,
+          items: const <({String text, bool done})>[],
+          implementation: project.implementation,
+        ),
+      );
+      return (text: text, error: null);
+    } on AiRequestException catch (error) {
+      return (text: null, error: error.message);
+    } catch (error) {
+      return (text: null, error: '拆分失败：$error');
     }
   }
 

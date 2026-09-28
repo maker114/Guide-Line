@@ -171,7 +171,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
 
   /// 选事件标识色（`null` = 取消，`''` = 明确不要颜色）。
   Future<void> _pickColor(BuildContext context, Event event) async {
-    final picked = await pickEventColor(context, current: event.color);
+    final picked = await pickEventColor(
+      context,
+      current: event.color,
+      // 与项目那一侧同一个口径：每支色被几个项目 / 分类 / 事件占着
+      usage: app.ws.markerColorUsage(),
+    );
     if (picked == null || !context.mounted) return;
     _setColor(context, event, picked.isEmpty ? null : picked);
   }

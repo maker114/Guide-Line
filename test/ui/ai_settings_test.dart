@@ -210,4 +210,11 @@ class _RecordingGenerator implements AiTextGenerator {
     if (failure != null) throw AiRequestException(failure);
     return reply;
   }
+
+  @override
+  Future<String> splitIntoItems({
+    required AiConfig config,
+    required PromptInput input,
+  }) =>
+      summarizeChecklist(config: config, input: input);
 }

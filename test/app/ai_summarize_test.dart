@@ -11,9 +11,12 @@ late AiConfig? lastConfig;
 
 /// 假生成器：把调用透传给测试给的函数，同时记下入参与配置。
 class FakeGenerator implements AiTextGenerator {
-  FakeGenerator(this.onCall);
+  FakeGenerator(this.onCall, {this.onSplit});
 
   final Future<String> Function(AiConfig config, PromptInput input) onCall;
+
+  /// 「拆成清单条目」那一路的假实现（默认复用 [onCall]）。
+  final Future<String> Function(AiConfig config, PromptInput input)? onSplit;
 
   @override
   Future<String> summarizeChecklist({
@@ -23,6 +26,16 @@ class FakeGenerator implements AiTextGenerator {
     lastConfig = config;
     lastInput = input;
     return onCall(config, input);
+  }
+
+  @override
+  Future<String> splitIntoItems({
+    required AiConfig config,
+    required PromptInput input,
+  }) {
+    lastConfig = config;
+    lastInput = input;
+    return (onSplit ?? onCall)(config, input);
   }
 }
 
@@ -336,7 +349,7 @@ void main() {
     expect(HttpAiTextGenerator.systemPrompt, contains('不要用列表'));
   });
 
-  test('用户消息把清单写成 GitHub 任务列表，方便模型理解勾选状态', () {
+  test('用户消息里**已完成的条目不发**（实机反馈：AI 整理时忽略已完成的项目）', () {
     final prompt = HttpAiTextGenerator.buildUserPrompt(
       const PromptInput(
         projectTitle: '标题',
@@ -350,7 +363,43 @@ void main() {
 
     expect(prompt, contains('项目名称：标题'));
     expect(prompt, contains('"有什么问题 / 思路"：（未填写）'));
-    expect(prompt, contains('- [x] 做了的'));
+    expect(
+      prompt,
+      isNot(contains('做了的')),
+      reason: '整理的是"接下来要做什么"，把做完的也发过去只会让模型把做完的事再说一遍',
+    );
     expect(prompt, contains('- [ ] 没做的'));
+  });
+
+  test('全都做完了时退回发全量 —— 否则这一段会是空的、模型没素材', () {
+    final prompt = HttpAiTextGenerator.buildUserPrompt(
+      const PromptInput(
+        projectTitle: '标题',
+        purpose: '',
+        items: <({String text, bool done})>[
+          (text: '做了的甲', done: true),
+          (text: '做了的乙', done: true),
+        ],
+      ),
+    );
+
+    expect(prompt, contains('- [x] 做了的甲'));
+    expect(prompt, contains('- [x] 做了的乙'));
+  });
+
+  test('拆条目那一路的用户消息带的是正文原文，而不是清单', () {
+    final prompt = HttpAiTextGenerator.buildSplitUserPrompt(
+      const PromptInput(
+        projectTitle: '标题',
+        purpose: '把这件事做完',
+        items: <({String text, bool done})>[(text: '不该出现', done: false)],
+        implementation: '先冻结契约\n再改解析层',
+      ),
+    );
+
+    expect(prompt, contains('项目名称：标题'));
+    expect(prompt, contains('先冻结契约'));
+    expect(prompt, contains('再改解析层'));
+    expect(prompt, isNot(contains('不该出现')), reason: '拆条目时清单本来就是空的');
   });
 }

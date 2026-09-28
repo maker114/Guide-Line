@@ -725,6 +725,68 @@ class AppStorage {
     }
   }
 
+  // -------------------------------------------------- 「重置」之前的留档（一次反悔）
+
+  /// 「重置」之前那一版的留档文件名。
+  ///
+  /// 与 [implementationHistoryFileName] 同一档：**不是数据**，不进主数据文件、
+  /// 不进导出、不进备份轮转，也没有 `schemaVersion`。区别只在内容 ——
+  /// 那份存"某项目旧正文一个字符串"，这份存"重置涉及的每个项目的
+  /// `purpose` + `implementation` + 清单条目"，因为重置一次会动好几个项目。
+  static const String resetSnapshotFileName = 'reset_snapshot.json';
+
+  File get _resetSnapshotFile => File(
+        '${paths.directory.path}${Platform.pathSeparator}$resetSnapshotFileName',
+      );
+
+  /// 留一份"重置之前"的快照，供"退回上一版"。
+  ///
+  /// 走的是**整份覆盖**：一份留档只值一次反悔（与历史正文同一条口径），
+  /// 所以第二次重置会把上一次的留档顶掉，不留多份。
+  /// 写不进去**只当没存上** —— 它是事后反悔的护栏，不该反过来挡住用户要做的事。
+  void saveResetSnapshot(Map<String, Map<String, dynamic>> snapshot) {
+    try {
+      paths.ensureDirectories();
+      AtomicFile(_resetSnapshotFile).writeText(Canonical.documentText(snapshot));
+    } catch (_) {
+      // 见上：护栏失败不阻断主流程
+    }
+  }
+
+  /// 读回"重置之前"的留档；没有（或读不出来、或空的）返回 `null`。
+  ///
+  /// 坏了不报错：读不出来最多是少一个"退回上一版"，绝不该在启动路径上抛异常。
+  Map<String, Map<String, dynamic>>? readResetSnapshot() {
+    final file = _resetSnapshotFile;
+    if (!file.existsSync()) return null;
+    try {
+      final decoded = Canonical.decode(file.readAsStringSync(encoding: utf8));
+      if (decoded is! Map) return null;
+      final out = <String, Map<String, dynamic>>{};
+      for (final entry in decoded.entries) {
+        final key = entry.key;
+        final value = entry.value;
+        if (key is String && value is Map) {
+          out[key] = value is Map<String, dynamic> ? value : value.cast<String, dynamic>();
+        }
+      }
+      return out.isEmpty ? null : out;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 销掉"重置之前"的留档（退回之后调用：**一份留档只值一次反悔**）。
+  void clearResetSnapshot() {
+    final file = _resetSnapshotFile;
+    if (!file.existsSync()) return;
+    try {
+      file.deleteSync();
+    } catch (_) {
+      // 删不掉也不影响：下次重置会整份覆盖
+    }
+  }
+
   /// 导出目录（供"导出/分享"使用）。
   Directory ensureExportsDir() {
     final dir = paths.exportsDir;

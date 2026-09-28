@@ -12,6 +12,7 @@ import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/format.dart';
 import '../common/labels.dart';
+import '../common/status_selector.dart';
 import '../theme/shape_tokens.dart';
 
 /// 归档区（ADR-052）。
@@ -31,42 +32,70 @@ import '../theme/shape_tokens.dart';
 /// 删除只留一条 30 天后骨架化的墓碑。
 ///
 /// 每个分区都能**反向找回**；只有「彻底删除」是不可逆的，所以它必须二次确认。
-class ArchivePage extends StatelessWidget {
+///
+/// 三档之间的切换用与「未完成 / 已完成 / 已搁置」**同一枚胶囊分段控件**
+/// （2026-09-28 实机反馈：改成和其他界面一样的滑块），不再是下划线页签。
+enum ArchiveSection {
+  archived('已归档'),
+  processed('已处理的灵感'),
+  trash('回收站');
+
+  const ArchiveSection(this.label);
+
+  final String label;
+}
+
+class ArchivePage extends StatefulWidget {
   const ArchivePage({super.key, required this.app});
 
   final AppController app;
 
   @override
+  State<ArchivePage> createState() => _ArchivePageState();
+}
+
+class _ArchivePageState extends State<ArchivePage> {
+  ArchiveSection _section = ArchiveSection.archived;
+
+  AppController get app => widget.app;
+
+  @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 3,
-      child: ListenableBuilder(
-        listenable: app,
-        builder: (context, _) {
-          final zone = app.ws.archiveZone;
-          final processed = _ProcessedInspirations.of(zone);
-          return Scaffold(
-            appBar: AppBar(
-              title: const Text('归档区'),
-              bottom: TabBar(
-                isScrollable: true,
-                tabs: <Widget>[
-                  Tab(text: '已归档 ${zone.archivedRoots.length}'),
-                  Tab(text: '已处理的灵感 ${processed.total}'),
-                  Tab(text: '回收站 ${zone.trashRoots.length}'),
-                ],
+    return ListenableBuilder(
+      listenable: app,
+      builder: (context, _) {
+        final zone = app.ws.archiveZone;
+        final processed = _ProcessedInspirations.of(zone);
+        return Scaffold(
+          appBar: AppBar(title: const Text('归档区')),
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              // 档名就是档名，**不往标签里塞数字**（实机反馈：除了文字描述之外
+              // 别再加负担）；条数由每个分区自己的列表与空态去讲。
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: StatusPillSelector<ArchiveSection>(
+                  values: ArchiveSection.values,
+                  selected: _section,
+                  labelOf: (each) => each.label,
+                  onSelected: (value) => setState(() => _section = value),
+                ),
               ),
-            ),
-            body: TabBarView(
-              children: <Widget>[
-                _ArchivedPane(app: app, items: zone.archivedRoots),
-                _ProcessedInspirationsPane(app: app, items: processed.items),
-                _TrashPane(app: app, items: zone.trashRoots),
-              ],
-            ),
-          );
-        },
-      ),
+              Expanded(
+                child: switch (_section) {
+                  ArchiveSection.archived =>
+                    _ArchivedPane(app: app, items: zone.archivedRoots),
+                  ArchiveSection.processed =>
+                    _ProcessedInspirationsPane(app: app, items: processed.items),
+                  ArchiveSection.trash =>
+                    _TrashPane(app: app, items: zone.trashRoots),
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -126,20 +155,30 @@ class _SourceChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    // 三档各取一个**主题里的前景 role**，颜色一律从 `colorScheme` 取、不硬编码。
-    // 被隐藏最轻（中性），已丢弃次之，已合并最实 —— 它已经在项目里留了痕。
+    // 三档各取一个**真正不同的家族**，颜色一律从 `colorScheme` 取、不硬编码。
+    //
+    // 为什么不是三个 `*Container`（2026-09-28 实测量出来的约束）：这套配色由单一
+    // seed 推导，`secondaryContainer` / `tertiaryContainer` / `primaryContainer`
+    // **就是同一个值**（两两 RGB 距离恒为 0）—— 拿它们当三档等于没分。
+    // 真正互相分得开的是三个家族：
+    //   · **已合并** → `primaryContainer`（已经落进项目里，最实）；
+    //   · **已丢弃** → `errorContainer`（被扔掉的）；
+    //   · **被隐藏** → **纯底 + 细描边**：它最轻（只是被遮住、没被处理过），
+    //     而"淡灰底"那一带在本调色板里与 error 档天然只差 36（浅色主题下），
+    //     所以不跟它们比底色，改用**形状**区分 —— 描边胶囊 vs 实底胶囊。
+    // 距离由 `test/ui/source_chip_tone_test.dart` 在五套主题 × 深浅两套下量着。
     final (Color background, Color foreground) = switch (source) {
       ProcessedSource.hidden => (
-          scheme.surfaceContainerHighest,
+          scheme.surface,
           scheme.onSurfaceVariant,
         ),
       ProcessedSource.discarded => (
-          scheme.secondaryContainer,
-          scheme.onSecondaryContainer,
+          scheme.errorContainer,
+          scheme.onErrorContainer,
         ),
       ProcessedSource.merged => (
-          scheme.tertiaryContainer,
-          scheme.onTertiaryContainer,
+          scheme.primaryContainer,
+          scheme.onPrimaryContainer,
         ),
     };
     return Container(
@@ -147,6 +186,10 @@ class _SourceChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: background,
         borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+        // 只有"被隐藏"这一档描边：它没有实底，靠轮廓才站得住
+        border: source == ProcessedSource.hidden
+            ? Border.all(color: scheme.outlineVariant)
+            : null,
       ),
       child: Text(
         source.label,

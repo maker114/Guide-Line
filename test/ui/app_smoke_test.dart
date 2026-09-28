@@ -155,8 +155,10 @@ void main() {
 
     await tester.tap(find.text('归档区'));
     await tester.pumpAndSettle();
-    expect(find.text('已归档 0'), findsOneWidget);
-    expect(find.text('回收站 0'), findsOneWidget);
+    // 三档现在是同一枚胶囊分段控件，档名里不再塞数字
+    expect(find.text('已归档'), findsOneWidget);
+    expect(find.text('已处理的灵感'), findsOneWidget);
+    expect(find.text('回收站'), findsOneWidget);
     await tester.pageBack();
     await tester.pumpAndSettle();
 
@@ -223,7 +225,7 @@ void main() {
     await switchTab(tester, '更多');
     await tester.tap(find.text('归档区'));
     await tester.pumpAndSettle();
-    expect(find.text('已归档 1'), findsOneWidget);
+    expect(find.text('已归档'), findsOneWidget);
     expect(find.text('会归档的项目'), findsOneWidget);
 
     await tester.tap(find.text('取消归档'));
@@ -317,7 +319,7 @@ void main() {
     final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
     final project = app.ws.createProject(title: '一个名字相当长的项目名');
     app.run(() => app.ws.updateProject(project.id, purpose: '一句相当长的目的说明，用来撑满一行'));
-    // 清单里留一条：标题行要同时摆下进度数字与「重拆 / 清空」胶囊（Q32）
+    // 清单里留一条：卡片里要有「添加条目」与收尾动作（1.6 倍字体下最容易挤爆）
     app.run(() => app.ws.addProjectItem(project.id, '一条相当长的清单条目，用来撑一撑卡片的宽度'));
     final event = app.ws.createEvent(name: '一个名字相当长的事件名');
     final task = app.ws.createTask(eventId: event.id, title: '一条名字相当长的主线任务');
@@ -361,18 +363,22 @@ void main() {
     await tester.tap(find.byTooltip('取消'));
     await tester.pumpAndSettle();
 
-    // 清单标题行：进度 n/m + 「重拆 / 清空」胶囊，1.6 倍字体下最容易挤爆（Q32）
+    // 「实现」卡片：标题 + 胶囊切换器（1.6 倍字体下最容易挤爆）
     await tester.scrollUntilVisible(
-      find.text('重拆 / 清空'),
+      find.text('实现'),
       150,
       scrollable: verticalScrollable,
     );
     await tester.pumpAndSettle();
-    expect(find.text('重拆 / 清空'), findsOneWidget);
-    await tester.tap(find.text('重拆 / 清空'));
+    expect(find.text('实现'), findsOneWidget);
+    expect(find.text('清单'), findsOneWidget, reason: '切换器不能被放大字体挤掉');
+    expect(find.text('文本'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('更多'));
     await tester.pumpAndSettle();
-    expect(find.text('整理清单'), findsOneWidget, reason: '面板本身也不能在放大字体下溢出');
-    await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉面板
+    // 重置那两项独立成组，放大字体下面板本身也不能溢出
+    expect(find.text('重置所有实现…'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10)); // 点遮罩关掉菜单
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('更多'));

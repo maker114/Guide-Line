@@ -443,6 +443,53 @@ void main() {
     expect(gapToNav(), closeTo(16, 0.5), reason: '位置不变');
   });
 
+  testWidgets('键盘弹出时内容区不被截断：底边仍等于底栏顶边（实机反馈"下半部被截断"）',
+      (tester) async {
+    tester.view.physicalSize = const Size(1080, 2340);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(of: find.byType(AppBottomNav), matching: find.text('项目')),
+    );
+    await tester.pumpAndSettle();
+
+    double contentBottom() => tester.getRect(find.byType(PageView)).bottom;
+    final nav = tester.getRect(find.byType(AppBottomNav));
+
+    // **内容区底边必须就是底栏顶边** —— 中间不许留空档。
+    //
+    // 这条是 2026-09-28 补的：上一版曾经在 body 底部给速记胶囊"留一条空档"，
+    // 结果内容被顶到半空、卡片里最后一条被齐刷刷裁掉一半，用户看到的是
+    // "下半部被截断"（而且**不随键盘移动**，所以与键盘无关）。
+    // 我当时只断言了"键盘前后底边一致"—— 量了个稳定但错的值，白改一遍。
+    expect(
+      contentBottom(),
+      closeTo(nav.top, 0.5),
+      reason: '内容区与底栏之间不许有空档：留白会把卡片最后一条裁掉一半',
+    );
+    final withoutKeyboard = contentBottom();
+
+    // 键盘弹出：内容**不许**被压缩上去 —— 那会在内容与底栏之间裂开一整个
+    // 键盘高的空档（实测 360×780 + 键盘 300：内容到 y=400、底栏还在 714，空档 314dp）
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300 * 3);
+    await tester.pumpAndSettle();
+
+    expect(
+      contentBottom(),
+      closeTo(withoutKeyboard, 0.5),
+      reason: '键盘弹出不该改变内容区底边 —— 截点跟着键盘走、底栏不动，就会"下半部被截断"',
+    );
+    expect(
+      tester.getRect(find.byType(AppBottomNav)).top,
+      closeTo(nav.top, 0.5),
+      reason: '底栏位置也不该被键盘改动',
+    );
+  });
+
   testWidgets('窄屏 + 1.6 倍字体：一格放不下就只画图标，但 tooltip 与语义标签仍是「速记」', (tester) async {
     // 360 × 780 逻辑像素（常见手机）；1.6 倍字体下一格只有 (360 − 40) / 4 = 80dp
     tester.view.physicalSize = const Size(1080, 2340);

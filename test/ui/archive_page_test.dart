@@ -51,7 +51,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('回收站 1'));
+    await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
     expect(find.text('删掉的项目'), findsOneWidget);
@@ -81,7 +81,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: restarted)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('回收站 1'));
+    await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
     expect(find.text('昨天删的项目'), findsOneWidget);
     expect(find.text('删了很久的项目'), findsNothing);
@@ -117,7 +117,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('回收站 1'));
+    await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
     expect(
@@ -138,7 +138,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('回收站 1'));
+    await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('更多'));
@@ -162,7 +162,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('回收站 1'));
+    await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('更多'));
@@ -185,7 +185,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('已处理的灵感 1'));
+    await tester.tap(find.text('已处理的灵感'));
     await tester.pumpAndSettle();
 
     // 分区说明先说清代价，动作名再说一遍 —— 名字与语义必须一致
@@ -237,9 +237,12 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('已处理的灵感 3'), findsOneWidget, reason: '页签上是三种加起来的总数');
+    // 切换器是同一枚胶囊分段控件（不再是下划线页签），档名里不再塞数字
+    expect(find.text('已归档'), findsOneWidget);
+    expect(find.text('已处理的灵感'), findsOneWidget);
+    expect(find.text('回收站'), findsOneWidget);
 
-    await tester.tap(find.textContaining('已处理的灵感 3'));
+    await tester.tap(find.text('已处理的灵感'));
     await tester.pumpAndSettle();
 
     expect(find.text('被遮住的灵感'), findsOneWidget);
@@ -258,7 +261,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('已处理的灵感 1'));
+    await tester.tap(find.text('已处理的灵感'));
     await tester.pumpAndSettle();
 
     expect(find.text('被遮住的灵感'), findsOneWidget);

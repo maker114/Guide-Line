@@ -11,8 +11,10 @@ import '../common/dialogs.dart';
 import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
+import '../common/status_selector.dart';
 import '../inspiration/merge_editor_page.dart';
 import '../theme/shape_tokens.dart';
+import 'ai_preview_page.dart';
 import 'handoff_preview_page.dart';
 import 'project_actions.dart';
 import 'project_checklist.dart';
@@ -160,6 +162,19 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                               title: isCategory ? '移到其它分类' : '移动到…',
                             );
                             break;
+                          case 'resetImplementation':
+                          case 'resetProject':
+                            if (!context.mounted) return;
+                            await _reset(
+                              context,
+                              project,
+                              implementationsOnly: value == 'resetImplementation',
+                            );
+                            break;
+                          case 'clearDone':
+                            if (!context.mounted) return;
+                            await _clearDoneItems(context, project);
+                            break;
                           case 'archive':
                             await archiveProjectAction(context, app, project.id, archived: true);
                             break;
@@ -183,6 +198,25 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                           value: 'move',
                           child: Text(isCategory ? '移到其它分类' : '移动到…'),
                         ),
+                        // 重置**单独一组**（上下各一条分隔线）：它是这一页里
+                        // 唯一"会一次抹掉很多字"的动作，与上面的日常操作不是一类
+                        // （2026-09-28 实机反馈：把重置放进 ⋮，并明确警告）。
+                        const PopupMenuDivider(),
+                        PopupMenuItem<String>(
+                          value: 'clearDone',
+                          // 只在有已勾选条目时给：一个永远点不动的项只会让人猜
+                          enabled: clearDoneScopeOf(project, app).items > 0,
+                          child: const Text('清除已完成条目…'),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'resetImplementation',
+                          child: const Text('重置所有实现…'),
+                        ),
+                        const PopupMenuItem<String>(
+                          value: 'resetProject',
+                          child: Text('重置所有项目…'),
+                        ),
+                        const PopupMenuDivider(),
                         const PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                         const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                       ],
@@ -245,6 +279,110 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           ),
         );
       },
+    );
+  }
+
+  /// 「清除已完成条目…」（2026-09-28 实机反馈：在分类界面里可以批量清除已完成清单）。
+  ///
+  /// 范围与「重置」同一套（本级 + 所有**直属**下级），但**只删已勾选的**：
+  /// 没做完的条目是还没交付的计划，批量动作误伤它们的代价远大于收益。
+  /// 清完清单里只剩未完成项，可以接着排下一批 —— 这也是它与「重置」的分工：
+  /// 重置是"这些都作废了"，这里是"做完的归档掉"。
+  Future<void> _clearDoneItems(BuildContext context, Project project) async {
+    final scope = clearDoneScopeOf(project, app);
+    if (scope.items == 0) return;
+
+    final ok = await confirmAction(
+      context,
+      title: '清除已完成条目',
+      message: '会删掉 ${scope.projects} 个项目里「已勾选」的 ${scope.items} 条清单条目。\n'
+          '没勾的条目、正文、名字都不动；删掉的找不回来（清单没有回收站）。',
+      confirmLabel: '清除',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+
+    final error = app.run(() => app.clearDoneItems(project.id));
+    if (!context.mounted) return;
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
+    showToast(context, '已清除 ${scope.items} 条已完成条目');
+  }
+
+  /// 一次「重置」（2026-09-28 实机反馈：放进 ⋮ 里，注意二次确认、明确警告，
+  /// 并区分「重置所有项目」与「重置所有实现」）。
+  ///
+  /// 两个范围的区别就是**清几个字段**：
+  ///   · 「重置所有实现」= 清 `implementation` + `items`（做法）；
+  ///   · 「重置所有项目」= 再加上 `purpose`（问题 / 思路，分类页叫总纲领）。
+  ///
+  /// 范围（本级 + 所有**直属**下级）与影响条数都在确认框里说清 —— 这句话涉及
+  /// "会丢多少东西"，必须让用户在按下之前看得见。执行前还会留一份可退回的档
+  /// （一份只值一次反悔），确认之后给一句带「退回上一版」的提示。
+  Future<void> _reset(
+    BuildContext context,
+    Project project, {
+    required bool implementationsOnly,
+  }) async {
+    final impact = app.resetImpactOf(project.id);
+    final scope = app.resetScopeOf(project.id);
+    final nested = scope.length - 1;
+
+    final title = implementationsOnly ? '重置所有实现' : '重置所有项目';
+    final what = implementationsOnly
+        ? '正文与清单条目会被清空'
+        : '「有什么问题 / 思路」与实现（正文 + 清单）都会被清空';
+    // 分类页上的"范围"必须写出来：用户看到的是几个目标的行，而不是这些目标的字段
+    final range = nested <= 0
+        ? '只会动「${project.title}」这一个项目'
+        : '会连同它的 $nested 个下级目标一起动，共 ${impact.projects} 个项目';
+
+    final ok = await confirmAction(
+      context,
+      title: title,
+      message: '$range，$what'
+          '（清单 ${impact.items} 条）—— 名字、标识色、日期与归档状态都不动。\n'
+          '不能撤销：重置没有回收站，退回只给一次（执行后提示里那个「退回上一版」）。',
+      confirmLabel: '重置',
+      danger: true,
+    );
+    if (!ok || !context.mounted) return;
+
+    final error = app.resetProject(project.id, implementationsOnly: implementationsOnly);
+    if (!context.mounted) return;
+    if (error != null) {
+      showToast(context, error, error: true);
+      return;
+    }
+    _announceReset(context, title, impact.projects);
+  }
+
+  /// 重置之后的提示：**带上一次反悔的入口**。
+  ///
+  /// 用 `SnackBar` 的 action 而不是轻提示：这条提示要给一个"点一下就退回去"的落点，
+  /// 而 `showToast` 给不了按钮。一份留档只值一次反悔，所以点完就销掉
+  /// （`revertProjectReset` 自己会销）。
+  void _announceReset(BuildContext context, String title, int projectCount) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('已重置 $projectCount 个项目'),
+        action: SnackBarAction(
+          label: '退回上一版',
+          onPressed: () {
+            final error = app.revertProjectReset();
+            if (!context.mounted) return;
+            showToast(
+              context,
+              error ?? '$title已退回（留档只值一次反悔）',
+              error: error != null,
+            );
+          },
+        ),
+      ),
     );
   }
 
@@ -501,94 +639,41 @@ class _ImplementationFieldState extends State<_ImplementationField> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final project = widget.project;
     final mode = _effective;
 
+    // 版式（2026-09-28 实机反馈"实现部分的 UI 和排布不美观"）：
+    //
+    //   ┌──────────────────────────────────────────┐
+    //   │ 实现                        ╭──────╮      │  ← 标题行只有两样：标题 + 切换器
+    //   │                             │清单│文本│     │
+    //   │                             ╰──────╯      │
+    //   │   ○ 一条条目                                │
+    //   │   ＋ 添加条目                               │
+    //   │   ✨ AI 整理成「如何解决」                     │
+    //   └──────────────────────────────────────────┘
+    //
+    // 三条刻意的取舍：
+    //   · **不再显示 `n/m` 进度**（实机反馈：不需要）—— 卡片里少一行数字；
+    //   · **不在切换器下面画分割线**（实机反馈：不要）：切换器与内容之间
+    //     用留白分开就够，画线反而多一道横杠；
+    //   · **切换器与「未完成 / 已完成 / 已搁置」共用同一个胶囊控件**
+    //     （`StatusPillSelector`，`stretch: false` 让它按内容宽排）——
+    //     从前这里用的是 M3 `SegmentedButton`，带外框、和全页都不像。
     return _FieldCard(
       title: '实现',
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          if (mode == ImplementationMode.checklist && project.items.isNotEmpty) ...<Widget>[
-            Text(
-              '${project.itemsDoneCount}/${project.items.length}',
-              style: theme.textTheme.labelSmall,
-            ),
-            const SizedBox(width: 8),
-          ],
-          // 清空 / 按正文重拆这两件事平时不用，但"拆错了想重来"时必须找得到
-          // —— 它们只对清单有意义，所以只在清单模式下出现。
-          if (mode == ImplementationMode.checklist)
-            Tooltip(
-              message: '清单：按正文重拆 / 清空',
-              child: TextButton.icon(
-                onPressed: widget.onChecklistActions,
-                icon: const Icon(Icons.tune, size: 18),
-                label: const Text('重拆 / 清空'),
-                style: TextButton.styleFrom(
-                  // 能点的用胶囊（《界面规范》§1）；次要入口不加底色
-                  shape: AppShapes.pill,
-                  // 不用强调色：这里进去的是**危险动作**（清空 / 覆盖现有条目），
-                  // 规范要求危险动作别做成醒目的按钮，实际的门在确认框上
-                  foregroundColor: theme.colorScheme.onSurfaceVariant,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ),
-          // 「全部复制」只做在文本模式：那一侧才是"一段整文"，复制它才有意义
-          if (mode == ImplementationMode.text && project.implementation.trim().isNotEmpty)
-            Tooltip(
-              message: '把「如何解决」全文复制到剪贴板',
-              child: TextButton.icon(
-                onPressed: () => _copyBody(context),
-                icon: const Icon(Icons.copy_all_outlined, size: 18),
-                label: const Text('全部复制'),
-                style: TextButton.styleFrom(
-                  shape: AppShapes.pill,
-                  foregroundColor: theme.colorScheme.onSurfaceVariant,
-                  visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ),
-        ],
+      trailing: StatusPillSelector<ImplementationMode>(
+        values: ImplementationMode.values,
+        selected: mode,
+        labelOf: (each) => each.label,
+        stretch: false,
+        onSelected: (value) => setState(() => _mode = value),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Align(
-            alignment: Alignment.centerLeft,
-            child: SegmentedButton<ImplementationMode>(
-              showSelectedIcon: false,
-              segments: <ButtonSegment<ImplementationMode>>[
-                for (final each in ImplementationMode.values)
-                  ButtonSegment<ImplementationMode>(
-                    value: each,
-                    label: Text(each.label),
-                  ),
-              ],
-              selected: <ImplementationMode>{mode},
-              onSelectionChanged: (selection) =>
-                  setState(() => _mode = selection.first),
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
           if (mode == ImplementationMode.checklist)
-            ProjectChecklist(
-              app: widget.app,
-              project: project,
-              onSplitFromImplementation: widget.onSplitFromImplementation,
-            )
+            ProjectChecklist(app: widget.app, project: project)
           else
             _ImplementationBody(
               value: project.implementation,
@@ -604,6 +689,38 @@ class _ImplementationFieldState extends State<_ImplementationField> {
                 }
               },
             ),
+          // 两种模式各有一个**收尾动作**，都画在卡片底部（PL-B-1：动作降到内容下面）。
+          // 谁是"这个方向上的下一步"，谁就出现在这里 —— 不需要两枚并列按钮。
+          //
+          // 名字跟着方向走（2026-09-28）：AI 那一步往哪边做，由"手上有什么"决定，
+          // 所以这一行写的是它**这一次**会做的事。
+          if (mode == ImplementationMode.checklist)
+            _CardFootAction(
+              icon: Icons.auto_awesome_outlined,
+              label: 'AI 整理成「如何解决」',
+              // 只在有清单**且 AI 总开关开着**时给入口 —— 关掉 AI 之后，
+              // 项目里不该再出现任何"AI 整理"的字样（实机反馈）
+              onTap: (project.items.isNotEmpty && widget.app.aiEnabled)
+                  ? () => startAiSummarize(context, widget.app, project.id, project.title)
+                  : null,
+            )
+          else ...<Widget>[
+            // 正文侧：有正文就能**拆成条目**（从前这一步是本地的"按行硬拆"）
+            if (project.implementation.trim().isNotEmpty && widget.app.aiEnabled)
+              _CardFootAction(
+                icon: Icons.auto_awesome_outlined,
+                label: 'AI 拆成清单条目',
+                onTap: () =>
+                    startAiSummarize(context, widget.app, project.id, project.title),
+              ),
+            if (project.implementation.trim().isNotEmpty)
+              _CardFootAction(
+                icon: Icons.copy_all_outlined,
+                label: '全部复制',
+                trailing: '${project.implementation.trim().length} 字',
+                onTap: () => _copyBody(context),
+              ),
+          ],
         ],
       ),
     );
@@ -621,6 +738,61 @@ class _ImplementationFieldState extends State<_ImplementationField> {
   }
 }
 
+/// 「实现」卡片底部的**收尾动作**（两种模式各一个）。
+///
+/// 长成一条**整行的文字按钮**：它有图标、有文案、点整行都能触发，
+/// 但**没有底色**——按《界面规范》§1，它是这一块里的次要动作，
+/// 不该跟内容抢注意力（从前那枚「重拆 / 清空」胶囊就是反面例子）。
+class _CardFootAction extends StatelessWidget {
+  const _CardFootAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String label;
+
+  /// `null` = 现在不能用（例如清单还是空的、或 AI 总开关关着）。
+  /// 那时**整行不画** —— 一个灰掉的按钮只会让人点它。
+  final VoidCallback? onTap;
+
+  /// 右侧的补充说明（现在只有「全部复制」用它报字数）。
+  final String? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    if (onTap == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppShapes.chipRadius),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          child: Row(
+            children: <Widget>[
+              Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ),
+              if (trailing != null)
+                Text(trailing!, style: theme.textTheme.labelSmall),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 「如何解决」的**内容部分**（标题与卡片外壳由 `_FieldCard` 负责）。
 ///
 /// 这一块是三样东西的共同落点 —— AI 整理写进来、交接导出从这里取、
@@ -628,6 +800,10 @@ class _ImplementationFieldState extends State<_ImplementationField> {
 ///
 /// **不再自己管展开 / 收起**（ADR-077）：那是"清单与正文同时存在"时代的东西，
 /// 现在由外面那个模式切换决定要不要显示它，所以这里就是一个**始终展开的编辑区**。
+///
+/// **给它加了"自己的框"**（2026-09-28）：从前正文只有一行浅色提示、直接铺在
+/// 卡片底上，而清单侧每一条都有勾选框当骨架 —— 同一张卡里两种密度。
+/// 现在正文有一层 `filled` 底色 + 内边距，与清单侧对称。
 class _ImplementationBody extends StatelessWidget {
   const _ImplementationBody({
     required this.value,
@@ -655,7 +831,7 @@ class _ImplementationBody extends StatelessWidget {
       children: <Widget>[
         if (empty && hasItems)
           Padding(
-            padding: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.only(bottom: 6),
             child: Text(
               '正文还空着 —— 清单里的条目不受影响，切回「清单」就能看到',
               style: theme.textTheme.bodySmall,
@@ -668,6 +844,8 @@ class _ImplementationBody extends StatelessWidget {
           maxLines: 12,
           allowEmpty: true,
           textStyle: theme.textTheme.bodyMedium,
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decorated: true,
           onSubmitted: onSubmit,
         ),
       ],
@@ -733,7 +911,12 @@ class _IconActions extends StatelessWidget {
   }
 
   Future<void> _pickColor(BuildContext context) async {
-    final picked = await pickProjectColor(context, current: project.color);
+    final picked = await pickProjectColor(
+      context,
+      current: project.color,
+      // 每支色被几个项目 / 分类 / 事件占着（画在色块右下角）
+      usage: app.ws.markerColorUsage(),
+    );
     // null = 取消；'' = 明确选了"不用标识色"
     if (picked == null || !context.mounted) return;
     _setColor(context, picked.isEmpty ? null : picked);
@@ -822,7 +1005,25 @@ class _ClearableIcon extends StatelessWidget {
   }
 }
 
-/// 一个"带轻阴影的字段卡"（项目详情里「有什么问题 / 思路 / 实现清单 / 如何解决 / 汇总」共用）。
+/// 一次「清除已完成条目」的**范围与代价**（确认框要用它说话）。
+///
+/// 范围与「重置」同一套：[resetScopeOf] 给的本级 + 所有**直属**下级，
+/// 但这里只看**已勾选**的那些条目 —— 没做完的是还没交付的计划，
+/// 批量动作误伤它们的代价远大于收益。
+({int projects, int items}) clearDoneScopeOf(Project project, AppController app) {
+  final scope = app.resetScopeOf(project.id);
+  var projects = 0;
+  var items = 0;
+  for (final each in scope) {
+    final done = each.items.where((item) => item.done).length;
+    if (done == 0) continue;
+    projects += 1;
+    items += done;
+  }
+  return (projects: projects, items: items);
+}
+
+/// 一个带轻阴影的字段卡（项目详情里「有什么问题 / 思路 / 实现清单 / 如何解决 / 汇总」共用）。
 ///
 /// 抽出来是为了让几块**长得一样**：以前「目的」是 `Card(elevation: 0)`
 /// （其实没有阴影），清单与正文则是裸标题 + 内容 —— 同一页里三种观感。

@@ -149,4 +149,11 @@ class _NoopGenerator implements AiTextGenerator {
     required PromptInput input,
   }) async =>
       '不该被调用';
+
+  @override
+  Future<String> splitIntoItems({
+    required AiConfig config,
+    required PromptInput input,
+  }) async =>
+      '不该被调用';
 }

@@ -429,20 +429,21 @@ const double _pillEntranceScale = 0.82;
 /// 实测（360×780 逻辑屏）底栏顶边 y = 714、胶囊底边 y = 698，差正好 16。
 const double _pillMarginAboveNav = 16;
 
-/// 速记胶囊**占掉的那一条高度**。
+/// 速记胶囊**不再占掉任何高度**（2026-09-28 实机反馈"截断的问题仍然存在"）。
 ///
-/// body 有一半是 `Stack`：内容在下面、胶囊浮在上面。原来是"内容铺满 body、
-/// 胶囊压在内容上"，于是列表**最后那几行会从胶囊底下穿过去** ——
-/// 行尾的 ⋮ 正好压在右边缘，实测整块落在胶囊底下：点它没反应
-/// （更早还因为胶囊命中区是整个矩形而变成"跳到灵感页并弹出输入框"，
-/// 那半见 `test/ui/capture_pill_hit_test.dart`）。
+/// 曾经把 body 底部留出 `胶囊高 + 上下两段空隙`（80dp），理由是不让列表最后几行
+/// 从胶囊底下穿过去。实机上的结果是：内容区底边被顶到半空中，**卡片里最后一条被
+/// 齐刷刷裁掉一半**，而它下面那 80dp 全是空白 —— 用户看到的就是"下半部被截断"。
+/// 而且这个现象**不随键盘移动**，所以它跟键盘无关，就是这条留白。
 ///
-/// 现在把这一条**留出来**：胶囊本身 + 它上下各一段空隙。
-/// 上沿那段余量是必须的 —— 视口底边落在胶囊上沿附近时，最后那一行是
-/// **被视口裁一半**的，它行尾的 ⋮ 仍会伸进胶囊里；留出一段空隙，
-/// 被裁掉的就只剩不承载操作区的空白。
-const double capturePillBand =
-    CapturePillButton.height + _pillMarginAboveNav * 2;
+/// 取消它的底气来自另一处修复：胶囊的命中区已经收成它**画出来的形状**
+/// （`_StadiumClipper`，见 `test/ui/capture_pill_hit_test.dart`）——
+/// 压在行尾那颗 ⋮ 上的只是**视觉重叠**，点下去落到的仍然是 ⋮ 自己。
+/// 于是"为了不抢点击而牺牲 80dp 版面"这个前提不再成立。
+///
+/// 这里留着一个值为 0 的常量是**刻意**的：这个数删干净过两次，就会有第三次
+/// 被加回来。把上面这段因果写在它旁边，比删掉它更有用。
+const double capturePillBand = 0;
 
 /// 速记胶囊：按页号**自己进场**（见 [_pillEntranceDuration]）。
 ///
@@ -871,6 +872,19 @@ class _AppShellState extends State<AppShell> {
       builder: (context, _) {
         final app = widget.app;
         return Scaffold(
+          // 键盘弹出时**不要压缩 body**（2026-09-28 实机反馈"显示界面的下半部被
+          // 截断了，而且还会随文本输入框上下移动"）。
+          //
+          // `resizeToAvoidBottomInset` 的默认值 `true` 会按键盘高度压缩 body，
+          // 而 `bottomNavigationBar` 那个槽**不动** —— 于是内容底边随键盘上移、
+          // 底栏留在原地，中间裂开一整个键盘高的空档：实测（360×780 + 键盘 300）
+          // 内容到 y=400、底栏还在 714，**空档 314dp**；再叠加下面那条
+          // `capturePillBand`（80dp），就成了"下半部整块没了"。
+          //
+          // 关掉之后 body 始终铺到"底栏顶边"（内容底边 = 底栏顶边，不再裂），
+          // 键盘只是盖住底部那一段 —— 这正是加 `capturePillBand` 之前的行为。
+          // 正文输入框仍会露在键盘之上：`ListView` 会把光标滚进可见区。
+          resizeToAvoidBottomInset: false,
           appBar: AppBar(
             // 标题跟着**连续页位置**走（交叉淡入淡出 + 轻微横移），
             // 与底栏滑块、页面翻页共用同一个数 —— 拖动切页时不再"啪"地换掉。
@@ -891,53 +905,49 @@ class _AppShellState extends State<AppShell> {
           ),
           body: Stack(
             children: <Widget>[
-              // 底部留出速记胶囊那一条（见 [capturePillBand]）：内容不再从胶囊
-              // 底下穿过，行尾的操作区就不会被盖住。
+              // 内容**铺满 body**（一直到"底栏顶边"），底部**不预留任何空档**：
+              // 留了会让卡片里最后一条被齐刷刷裁掉一半（理由见 [capturePillBand]）。
               //
               // 必须 `Positioned.fill`：`Stack` 默认 `StackFit.loose`，非定位子节点
-              // 拿到的是**松约束**，于是 Stack 会缩到"刚好装下这一列"，胶囊的
-              // 参照物也就跟着缩 —— 留白只把内容顶上去了，胶囊自己没动。
-              // 铺满之后 Stack 底边重归 body 底边，胶囊的 `bottom` 才重新有意义。
+              // 拿到的是**松约束**，于是 Stack 会缩到"刚好装下这一列"、
+              // 胶囊的参照物也跟着缩。铺满之后 Stack 底边重归 body 底边。
               Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: capturePillBand),
-                  child: Column(
-                    children: <Widget>[
-                      if (app.startupWarnings.isNotEmpty)
-                        _WarningBanner(
-                          messages: app.startupWarnings,
-                          onTap: () => _showDataIncident(context, app),
-                        ),
-                      // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
-                      // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
-                      if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
-                        _WarningBanner(
-                          messages: <String>[
-                            '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
-                          ],
-                          onDismiss: () => setState(() => _trashNoticeClosed = true),
-                        ),
-                      if (app.overdueCount > 0)
-                        _DueBanner(count: app.overdueCount, app: app),
-                      Expanded(
-                        // 左右滑动切页：四个页签排成一排，滑动时底栏的胶囊跟着走。
-                        // 每页包一层 `_KeepAlivePage`，切过去再切回来不丢状态
-                        // （滚动位置、输入到一半的灵感、展开的项目/任务线）。
-                        child: PageView(
-                          controller: _pages,
-                          onPageChanged: _onPageChanged,
-                          children: <Widget>[
-                            _KeepAlivePage(
-                              child: InspirationTab(key: _inspirationKey, app: app),
-                            ),
-                            _KeepAlivePage(child: ProjectTab(app: app)),
-                            _KeepAlivePage(child: EventTab(app: app)),
-                            _KeepAlivePage(child: MoreTab(app: app)),
-                          ],
-                        ),
+                child: Column(
+                  children: <Widget>[
+                    if (app.startupWarnings.isNotEmpty)
+                      _WarningBanner(
+                        messages: app.startupWarnings,
+                        onTap: () => _showDataIncident(context, app),
                       ),
-                    ],
-                  ),
+                    // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
+                    // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
+                    if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
+                      _WarningBanner(
+                        messages: <String>[
+                          '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
+                        ],
+                        onDismiss: () => setState(() => _trashNoticeClosed = true),
+                      ),
+                    if (app.overdueCount > 0)
+                      _DueBanner(count: app.overdueCount, app: app),
+                    Expanded(
+                      // 左右滑动切页：四个页签排成一排，滑动时底栏的胶囊跟着走。
+                      // 每页包一层 `_KeepAlivePage`，切过去再切回来不丢状态
+                      // （滚动位置、输入到一半的灵感、展开的项目/任务线）。
+                      child: PageView(
+                        controller: _pages,
+                        onPageChanged: _onPageChanged,
+                        children: <Widget>[
+                          _KeepAlivePage(
+                            child: InspirationTab(key: _inspirationKey, app: app),
+                          ),
+                          _KeepAlivePage(child: ProjectTab(app: app)),
+                          _KeepAlivePage(child: EventTab(app: app)),
+                          _KeepAlivePage(child: MoreTab(app: app)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
               // 速记按钮（2026-09-26 批 B 第 ③ 项）：**自绘的胶囊**，
@@ -945,21 +955,19 @@ class _AppShellState extends State<AppShell> {
               // 灵感页不显示（那一页整个就是速记）。
               //
               // 位置与入场动画**都自己来**（2026-09-27）：
-              //   · 位置：body 底部已经给这一颗留了一条空档（[capturePillBand]，
-              //     见上面那个 `Padding`），所以它就在这一条的底边 —— `bottom: 0`。
-              //     与底栏之间的空隙仍是 [_pillMarginAboveNav]，口径由
-              //     `test/ui/shell_swipe_test.dart` 按 16dp 量着。
-              //   · **不再需要补 `viewInsets.bottom`**：那条补正是"内容铺满 body、
-              //     胶囊挂在底边上"时才有的问题（键盘弹出会把 body 压扁、胶囊被顶飞）。
-              //     现在胶囊在自己的空档里，参照物不会动。
+              //   · 位置：`bottom: _pillMarginAboveNav` 让胶囊底边离**底栏顶边**
+              //     正好 16dp（body 底边就是底栏顶边，所以这个数直接就是那个空隙，
+              //     口径由 `test/ui/shell_swipe_test.dart` 量着）。
+              //   · **它浮在内容之上**：不再为它预留空档了（见 [capturePillBand]），
+              //     所以列表最后几行会从它底下穿过 —— 那是可以的，因为胶囊的命中区
+              //     已收成画出来的形状，压在底下的行 ⋮ 仍然点得到
+              //     （`test/ui/capture_pill_hit_test.dart` 守着）。
+              //   · **不再需要补 `viewInsets.bottom`**：外壳整体由
+              //     `resizeToAvoidBottomInset: false` 交给键盘覆盖，参照物不会动。
               //   · **键盘弹出时干脆收起来**（实机反馈"打开输入框时胶囊飞到顶上"）：
               //     那一刻用户正在打字，不需要这个入口。
               Positioned(
                 right: navHorizontalPadding,
-                // `bottom` 是相对 **Stack 底边**（= body 底边）算的，而底栏还在这条
-                // 空档之下 —— 所以 `_pillMarginAboveNav` 在这里量的是"胶囊离底栏顶边
-                // 多少"（2026-09-27 实机口径），`capturePillBand` 则要把它**上下各算一次**：
-                // 条内上下的两段空隙加起来才够放下这一颗。
                 bottom: _pillMarginAboveNav,
                 child: _AnimatedCapturePill(
                   visible: _index != 0 &&

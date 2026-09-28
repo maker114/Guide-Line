@@ -104,8 +104,13 @@ void main() {
     );
   });
 
-  testWidgets('矮屏上：项目行 ⋮ 整块都不在胶囊底下（内容不再从胶囊下面穿过）',
-      (tester) async {
+  testWidgets('矮屏上：与胶囊重叠的那些行 ⋮，点下去仍然落到 ⋮ 自己', (tester) async {
+    // 这一条是 2026-09-28 改写的：原版断言"胶囊与行 ⋮ **一个像素都不许重叠**"，
+    // 于是 body 底部必须留出 80dp 空档 —— 而那条空档正是实机反馈里
+    // "下半部被截断"的元凶（卡片最后一条被齐刷刷裁掉一半）。
+    //
+    // 现在改成断言**功能**而不是几何：重叠可以有（胶囊本来就是浮在内容上的），
+    // 但压在它底下的行 ⋮ 必须仍然点得到。靠的是胶囊的命中区已收成画出来的形状。
     await bootOnShortScreen(tester);
 
     final pill = tester.getRect(find.byType(CapturePillButton));
@@ -117,13 +122,27 @@ void main() {
     );
     expect(menuButtons, findsWidgets, reason: '项目页应当画出带 ⋮ 的行');
 
-    for (var i = 0; i < menuButtons.evaluate().length; i += 1) {
-      final rect = tester.getRect(menuButtons.at(i));
+    // 只挑**与胶囊有交集**的那些 —— 没有交集的行本来就不可能被抢
+    final overlapping = <Rect>[
+      for (var i = 0; i < menuButtons.evaluate().length; i += 1)
+        tester.getRect(menuButtons.at(i)),
+    ].where(pill.overlaps).toList();
+
+    for (final rect in overlapping) {
+      // 扫一圈：只要还有**一个**点能落到胶囊之外（也就是 ⋮ 自己的地盘），
+      // 这一行就没有被整块吃掉
+      var reachable = 0;
+      for (var dx = 2.0; dx < rect.width; dx += 4) {
+        for (var dy = 2.0; dy < rect.height; dy += 4) {
+          final point = Offset(rect.left + dx, rect.top + dy);
+          if (!pillHitAt(tester, point)) reachable += 1;
+        }
+      }
       expect(
-        pill.overlaps(rect),
-        isFalse,
-        reason: '行 ⋮（$rect）与速记胶囊（$pill）有交集 —— '
-            'body 底部必须给胶囊留出整条空档，否则行尾的操作区会被盖住',
+        reachable,
+        greaterThan(0),
+        reason: '行 ⋮（$rect）整块都被速记胶囊（$pill）吃掉了 —— '
+            '它得点得到，否则最后那一行的菜单就没有出路',
       );
     }
   });

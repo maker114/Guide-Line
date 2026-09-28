@@ -12,6 +12,11 @@ import '../theme/shape_tokens.dart';
 ///
 /// 刻意不用 `SegmentedButton`：它的默认外观带分隔线、选中态是整块填充，
 /// 与这里要的"胶囊里套小胶囊"不是一套东西，改它的 theme 反而更绕。
+///
+/// **它不只服务三态**（2026-09-28）：全应用需要"少数几个互斥选项"的地方
+/// 一律用它 —— 「清单 / 文本」的切换与归档区的三档也是同一个控件，
+/// 这样切换控件在哪儿都长一样。传 `stretch: false` 可以让它**按内容宽**排
+/// （标题行右侧那种位置不能撑满整行）。
 class StatusPillSelector<T> extends StatelessWidget {
   const StatusPillSelector({
     super.key,
@@ -20,6 +25,7 @@ class StatusPillSelector<T> extends StatelessWidget {
     required this.labelOf,
     required this.onSelected,
     this.padding = const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+    this.stretch = true,
   });
 
   final List<T> values;
@@ -28,10 +34,28 @@ class StatusPillSelector<T> extends StatelessWidget {
   final ValueChanged<T> onSelected;
   final EdgeInsets padding;
 
+  /// 是否把选项**平分整行宽度**（默认）。
+  ///
+  /// `false` = 整条只占内容那么多（各选项最宽的那个自然把宽度撑出来），
+  /// 给"标题行右侧"这类不能撑满整行的位置用。**不靠 `IntrinsicWidth` 去凑等宽**：
+  /// 那会在每一帧多做一次固有尺寸测量，而这些选项的字数本来就相近
+  /// （「清单 / 文本」「已归档 / 已处理的灵感 / 回收站」），差几个像素不值得。
+  final bool stretch;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+
+    final pills = <Widget>[
+      for (final value in values)
+        _Pill(
+          label: labelOf(value),
+          active: value == selected,
+          stretch: stretch,
+          onTap: () => onSelected(value),
+        ),
+    ];
 
     return Container(
       padding: padding,
@@ -47,30 +71,31 @@ class StatusPillSelector<T> extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        children: <Widget>[
-          for (final value in values)
-            // 等宽 + 平分可用宽度：这样"两端到边缘的距离相等"是布局保证的，
-            // 不依赖选项文字长短（"未完成"比"已完成"长一个字，靠内容撑会歪）。
-            Expanded(
-              child: _Pill(
-                label: labelOf(value),
-                active: value == selected,
-                onTap: () => onSelected(value),
-              ),
-            ),
-        ],
-      ),
+      child: stretch
+          ? Row(
+              children: <Widget>[
+                // 等宽 + 平分可用宽度：这样"两端到边缘的距离相等"是布局保证的，
+                // 不依赖选项文字长短（"未完成"比"已完成"长一个字，靠内容撑会歪）。
+                for (final pill in pills) Expanded(child: pill),
+              ],
+            )
+          : Row(mainAxisSize: MainAxisSize.min, children: pills),
     );
   }
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.active, required this.onTap});
+  const _Pill({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.stretch = true,
+  });
 
   final String label;
   final bool active;
   final VoidCallback onTap;
+  final bool stretch;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +113,10 @@ class _Pill extends StatelessWidget {
           // 160ms 够快不至于拖沓，又不至于闪一下就没了
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+          padding: EdgeInsets.symmetric(
+            horizontal: stretch ? 8 : 16,
+            vertical: stretch ? 9 : 7,
+          ),
           decoration: BoxDecoration(
             color: active ? scheme.primary.withValues(alpha: 0.16) : null,
             borderRadius: BorderRadius.circular(AppShapes.pillRadius),
