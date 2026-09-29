@@ -56,7 +56,7 @@ class AppController extends ChangeNotifier {
         ai = aiGenerator ?? const HttpAiTextGenerator(),
         credentials = credentialStore ?? const SecureAiCredentialStore(),
         shareFile = shareFile ?? _defaultShareFile,
-        gitHub = gitHubGateway ?? const HttpGitHubBackupGateway(),
+        gitHub = gitHubGateway ?? HttpGitHubBackupGateway(),
         gitHubStore = gitHubCredentials ?? const SecureGitHubCredentialStore();
 
   /// 从磁盘装配（唯一入口）。
@@ -926,12 +926,23 @@ class AppController extends ChangeNotifier {
       // 它与文件内容一起，才答得出"远程停在哪一次上传"。
       final commit = await gitHub.latestCommit(config: cleaned, token: token.trim());
       if (remote == null) {
+        // 404 有两种意思，Contents API 分不出来（ADR-090）：仓库 / 权限不对，
+        // 或者仓库在、只是这份文件还没推过。旧写法一律说「连上了，远程还没有
+        // 这份备份」—— owner 拼错也长这样，等于把配置错误报成了正常状态。
+        final repo = await gitHub.describeRepository(
+          config: cleaned,
+          token: token.trim(),
+        );
+        final branchNote =
+            repo.defaultBranch.isEmpty ? '' : '，默认分支 ${repo.defaultBranch}';
         return (
           ok: true,
-          message: '连上了，但远程还没有这份备份。\n'
+          message: '连通成功：仓库 ${repo.fullName} 在'
+              '（${repo.isPrivate ? '私有' : '公开'}$branchNote）。\n'
               '请求地址：$where\n'
               '${_remoteCommitLine(commit)}\n'
-              '第一次「推送」会新建它。',
+              '这个路径还没有备份 —— 第一次「推送」会新建它；'
+              '分支名写错也会长这样，对一下上面的默认分支。',
         );
       }
       if (!remote.readable) {

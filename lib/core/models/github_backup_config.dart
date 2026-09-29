@@ -107,6 +107,13 @@ class GitHubBackupConfig {
   /// [RemoteCommit] 的说明。
   String get commitsApiPath => '/repos/$owner/$repo/commits';
 
+  /// 仓库本身的地址（不含主机名）。
+  ///
+  /// 只问一件事：这个仓库在不在、这个 Token 看不看得见它（ADR-090）。
+  /// Contents API 对"仓库/权限不对"和"文件还没推过"都回 404，分开这两者
+  /// 只能另外问一句 —— 「测试连接」多花的这一个请求就花在这里。
+  String get repositoryApiPath => '/repos/$owner/$repo';
+
   GitHubBackupConfig copyWith({
     bool? enabled,
     String? owner,

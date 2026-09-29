@@ -182,6 +182,35 @@ void main() {
     });
   });
 
+  group('测试连接', () {
+    testWidgets('仓库 / 权限不对：当场报失败，不再说成「远程还没有备份」', (tester) async {
+      final gateway = _FakeGateway()..repositoryMissing = true;
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+
+      await openPage(tester, app);
+      await tapAction(tester, '测试连接');
+
+      // 旧写法这里会说「连上了，但远程还没有这份备份」—— owner 拼错也长这样，
+      // 等于把配置错误报成了正常状态（ADR-090）。
+      expect(find.textContaining('连接失败'), findsOneWidget);
+      expect(find.textContaining('连通成功'), findsNothing);
+    });
+
+    testWidgets('仓库在、只是还没推过：说清仓库在哪，不让人以为配错了', (tester) async {
+      final gateway = _FakeGateway();
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+
+      await openPage(tester, app);
+      await tapAction(tester, '测试连接');
+
+      expect(find.textContaining('连通成功'), findsOneWidget);
+      expect(find.textContaining('maker114/guideline-backup'), findsOneWidget);
+      expect(find.textContaining('这个路径还没有备份'), findsOneWidget);
+    });
+  });
+
   group('拉取要先预览再落盘', () {
     testWidgets('确认框里摆出远程的条数、时间与提交码；取消就一点都不动', (tester) async {
       final gateway = _FakeGateway(
@@ -317,6 +346,31 @@ class _FakeGateway implements GitHubBackupGateway {
   }) async {
     readCount += 1;
     return commit;
+  }
+
+  /// 「测试连接」在 404 之后要问的那一句（ADR-090）。
+  RemoteRepository repository = const RemoteRepository(
+    fullName: 'maker114/guideline-backup',
+    isPrivate: true,
+    defaultBranch: 'main',
+  );
+
+  /// 设成 true 就让 [describeRepository] 抛"仓库不存在" ——
+  /// 用来验"owner 拼错时当场报失败，而不是报成远程还没有备份"。
+  bool repositoryMissing = false;
+
+  @override
+  Future<RemoteRepository> describeRepository({
+    required GitHubBackupConfig config,
+    required String token,
+  }) async {
+    readCount += 1;
+    if (repositoryMissing) {
+      throw const GitHubBackupException(
+        '仓库或分支不存在（404）：核对所有者、仓库名、分支名是否正确',
+      );
+    }
+    return repository;
   }
 
   @override

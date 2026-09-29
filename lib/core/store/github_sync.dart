@@ -232,6 +232,28 @@ String shortSha(String sha) {
   return sha.length <= 7 ? sha : sha.substring(0, 7);
 }
 
+/// 目标仓库本身（不是里面的文件）：只用来回答"这个仓库到底在不在、我看不看得见"。
+///
+/// 存在的理由是一个具体的坑（ADR-090）：Contents API 对"仓库/权限不对"和
+/// "仓库在、只是这份文件还没推过"**都回 404**，只看那一个响应就会把
+/// owner 拼错报成「连通成功，远程还没有备份」—— 把配置错误说成了正常状态。
+class RemoteRepository {
+  const RemoteRepository({
+    required this.fullName,
+    this.isPrivate = false,
+    this.defaultBranch = '',
+  });
+
+  /// `owner/repo` 的规范写法（以 GitHub 回的那份为准，用户大小写写错了也照实显示）。
+  final String fullName;
+
+  /// 私有仓库 —— 我们的边界就建在"用户自建私有仓库"上（ADR-088）。
+  final bool isPrivate;
+
+  /// 默认分支：拉取/推送用的分支名写错时，这一条是对照物。
+  final String defaultBranch;
+}
+
 /// 数一份数据文件里的活记录（**不含墓碑**）。
 ///
 /// 与「导出·导入」那一页自己数活记录的口径一致：墓碑含进去会让

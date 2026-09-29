@@ -58,6 +58,19 @@ abstract interface class GitHubBackupGateway {
     required GitHubBackupConfig config,
     required String token,
   });
+
+  /// 问仓库本身在不在、这个 Token 看不看得见它（ADR-090）。
+  ///
+  /// 与 [readBackup] 的区别就是 `404` 的两种意思：Contents API 对
+  /// "仓库 / 权限不对"和"仓库在、只是这份文件还没推过"回的是同一个 404，
+  /// 只看它就会把 owner 拼错报成「连通成功，远程还没有备份」。
+  ///
+  /// 仓库不存在（或这个 Token 看不到它，GitHub 对私有仓库一律回 404）
+  /// 时抛 [GitHubBackupException]，消息本身就是给用户看的那一句。
+  Future<RemoteRepository> describeRepository({
+    required GitHubBackupConfig config,
+    required String token,
+  });
 }
 
 /// 走 GitHub **Contents API** 的实现。
@@ -65,8 +78,14 @@ abstract interface class GitHubBackupGateway {
 /// 只用这一套 API 是刻意的：它把"读一份文件"和"带提交信息覆盖一份文件"
 /// 压成两个请求，用户不需要理解 git、也不会在我们这边多存一份状态。
 /// 每次覆盖都是一次正常提交 —— 仓库自带的历史就是他额外的退路。
+///
+/// [client] 只在测试里传：`http` 在纯 Dart 测试里发不出真请求，而"文件超过
+/// 1 MB 时 GitHub 只回空 content""仓库不存在与文件不存在都是 404"这两条
+/// **恰恰只有在特定响应下才验得出来** —— 与本文件顶部那个接口同一个理由。
 class HttpGitHubBackupGateway implements GitHubBackupGateway {
-  const HttpGitHubBackupGateway();
+  HttpGitHubBackupGateway({http.Client? client}) : _client = client ?? http.Client();
+
+  final http.Client _client;
 
   static const Duration timeout = Duration(seconds: 30);
 
@@ -85,7 +104,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     if (reason != null) throw GitHubBackupException(reason);
 
     final uri = _contentsUri(cleaned, withRef: true);
-    final response = await _send(() => http.get(uri, headers: _headers(token)));
+    final response = await _send(() => _client.get(uri, headers: _headers(token)));
 
     if (response.statusCode == 404) return null;
     if (response.statusCode >= 400) _throwFor(response, uri);
@@ -93,20 +112,94 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     final body = _decodedObject(response, uri);
     final sha = body['sha'];
     final content = body['content'];
-    if (sha is! String || content is! String) {
+    final encoding = body['encoding'];
+    if (sha is! String) {
       throw GitHubBackupException(
-        '远程文件的格式不对（${uri.toString()}）：没读到 sha 或 content',
+        '远程文件的格式不对（${uri.toString()}）：没读到 sha',
       );
     }
 
-    late final List<int> bytes;
-    try {
-      bytes = base64.decode(content.replaceAll(RegExp(r'\s'), ''));
-    } catch (error) {
-      throw GitHubBackupException('远程文件的内容解不开（$error）');
+    final List<int> bytes;
+    if (content is String && content.isNotEmpty) {
+      try {
+        bytes = base64.decode(content.replaceAll(RegExp(r'\s'), ''));
+      } catch (error) {
+        throw GitHubBackupException('远程文件的内容解不开（$error）');
+      }
+    } else {
+      // 1 MB 以上的文件，默认的 object 媒体类型只回一个**空 content**
+      // （`encoding` 写着 `none`），而 `base64.decode('')` 不抛错 ——
+      // 旧写法于是把"文件太大"读成"这份备份读不出数据"：拉取永远失败，
+      // 推送却照常能用，界面上看不出任何原因（ADR-090）。
+      bytes = await _readRawBytes(cleaned, token, uri, encoding: encoding);
     }
 
     return RemoteBackup.fromBytes(path: cleaned.path, sha: sha, bytes: bytes);
+  }
+
+  /// 用 raw 媒体类型把文件字节直接读回来（1–100 MB 的文件只有这一条路）。
+  ///
+  /// `/contents` 这个地址配上 `Accept: application/vnd.github.raw`，GitHub
+  /// 就把原始字节回给我们（不会再套一层 base64，也不会 302 到别处）。
+  /// 只在"默认媒体类型没给内容"时才走这里 —— 小文件不必多花一个请求。
+  Future<List<int>> _readRawBytes(
+    GitHubBackupConfig config,
+    String token,
+    Uri uri, {
+    Object? encoding,
+  }) async {
+    final response = await _send(
+      () => _client.get(
+        uri,
+        headers: _headers(token, mediaType: 'application/vnd.github.raw'),
+      ),
+    );
+
+    if (response.statusCode == 403 || response.statusCode == 413) {
+      // 单文件读取上限（100 MB）：这也是推送的极限。单列一条可读文案，
+      // 不把它混进"这份备份读不出数据"里 —— 那会让人以为是文件坏了。
+      throw const GitHubBackupException(
+        '远程那份太大，GitHub 不给通过接口读回来（单文件 100 MB 上限）。\n'
+        '到仓库网页里手动下载它，或者把备份瘦下来再试',
+      );
+    }
+    if (response.statusCode >= 400) _throwFor(response, uri);
+    if (response.bodyBytes.isEmpty) {
+      throw GitHubBackupException(
+        '远程那份读回来是空的（encoding=${encoding ?? '未知'}）：'
+        '文件可能刚被清空，也可能 GitHub 只回了元数据。\n'
+        '重试一次；仍然如此就到仓库网页里看一眼这个文件',
+      );
+    }
+    return response.bodyBytes;
+  }
+
+  @override
+  Future<RemoteRepository> describeRepository({
+    required GitHubBackupConfig config,
+    required String token,
+  }) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) throw GitHubBackupException(reason);
+
+    final uri = Uri.parse('$_host${cleaned.repositoryApiPath}');
+    final response = await _send(() => _client.get(uri, headers: _headers(token)));
+
+    // 404 就按 [_throwFor] 里那一句报出去（"仓库或分支不存在"）——
+    // 那正是这个请求存在的意义：把仓库/权限不对与"文件还没推过"分开。
+    if (response.statusCode >= 400) _throwFor(response, uri);
+
+    final body = _decodedObject(response, uri);
+    final fullName = body['full_name'];
+    final defaultBranch = body['default_branch'];
+    return RemoteRepository(
+      fullName: fullName is String && fullName.isNotEmpty
+          ? fullName
+          : '${cleaned.owner}/${cleaned.repo}',
+      isPrivate: body['private'] == true,
+      defaultBranch: defaultBranch is String ? defaultBranch : '',
+    );
   }
 
   @override
@@ -131,7 +224,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     };
 
     final response = await _send(
-      () => http.put(
+      () => _client.put(
         uri,
         headers: _headers(token, json: true),
         body: jsonEncode(payload),
@@ -178,7 +271,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     if (reason != null) throw GitHubBackupException(reason);
 
     final uri = _commitsUri(cleaned);
-    final response = await _send(() => http.get(uri, headers: _headers(token)));
+    final response = await _send(() => _client.get(uri, headers: _headers(token)));
 
     // 409 = 空仓库（一条提交都还没有）；404 = 这个分支 / 仓库读不到。
     // 两种都回答"此刻读不到提交" —— 那是**还没有**，不是错误：
@@ -216,10 +309,16 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     );
   }
 
-  Map<String, String> _headers(String token, {bool json = false}) =>
+  Map<String, String> _headers(
+    String token, {
+    bool json = false,
+    String? mediaType,
+  }) =>
       <String, String>{
         'Authorization': 'Bearer $token',
-        'Accept': 'application/vnd.github+json',
+        // 默认按 GitHub 自己那套 JSON 形状走；读 1 MB 以上的文件时换成 raw，
+        // 那一次回来的是文件本身，不是 JSON（见 [_readRawBytes]）。
+        'Accept': mediaType ?? 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': _userAgent,
         if (json) 'Content-Type': 'application/json',
