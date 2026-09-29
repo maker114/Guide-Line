@@ -8,13 +8,16 @@ import '../common/dialogs.dart';
 import '../common/keyboard_dismiss_guard.dart';
 import '../theme/shape_tokens.dart';
 
-/// 「GitHub 备份同步」页（**实验性**）。
+/// 「GitHub 备份同步」页。
 ///
 /// 这一页只做一件事：把手机上这份数据推到用户自己的私有仓库，或反过来拉回来。
 /// 三条口径是写死的，别在别处再实现一遍：
-///   · **纯手动**：不做启动检查、不做编辑后自动推送 —— 这是实验性功能的边界；
+///   · **纯手动**：不做启动检查、不做编辑后自动推送 —— 只有你亲手点的两下才会连网；
 ///   · **不做自动合并**：两边都改过时只把情况摆出来，让用户自己选；
 ///   · **推送前确认、拉取前先预览条数与时间再确认**：两端都是覆盖性操作。
+///
+/// 为什么要在页面上摆出**提交码**（ADR-089）：它是"这是哪一次上传"的凭证 ——
+/// 两台手机上读到同一个提交码，就是同一份；内容码相同并不说明这一点。
 class GitHubBackupPage extends StatefulWidget {
   const GitHubBackupPage({super.key, required this.app});
 
@@ -168,7 +171,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           context,
           title: '覆盖远程那份备份',
           message: '${plan.message}\n\n'
-              '当前这台手机：$localText\n\n'
+              '当前这台手机：$localText\n'
+              '${_remoteCommitText(check.remoteCommit)}\n\n'
               '覆盖之后，远程上一次的内容仍然可以从 GitHub 的提交历史里找回。',
           confirmLabel: '用本地覆盖远程',
           danger: true,
@@ -184,7 +188,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           context,
           title: '推送到 GitHub',
           message: '会把当前 $localText 推上去，覆盖远程那一份路径上的文件。\n\n'
-              '远程：${plan.remoteSavedAt == null ? '还没有这份文件' : formatStamp(plan.remoteSavedAt)}',
+              '远程：${plan.remoteSavedAt == null ? '还没有这份文件' : formatStamp(plan.remoteSavedAt)}\n'
+              '${_remoteCommitText(check.remoteCommit)}',
           confirmLabel: '推送',
         );
         if (!ok) {
@@ -228,6 +233,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       context,
       title: '用远程那份覆盖这台手机',
       message: '远程：${formatStamp(remote.savedAt)} · $incoming\n'
+          '${_remoteCommitText(preview.commit)}\n'
           '现在这台上：$current\n\n'
           '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
       confirmLabel: '拉取并覆盖',
@@ -264,8 +270,18 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
   String _lastSyncText() {
     final record = app.readGitHubSyncRecord();
     if (record == null) return '这台手机还没和这个仓库同步过。';
-    return '上次同步：${formatStamp(record.syncedAt)} · ${record.recordCount} 条记录';
+    // 两个码并列摆出来，但不混为一谈：**提交码在前** —— 它才是"是不是
+    // 同一次上传"的凭证；内容码在后，它只答"内容一不一样"。
+    // 老记账（1.8.5 及以前）没有提交码，写「未知」而不是装作有。
+    return '上次同步：${formatStamp(record.syncedAt)} · ${record.recordCount} 条记录\n'
+        '提交 ${shortSha(record.commitSha)} · 内容码 ${shortSha(record.remoteSha)}';
   }
+
+  /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
+  static String _remoteCommitText(RemoteCommit? commit) =>
+      commit == null || !commit.known
+          ? '远程提交：读不到'
+          : '远程提交：${shortSha(commit.sha)}';
 
   @override
   Widget build(BuildContext context) {
@@ -289,7 +305,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 SwitchListTile(
                   value: _enabled,
                   title: const Text('启用 GitHub 备份同步'),
-                  subtitle: const Text('实验性：关掉不会丢配置，也不会删掉远程那份'),
+                  subtitle: const Text('关掉不会丢配置，也不会删掉远程那份'),
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
                 const Divider(height: 1),

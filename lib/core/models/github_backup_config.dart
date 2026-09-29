@@ -100,6 +100,13 @@ class GitHubBackupConfig {
   String get contentsApiPath =>
       '/repos/$owner/$repo/contents/${path.split('/').map(Uri.encodeComponent).join('/')}';
 
+  /// Commits API 的地址（不含主机名）。
+  ///
+  /// 用来读"这个路径最后一次是被哪一次提交改的"，也就是**提交码** ——
+  /// 内容码（blob sha）与它答的不是同一个问题，见 `github_sync.dart` 里
+  /// [RemoteCommit] 的说明。
+  String get commitsApiPath => '/repos/$owner/$repo/commits';
+
   GitHubBackupConfig copyWith({
     bool? enabled,
     String? owner,

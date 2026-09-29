@@ -11,14 +11,17 @@ import 'package:guideline/core/models/github_backup_config.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/export_codec.dart';
 import 'package:guideline/core/store/github_sync.dart';
+import 'package:guideline/platform/data_directory.dart';
 import 'package:guideline/platform/github_backup_client.dart';
 import 'package:guideline/ui/more/github_backup_page.dart';
 
-/// GitHub 备份同步是**实验性**功能，这一页守住三件"不许悄悄发生"的事：
+/// GitHub 备份同步是**正式功能**，这一页守住四件"不许悄悄发生"的事：
 ///   · **总开关关着就一份都不许连网**（含推送、拉取）。灰按钮挡不住无障碍焦点
 ///     与热键重入，所以这里既验界面置灰、也验控制器那一层真的会拒绝；
 ///   · **未配置也能进页** —— 进不来就没法配置，这一页不能要求"先配好再打开"；
-///   · **拉取前必须先预览**：条数与时间摆在确认框里，没点确认就不许覆盖本地。
+///   · **拉取前必须先预览**：条数与时间摆在确认框里，没点确认就不许覆盖本地；
+///   · **提交码要摆到明面上**：双端对版本靠的是提交码（内容码只答"内容一不一样"），
+///     记账里没有它时写「未知」，不许当成"两边不一致"。
 void main() {
   late Directory tempDir;
 
@@ -180,9 +183,10 @@ void main() {
   });
 
   group('拉取要先预览再落盘', () {
-    testWidgets('确认框里摆出远程的条数与时间；取消就一点都不动', (tester) async {
+    testWidgets('确认框里摆出远程的条数、时间与提交码；取消就一点都不动', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 3)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
       );
       final credentials = _FakeCredentials('ghp_token');
       final app = await boot(gateway, credentials);
@@ -201,6 +205,11 @@ void main() {
       expect(find.textContaining('项目 3'), findsOneWidget, reason: '远程那边有多少要说清');
       expect(find.textContaining(formatStamp(t1)), findsOneWidget, reason: '远程那份的时间要给');
       expect(find.textContaining('现在这台上：项目 1'), findsOneWidget);
+      expect(
+        find.textContaining('远程提交：abc1234'),
+        findsOneWidget,
+        reason: '双端对版本靠提交码，预览框里就得给出来',
+      );
 
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();
@@ -223,9 +232,10 @@ void main() {
       expect(find.textContaining('0 条不算可用备份'), findsOneWidget);
     });
 
-    testWidgets('拉取之后写记账，页面上能看到上次同步时间', (tester) async {
+    testWidgets('拉取之后写记账，页面上能看到上次同步时间与两个码', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
       );
       final app = await boot(gateway, _FakeCredentials('ghp_token'));
       await app.saveGitHubBackupConfig(configured, 'ghp_token');
@@ -240,17 +250,56 @@ void main() {
       expect(record, isNotNull);
       expect(record!.recordCount, 2);
       expect(record.remoteSha, 'sha-remote');
-      expect(find.textContaining('上次同步'), findsOneWidget);
+      expect(
+        record.commitSha,
+        'abc1234def5678',
+        reason: '提交码要落进记账，重启后才对得出"是不是同一次上传"',
+      );
+      expect(find.textContaining('上次同步：'), findsOneWidget);
+      expect(
+        find.textContaining('提交 abc1234 · 内容码 sha-rem'),
+        // 两处都会摆出这两个码：页面上「上次同步」那一行，以及拉取结果框。
+        findsNWidgets(2),
+        reason: '两个码并列摆出来，但要说清各自答的是什么',
+      );
+    });
+  });
+
+  group('推送', () {
+    testWidgets('记账里带提交码，结果里两个码都摆出来，提交说明带 App 版本号', (tester) async {
+      final gateway = _FakeGateway();
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      expect(app.applyImport(storeWith(savedAt: t1, projects: 2)), isNull);
+
+      final pushed = await app.pushGitHubBackup(configured, 'ghp_token');
+
+      expect(pushed.ok, isTrue, reason: pushed.message);
+      expect(pushed.message, contains('提交 commit-'));
+      expect(pushed.message, contains('内容码 sha-wri'));
+      final record = app.readGitHubSyncRecord();
+      expect(record, isNotNull);
+      expect(record!.commitSha, 'commit-written', reason: '这次推送的提交码要记住');
+      expect(record.remoteSha, 'sha-written');
+      expect(
+        gateway.lastMessage,
+        contains(AppInfo.versionLabel),
+        reason: '提交说明里带版本号，GitHub 的提交列表里才看得出是哪一版推的',
+      );
     });
   });
 }
 
 class _FakeGateway implements GitHubBackupGateway {
-  _FakeGateway({this.remote});
+  _FakeGateway({this.remote, this.commit});
 
   RemoteBackup? remote;
+  RemoteCommit? commit;
   int readCount = 0;
   int writeCount = 0;
+
+  /// 最后一次推送用的提交说明（验"App 版本号跟着一起上去了"）。
+  String lastMessage = '';
 
   @override
   Future<RemoteBackup?> readBackup({
@@ -262,6 +311,15 @@ class _FakeGateway implements GitHubBackupGateway {
   }
 
   @override
+  Future<RemoteCommit?> latestCommit({
+    required GitHubBackupConfig config,
+    required String token,
+  }) async {
+    readCount += 1;
+    return commit;
+  }
+
+  @override
   Future<RemoteBackup> writeBackup({
     required GitHubBackupConfig config,
     required String token,
@@ -270,12 +328,17 @@ class _FakeGateway implements GitHubBackupGateway {
     required String? knownSha,
   }) async {
     writeCount += 1;
+    lastMessage = message;
+    // 真 gateway 会把 PUT 返回里的提交码原样带回来；这里也照做，
+    // 否则"记账里有没有提交码"这条就验不到了。
     final written = RemoteBackup.fromBytes(
       path: config.path,
       sha: 'sha-written',
       bytes: bytes,
+      commitSha: 'commit-written',
     );
     remote = written;
+    commit = RemoteCommit(sha: 'commit-written', message: message);
     return written;
   }
 }

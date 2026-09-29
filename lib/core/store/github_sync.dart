@@ -73,6 +73,7 @@ class SyncRecord {
     required this.syncedAt,
     required this.remoteSha,
     required this.recordCount,
+    this.commitSha = '',
   });
 
   /// 上次成功同步的时刻（毫秒）。
@@ -83,6 +84,12 @@ class SyncRecord {
 
   /// 上次同步时两边一致的那一份里有几条活记录。
   final int recordCount;
+
+  /// 上次同步对应的**提交码**（`1.8.5` 及以前的记账没有这一项，读出来是空串）。
+  ///
+  /// 空串的含义是**未知**，不是"不一致" —— 老记账文件缺这个字段只说明
+  /// "那时还没记"，不能让一次正常的同步被说成双端版本对不上。
+  final String commitSha;
 
   /// 有没有可用的记账。
   static SyncRecord? parse(String? text) {
@@ -95,7 +102,13 @@ class SyncRecord {
       final count = root['recordCount'];
       if (syncedAt is! int || sha is! String || count is! int) return null;
       if (sha.isEmpty || syncedAt <= 0 || count < 0) return null;
-      return SyncRecord(syncedAt: syncedAt, remoteSha: sha, recordCount: count);
+      final commit = root['commitSha'];
+      return SyncRecord(
+        syncedAt: syncedAt,
+        remoteSha: sha,
+        recordCount: count,
+        commitSha: commit is String ? commit : '',
+      );
     } catch (_) {
       // 记账坏了就当没有：它只影响"能不能自动判断"，不影响任何真实数据。
       return null;
@@ -106,13 +119,21 @@ class SyncRecord {
         'syncedAt': syncedAt,
         'remoteSha': remoteSha,
         'recordCount': recordCount,
+        // 未知就不写出去：与"空值不写出"的契约口径一致。
+        if (commitSha.isNotEmpty) 'commitSha': commitSha,
       });
 
-  SyncRecord copyWith({int? syncedAt, String? remoteSha, int? recordCount}) =>
+  SyncRecord copyWith({
+    int? syncedAt,
+    String? remoteSha,
+    int? recordCount,
+    String? commitSha,
+  }) =>
       SyncRecord(
         syncedAt: syncedAt ?? this.syncedAt,
         remoteSha: remoteSha ?? this.remoteSha,
         recordCount: recordCount ?? this.recordCount,
+        commitSha: commitSha ?? this.commitSha,
       );
 }
 
@@ -123,6 +144,7 @@ class RemoteBackup {
     required this.sha,
     required this.bytes,
     required this.payload,
+    this.commitSha = '',
   });
 
   /// 仓库里的路径。
@@ -130,6 +152,14 @@ class RemoteBackup {
 
   /// GitHub 给的 blob sha —— 覆盖它必须带上这个值。
   final String sha;
+
+  /// 写成功时 GitHub 顺手回来的**提交码**；**读回来的那一份不知道**（空串）。
+  ///
+  /// 它与 [sha] 不是一回事，别混用：`sha` 答"内容一不一样"，
+  /// 提交码答"是不是**同一次上传**" —— 推送两次、内容一个字没改，
+  /// 提交码也不同。要在两台手机之间确认"我们看到的是同一次上传"，
+  /// 靠的是后者。空串一律当**未知**，不许当成"不一致"。
+  final String commitSha;
 
   /// 远程文件的原始字节（拉取失败时用它落一份导出存档）。
   final List<int> bytes;
@@ -142,6 +172,7 @@ class RemoteBackup {
     required String path,
     required String sha,
     required List<int> bytes,
+    String commitSha = '',
   }) {
     final issues = DecodeIssues();
     final payload = ExportCodec.decode(bytes, issues);
@@ -150,6 +181,7 @@ class RemoteBackup {
       sha: sha,
       bytes: bytes,
       payload: payload.readable ? payload : null,
+      commitSha: commitSha,
     );
   }
 
@@ -164,6 +196,40 @@ class RemoteBackup {
 
   /// 它算不算一份**可用**备份（判据与本地备份那一套同一句话）。
   bool get usable => readable && recordCount > 0;
+}
+
+/// 远程仓库里**那一次提交**（只有元数据，不含文件内容）。
+///
+/// 存在的理由只有一个：**提交码是双端判断"是不是同一次上传"的凭证**（ADR-089）。
+/// 内容码（[RemoteBackup.sha]）答"内容一不一样"，而"两台手机上内容碰巧
+/// 一样"并不说明它们来自同一次上传 —— 只有提交码能说明。
+class RemoteCommit {
+  const RemoteCommit({
+    required this.sha,
+    this.message = '',
+    this.committedAt,
+  });
+
+  /// 提交码（GitHub 给的是完整 40 位）；读不到时是**空串**，当"未知"。
+  final String sha;
+
+  /// 提交说明的首行（我们推上去时写的是 `backup: GuideLine …`）。
+  final String message;
+
+  /// 提交时刻（毫秒）；读不到时为 null。
+  final int? committedAt;
+
+  /// 有没有读到提交码。
+  bool get known => sha.isNotEmpty;
+}
+
+/// 把提交码 / 内容码缩成前 7 位（git 的惯例），空串写「未知」。
+///
+/// 单独一个函数是为了让界面与控制器的说法**只有一处**：
+/// 两处各写一遍 `substring(0, 7)`，早晚会在某处长成 8 位。
+String shortSha(String sha) {
+  if (sha.isEmpty) return '未知';
+  return sha.length <= 7 ? sha : sha.substring(0, 7);
 }
 
 /// 数一份数据文件里的活记录（**不含墓碑**）。
@@ -310,5 +376,14 @@ String formatStamp(int? millis) {
 }
 
 /// 远程那份备份的提交说明里带上的摘要（推上去以后在 GitHub 上看得见）。
-String commitMessageFor({required int nowMillis, required int recordCount}) =>
-    'backup: GuideLine $recordCount 条记录（${formatStamp(nowMillis)}）';
+///
+/// [appVersion] 形如 `1.9.0+38`，由调用方从 `AppInfo` 传进来 ——
+/// 这一层不许 import `lib/platform`（分层硬线），但"这条提交是哪一版 App
+/// 推的"只有 GitHub 页面上才看得出来，值得写进提交说明。
+String commitMessageFor({
+  required int nowMillis,
+  required int recordCount,
+  required String appVersion,
+}) =>
+    'backup: GuideLine $recordCount 条记录（${formatStamp(nowMillis)}）'
+    '${appVersion.isEmpty ? '' : ' · $appVersion'}';

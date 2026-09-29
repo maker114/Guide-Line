@@ -37,12 +37,26 @@ abstract interface class GitHubBackupGateway {
   ///
   /// [knownSha] 是刚读到的 sha（`null` = 远程确实没有这份文件）；
   /// 带上它，GitHub 会在"读之后被别人改过"时返回 409 而不是悄悄覆盖。
+  /// 返回值的 [RemoteBackup.commitSha] 是**这一次提交的提交码**。
   Future<RemoteBackup> writeBackup({
     required GitHubBackupConfig config,
     required String token,
     required List<int> bytes,
     required String message,
     required String? knownSha,
+  });
+
+  /// 读远程**此刻**那一次提交（只取提交列表的第一条，ADR-089）。
+  ///
+  /// 与 [readBackup] 问的不是同一件事：那一份是"文件内容里有什么"，
+  /// 这一条是"这份文件最后是被哪一次提交改的"。双端对版本要的是后者 ——
+  /// 提交码相同才说明"我们说的是同一次上传"。
+  ///
+  /// 仓库里还没有任何提交（GitHub 对空仓库返回 409）或这个路径还没提交过
+  /// 时返回 `null`：那是**还没有**，不是错误。
+  Future<RemoteCommit?> latestCommit({
+    required GitHubBackupConfig config,
+    required String token,
   });
 }
 
@@ -127,16 +141,79 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     if (response.statusCode >= 400) _throwFor(response, uri);
 
     final body = _decodedObject(response, uri);
-    // PUT 的返回是 `{"content": {...}, "commit": {...}}`，新 sha 在 content 里。
+    // PUT 的返回是 `{"content": {...}, "commit": {...}}`：
+    // 文件的新内容码在 content 里，**这一次提交的提交码**在 commit 里。
+    // 两个都要：内容码用来做下次覆盖的基线，提交码是给用户对版本的凭证。
     final content = body['content'];
+    final commit = body['commit'];
     final sha = content is Map ? content['sha'] : null;
+    final commitSha = commit is Map ? commit['sha'] : null;
+    final commitText = commitSha is String ? commitSha : '';
     if (sha is! String) {
       // 写成功了但没读到 sha 不该算失败：文件已经上去了。
       // 记账退化成"下次再读一次"，比把一个成功的写入报成失败安全得多。
-      return RemoteBackup.fromBytes(path: cleaned.path, sha: '', bytes: bytes);
+      return RemoteBackup.fromBytes(
+        path: cleaned.path,
+        sha: '',
+        bytes: bytes,
+        commitSha: commitText,
+      );
     }
 
-    return RemoteBackup.fromBytes(path: cleaned.path, sha: sha, bytes: bytes);
+    return RemoteBackup.fromBytes(
+      path: cleaned.path,
+      sha: sha,
+      bytes: bytes,
+      commitSha: commitText,
+    );
+  }
+
+  @override
+  Future<RemoteCommit?> latestCommit({
+    required GitHubBackupConfig config,
+    required String token,
+  }) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) throw GitHubBackupException(reason);
+
+    final uri = _commitsUri(cleaned);
+    final response = await _send(() => http.get(uri, headers: _headers(token)));
+
+    // 409 = 空仓库（一条提交都还没有）；404 = 这个分支 / 仓库读不到。
+    // 两种都回答"此刻读不到提交" —— 那是**还没有**，不是错误：
+    // "仓库到底存不存在"是「测试连接」那一句要回答的事（另一轮修）。
+    if (response.statusCode == 404 || response.statusCode == 409) return null;
+    if (response.statusCode >= 400) _throwFor(response, uri);
+
+    final Object? root;
+    try {
+      root = jsonDecode(response.body);
+    } catch (error) {
+      throw GitHubBackupException(
+        'GitHub 返回的不是 JSON（${uri.toString()}）：${_brief(response.body)}',
+      );
+    }
+    if (root is! List || root.isEmpty) return null;
+
+    final first = root.first;
+    if (first is! Map) return null;
+    final sha = first['sha'];
+    if (sha is! String || sha.isEmpty) return null;
+
+    final commit = first['commit'];
+    final message = commit is Map ? commit['message'] : null;
+    final committer = commit is Map ? commit['committer'] : null;
+    final date = committer is Map ? committer['date'] : null;
+
+    return RemoteCommit(
+      sha: sha,
+      // 提交说明只取首行：正文可能很长，界面上只摆得下一行。
+      message: message is String ? message.split('\n').first.trim() : '',
+      committedAt: date is String
+          ? DateTime.tryParse(date)?.millisecondsSinceEpoch
+          : null,
+    );
   }
 
   Map<String, String> _headers(String token, {bool json = false}) =>
@@ -151,6 +228,17 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
   Uri _contentsUri(GitHubBackupConfig config, {required bool withRef}) => Uri.parse(
         '$_host${config.contentsApiPath}'
         '${withRef ? '?ref=${Uri.encodeComponent(config.branch)}' : ''}',
+      );
+
+  /// 提交列表的地址：**只取一条**，问的就是"这个路径最后一次被谁改的"。
+  ///
+  /// `path` 与 `sha` 都带上：前者把范围收到我们那份文件上（不然第一条会
+  /// 是别人对仓库里任何一个文件的提交），后者钉住分支（默认分支未必是它）。
+  Uri _commitsUri(GitHubBackupConfig config) => Uri.parse(
+        '$_host${config.commitsApiPath}'
+        '?path=${Uri.encodeComponent(config.path)}'
+        '&sha=${Uri.encodeComponent(config.branch)}'
+        '&per_page=1',
       );
 
   Future<http.Response> _send(Future<http.Response> Function() request) async {

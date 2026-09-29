@@ -199,7 +199,7 @@ class _MoreTabState extends State<MoreTab> {
   /// 记账（上次同步时间）是同步读的本地小文件，不必再起一个 `FutureBuilder`。
   Widget _gitHubSubtitle(BuildContext context) {
     if (!app.prefs.githubBackupEnabled) {
-      return Text('已关闭（实验性）', style: Theme.of(context).textTheme.bodySmall);
+      return Text('已关闭', style: Theme.of(context).textTheme.bodySmall);
     }
     final owner = app.prefs.githubBackupOwner;
     final repo = app.prefs.githubBackupRepo;

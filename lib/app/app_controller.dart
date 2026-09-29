@@ -822,11 +822,23 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  // ------------------------------------------------- GitHub 备份同步（实验性）
+  // ------------------------------------------------- GitHub 备份同步
 
   /// 总开关关着时，推送 / 拉取一律拒绝的那句话。
   static const String _gitHubDisabledMessage =
       'GitHub 备份同步的开关还关着 —— 先在这一页打开「启用 GitHub 备份同步」，它才会连网';
+
+  /// 「远程提交」那一行：**双端对版本的凭证**（ADR-089）。
+  ///
+  /// 读不到时如实写"读不到"，不写「未知」以外的任何东西 ——
+  /// 这一行是给用户对版本的，含糊过去比不给更糟。
+  static String _remoteCommitLine(RemoteCommit? commit) {
+    if (commit == null || !commit.known) {
+      return '远程提交：读不到（这个路径还没有提交，或者分支里一条提交都没有）';
+    }
+    final when = commit.committedAt == null ? '' : ' · ${formatStamp(commit.committedAt)}';
+    return '远程提交：${shortSha(commit.sha)}$when';
+  }
 
   /// 读 GitHub 备份同步的配置：非敏感部分在偏好里，Token 从安全存储取。
   ///
@@ -910,11 +922,15 @@ class AppController extends ChangeNotifier {
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      // 顺手读"远程此刻那一次提交"：只读一次，不写任何东西。
+      // 它与文件内容一起，才答得出"远程停在哪一次上传"。
+      final commit = await gitHub.latestCommit(config: cleaned, token: token.trim());
       if (remote == null) {
         return (
           ok: true,
           message: '连上了，但远程还没有这份备份。\n'
               '请求地址：$where\n'
+              '${_remoteCommitLine(commit)}\n'
               '第一次「推送」会新建它。',
         );
       }
@@ -923,6 +939,7 @@ class AppController extends ChangeNotifier {
           ok: true,
           message: '连上了，但那份文件读不出 Guide Line 数据。\n'
               '请求地址：$where\n'
+              '${_remoteCommitLine(commit)}\n'
               '它可能不是你 App 推上去的 —— 推送会覆盖它。',
         );
       }
@@ -931,7 +948,8 @@ class AppController extends ChangeNotifier {
         message: '连通成功\n'
             '请求地址：$where\n'
             '远程那份：${formatStamp(remote.savedAt)} · '
-            '${liveRecordCount(remote.payload!.store)} 条活记录',
+            '${liveRecordCount(remote.payload!.store)} 条活记录\n'
+            '${_remoteCommitLine(commit)}',
       );
     } on GitHubBackupException catch (error) {
       return (ok: false, message: '连接失败\n请求地址：$where\n原因：${error.message}');
@@ -941,17 +959,32 @@ class AppController extends ChangeNotifier {
   }
 
   /// 看远程现在是什么状态（**只读**，供界面在推送 / 拉取前把情况摆清楚）。
-  Future<({RemoteBackup? remote, SyncPlan? plan, String? error})> checkGitHubBackup(
+  ///
+  /// [remoteCommit] 是远程**此刻**那一次提交：推送前的确认框要把它摆出来，
+  /// 用户才知道自己这次覆盖掉的是哪一次上传。
+  Future<
+      ({
+        RemoteBackup? remote,
+        RemoteCommit? remoteCommit,
+        SyncPlan? plan,
+        String? error,
+      })> checkGitHubBackup(
     GitHubBackupConfig config,
     String token,
   ) async {
     final cleaned = config.normalized();
     final reason = cleaned.validate();
-    if (reason != null) return (remote: null, plan: null, error: reason);
-    if (token.trim().isEmpty) return (remote: null, plan: null, error: '还没填 Token');
+    if (reason != null) {
+      return (remote: null, remoteCommit: null, plan: null, error: reason);
+    }
+    if (token.trim().isEmpty) {
+      return (remote: null, remoteCommit: null, plan: null, error: '还没填 Token');
+    }
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      final remoteCommit =
+          await gitHub.latestCommit(config: cleaned, token: token.trim());
       final local = workspace.buildStoreFile();
       final plan = analyzeSync(
         local: local,
@@ -961,11 +994,16 @@ class AppController extends ChangeNotifier {
         remote: remote,
         lastSync: storage.readSyncRecord(),
       );
-      return (remote: remote, plan: plan, error: null);
+      return (remote: remote, remoteCommit: remoteCommit, plan: plan, error: null);
     } on GitHubBackupException catch (error) {
-      return (remote: null, plan: null, error: error.message);
+      return (remote: null, remoteCommit: null, plan: null, error: error.message);
     } catch (error) {
-      return (remote: null, plan: null, error: '读取远程失败：$error');
+      return (
+        remote: null,
+        remoteCommit: null,
+        plan: null,
+        error: '读取远程失败：$error',
+      );
     }
   }
 
@@ -1026,6 +1064,8 @@ class AppController extends ChangeNotifier {
         message: commitMessageFor(
           nowMillis: now,
           recordCount: liveRecordCount(local),
+          // 版本号从 platform 传进来：core 不许依赖 platform（分层硬线）。
+          appVersion: AppInfo.versionLabel,
         ),
         knownSha: remote?.sha,
       );
@@ -1035,13 +1075,16 @@ class AppController extends ChangeNotifier {
           syncedAt: now,
           remoteSha: written.sha,
           recordCount: liveRecordCount(local),
+          commitSha: written.commitSha,
         ),
       );
       notifyListeners();
       return (
         ok: true,
         message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
-            '远程路径：${cleaned.path}（分支 ${cleaned.branch}）',
+            '提交 ${shortSha(written.commitSha)} · 内容码 ${shortSha(written.sha)}\n'
+            '远程路径：${cleaned.path}（分支 ${cleaned.branch}）\n'
+            '提交码是"同一次上传"的凭证：另一台手机上读到同一个码，就是同一份。',
       );
     } on GitHubBackupException catch (error) {
       return (ok: false, message: '推送失败：${error.message}');
@@ -1054,28 +1097,41 @@ class AppController extends ChangeNotifier {
   ///
   /// 单独一个方法是因为"用远程覆盖本地"是覆盖性操作：用户必须先看到
   /// **条数与时间**，点过确认，才允许调用 [pullGitHubBackup]。
-  Future<({RemoteBackup? remote, String? error})> previewGitHubPull(
+  /// [commit] 是远程此刻那一次提交 —— 预览框里要摆出提交码，
+  /// 用户才知道这次拉的是哪一次上传。
+  Future<({RemoteBackup? remote, RemoteCommit? commit, String? error})> previewGitHubPull(
     GitHubBackupConfig config,
     String token,
   ) async {
     final cleaned = config.normalized();
     final reason = cleaned.validate();
-    if (reason != null) return (remote: null, error: reason);
-    if (!cleaned.enabled) return (remote: null, error: _gitHubDisabledMessage);
-    if (token.trim().isEmpty) return (remote: null, error: '还没填 Token');
+    if (reason != null) return (remote: null, commit: null, error: reason);
+    if (!cleaned.enabled) {
+      return (remote: null, commit: null, error: _gitHubDisabledMessage);
+    }
+    if (token.trim().isEmpty) return (remote: null, commit: null, error: '还没填 Token');
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
-      if (remote == null) return (remote: null, error: '远程还没有这份备份，先推送一次');
-      if (!remote.readable) return (remote: null, error: '远程那份读不出 Guide Line 数据');
-      if (liveRecordCount(remote.payload!.store) == 0) {
-        return (remote: null, error: '远程那份是 0 条记录 —— 0 条不算可用备份，不能拿它覆盖本地');
+      if (remote == null) {
+        return (remote: null, commit: null, error: '远程还没有这份备份，先推送一次');
       }
-      return (remote: remote, error: null);
+      if (!remote.readable) {
+        return (remote: null, commit: null, error: '远程那份读不出 Guide Line 数据');
+      }
+      if (liveRecordCount(remote.payload!.store) == 0) {
+        return (
+          remote: null,
+          commit: null,
+          error: '远程那份是 0 条记录 —— 0 条不算可用备份，不能拿它覆盖本地',
+        );
+      }
+      final commit = await gitHub.latestCommit(config: cleaned, token: token.trim());
+      return (remote: remote, commit: commit, error: null);
     } on GitHubBackupException catch (error) {
-      return (remote: null, error: error.message);
+      return (remote: null, commit: null, error: error.message);
     } catch (error) {
-      return (remote: null, error: '读取远程失败：$error');
+      return (remote: null, commit: null, error: '读取远程失败：$error');
     }
   }
 
@@ -1093,18 +1149,25 @@ class AppController extends ChangeNotifier {
     final remote = preview.remote!;
     final store = remote.payload!.store;
     final count = liveRecordCount(store);
+    final commit = preview.commit;
 
     final error = applyImport(store);
     if (error != null) return (ok: false, message: '拉取失败：$error');
 
     final now = Ids.nowMillis();
     storage.writeSyncRecord(
-      SyncRecord(syncedAt: now, remoteSha: remote.sha, recordCount: count),
+      SyncRecord(
+        syncedAt: now,
+        remoteSha: remote.sha,
+        recordCount: count,
+        commitSha: commit?.sha ?? '',
+      ),
     );
     notifyListeners();
     return (
       ok: true,
       message: '已拉取远程那份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
+          '提交 ${shortSha(commit?.sha ?? '')} · 内容码 ${shortSha(remote.sha)}\n'
           '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
     );
   }

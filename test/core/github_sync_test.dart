@@ -311,6 +311,69 @@ void main() {
       expect(next.remoteSha, 'a');
       expect(next.recordCount, 5);
     });
+
+    test('提交码原样读回来；未知（空串）就不写出去', () {
+      const code = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+      const record = SyncRecord(
+        syncedAt: t1,
+        remoteSha: 'abc123',
+        recordCount: 7,
+        commitSha: code,
+      );
+      final text = record.toCanonicalText();
+      expect(text, contains('commitSha'));
+      expect(SyncRecord.parse(text)!.commitSha, code);
+
+      const unknown = SyncRecord(syncedAt: t1, remoteSha: 'abc123', recordCount: 7);
+      expect(
+        unknown.toCanonicalText(),
+        isNot(contains('commitSha')),
+        reason: '未知就不写出去，与"空值不写出"的契约口径一致',
+      );
+    });
+
+    test('1.8.5 及以前的老记账没有提交码：读出来是未知，不是坏记账', () {
+      final old = SyncRecord.parse(
+        '{"syncedAt":$t1,"remoteSha":"abc123","recordCount":7}',
+      );
+      expect(old, isNotNull, reason: '老记账必须照旧能读，不能被升级弄坏');
+      expect(
+        old!.commitSha,
+        '',
+        reason: '缺这一项 =未知，不许判成"双端版本不一致"',
+      );
+    });
+  });
+
+  group('提交码与内容码', () {
+    test('短码取前 7 位；空串写「未知」而不是空着', () {
+      expect(shortSha('abc1234def5678'), 'abc1234');
+      expect(shortSha('abc'), 'abc');
+      expect(shortSha(''), '未知');
+    });
+
+    test('RemoteCommit：读不到提交码时 known 是 false', () {
+      expect(const RemoteCommit(sha: '').known, isFalse);
+      const found = RemoteCommit(
+        sha: 'abc1234',
+        message: 'backup: GuideLine 3 条记录',
+        committedAt: t1,
+      );
+      expect(found.known, isTrue);
+      expect(found.message, 'backup: GuideLine 3 条记录');
+      expect(found.committedAt, t1);
+    });
+
+    test('写回来的提交码跟着 RemoteBackup 一起带出来（内容码另有其人）', () {
+      final backup = RemoteBackup.fromBytes(
+        path: 'backups/guideline-latest.json.gz',
+        sha: 'blob-sha',
+        bytes: ExportCodec.encode(StoreFile.empty(), exportedAt: t1),
+        commitSha: 'commit-sha',
+      );
+      expect(backup.sha, 'blob-sha', reason: '内容码还是内容码');
+      expect(backup.commitSha, 'commit-sha', reason: '提交码要单独带一份');
+    });
   });
 
   group('给人看的两句话', () {
@@ -321,9 +384,24 @@ void main() {
     });
 
     test('提交说明带上条数，在 GitHub 上一眼看得懂', () {
-      final message = commitMessageFor(nowMillis: t1, recordCount: 12);
+      final message = commitMessageFor(
+        nowMillis: t1,
+        recordCount: 12,
+        appVersion: '1.9.0+38',
+      );
       expect(message, contains('12 条记录'));
       expect(message, startsWith('backup: GuideLine'));
+      expect(
+        message,
+        contains('1.9.0+38'),
+        reason: '带上版本号，GitHub 的提交列表里才看得出是哪一版推的',
+      );
+    });
+
+    test('没有版本号就不缀那一段，不留一个孤零零的分隔号', () {
+      final message = commitMessageFor(nowMillis: t1, recordCount: 3, appVersion: '');
+      expect(message, isNot(contains('·')));
+      expect(message, contains('3 条记录'));
     });
   });
 }
