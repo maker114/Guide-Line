@@ -15,53 +15,100 @@ void main() {
   });
 
   tearDown(() {
-    // 用例里可能把文件设成只读，先恢复再删
-    if (dir.existsSync()) {
-      for (final entity in dir.listSync(recursive: true)) {
-        if (entity is File) {
-          try {
-            entity.setLastModifiedSync(DateTime.now());
-            Process.runSync('attrib', <String>['-R', entity.path]);
-          } catch (_) {
-            // 恢复不了也不影响用例结果
-          }
-        }
-      }
-      dir.deleteSync(recursive: true);
-    }
+    if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
-  test('写入失败时原有数据必须还在（P1-1）', () {
-    final target = File('${dir.path}${Platform.pathSeparator}guideline.json');
-    target.writeAsStringSync('真数据');
+  /// 只拦"某一步改名"：`deny` 返回 true 表示这一步被拒绝
+  /// （模拟 EACCES / EPERM / EBUSY / 配额满）。
+  ///
+  /// 用注入点而不是 `attrib +R`：`attrib` 是 Windows 专用命令，Ubuntu CI 上
+  /// `Process.runSync` 直接抛 `ProcessException` —— **CI 从 2026-09-27 建立起
+  /// 就一直红在这两条用例上**；而 `chmod` 目录只读只会在创建 `.tmp` 时就抛，
+  /// 走不到要守的兜底。注入点让两端走同一条确定性路径。
+  void denyRenames(bool Function(File from, File to) deny) {
+    AtomicFile.renameHook = (from, to) {
+      if (deny(from, to)) throw FileSystemException('注入的失败：这一步改名被拒绝');
+      from.renameSync(to.path);
+    };
+    addTearDown(() => AtomicFile.renameHook = null);
+  }
 
-    // 目标文件只读 → 覆盖式 rename 会失败。
-    // 旧实现在这个 catch 里**无条件**删掉目标再改名，于是主文件消失、新文件也没就位。
-    Process.runSync('attrib', <String>['+R', target.path]);
+  group('写入失败时原有数据必须还在（P1-1）', () {
+    test('覆盖式 rename 被拒、兜底能走通：新数据就位，也不报错', () {
+      final target = File('${dir.path}${Platform.pathSeparator}guideline.json')
+        ..writeAsStringSync('真数据');
 
-    var threw = false;
-    try {
-      AtomicFile(target).writeText('新数据');
-    } catch (_) {
-      threw = true;
-    }
+      // 只拦第一次（`_replace` 那一步）；兜底里的两次改名放行
+      var attempt = 0;
+      AtomicFile.renameHook = (from, to) {
+        attempt += 1;
+        if (attempt == 1) throw FileSystemException('注入的失败：不允许覆盖');
+        from.renameSync(to.path);
+      };
+      addTearDown(() => AtomicFile.renameHook = null);
 
-    if (!threw) {
-      // 平台允许覆盖式 rename（那就没走到兜底），此时新数据应当已就位
-      expect(target.readAsStringSync(), '新数据');
-      return;
-    }
+      expect(() => AtomicFile(target).writeText('新数据'), returnsNormally);
+      expect(target.readAsStringSync(), '新数据', reason: '兜底走通了就该把新数据换上去');
+      expect(
+        File('${target.path}.old').existsSync(),
+        isFalse,
+        reason: '中转文件用完必须清掉，不能越积越多',
+      );
+    });
 
-    expect(
-      target.existsSync(),
-      isTrue,
-      reason: '写入失败绝不能把唯一的主文件删掉 —— 这是不可逆的数据丢失',
-    );
-    expect(
-      target.readAsStringSync(),
-      '真数据',
-      reason: '失败后留下的必须是原来的内容，不能是半截或空文件',
-    );
+    test('兜底也换不上去：原文件必须原样回来，且如实报错', () {
+      final target = File('${dir.path}${Platform.pathSeparator}guideline.json')
+        ..writeAsStringSync('真数据');
+
+      // 只要"目标是主文件"就拒绝：`_replace` 与兜底里的 `tmp → 目标` 都被拦，
+      // 于是"新文件没就位 → 把原文件改回来"这条分支必然走到。
+      final tmp = '${target.path}.tmp';
+      denyRenames((from, to) => to.path == target.path && from.path == tmp);
+
+      var threw = false;
+      try {
+        AtomicFile(target).writeText('新数据');
+      } catch (_) {
+        threw = true;
+      }
+
+      expect(threw, isTrue, reason: '没写进去就必须如实报错，绝不能静默成功');
+      expect(
+        target.existsSync(),
+        isTrue,
+        reason: '写入失败绝不能把唯一的主文件删掉 —— 这是不可逆的数据丢失',
+      );
+      expect(target.readAsStringSync(), '真数据', reason: '失败后留下的必须是原来的内容');
+      expect(
+        File('${target.path}.old').existsSync(),
+        isFalse,
+        reason: '原文件已经改回目标位，中转文件不该留下',
+      );
+      expect(File(tmp).existsSync(), isTrue, reason: '临时文件留着，启动时由 cleanupTmp 清掉');
+    });
+
+    test('连回改都失败：数据必须还躺在 .old 里，绝不许两份同时消失', () {
+      final target = File('${dir.path}${Platform.pathSeparator}guideline.json')
+        ..writeAsStringSync('真数据');
+
+      // 所有"改名为主文件"的步骤都拒绝 → 中转成功、新文件没就位、回改也失败
+      denyRenames((from, to) => to.path == target.path);
+
+      var threw = false;
+      try {
+        AtomicFile(target).writeText('新数据');
+      } catch (_) {
+        threw = true;
+      }
+
+      expect(threw, isTrue, reason: '没写进去就必须如实报错');
+      expect(
+        File('${target.path}.old').readAsStringSync(),
+        '真数据',
+        reason: '目标位空了，但数据还在 .old —— 留一份给人工处理，总比两份都没了强',
+      );
+      expect(File('${target.path}.tmp').existsSync(), isTrue);
+    });
   });
 
   test('同一毫秒隔离两次：第二份不会盖掉第一份的现场（P1-7）', () {

@@ -16,6 +16,8 @@ import 'package:guideline/core/store/merge.dart';
 import 'package:guideline/core/store/ui_prefs.dart';
 import 'package:guideline/features/workspace.dart';
 
+import '../support/readonly_dir.dart';
+
 /// 写盘失败时的行为（磁盘满 / 权限被拒），以及「导出记账」的口径（Q11）。
 ///
 /// 业务动作的写法是「先改内存，再整份落盘」，所以写失败时内存**已经改了**。
@@ -30,7 +32,11 @@ void main() {
   });
 
   tearDown(() {
-    if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+    if (tempDir.existsSync()) {
+      // 用例可能把目录上过锁（P1-3），先解锁再删，否则收尾会删不掉
+      restoreDirWritable(tempDir.path);
+      tempDir.deleteSync(recursive: true);
+    }
   });
 
   AppController controllerWith(AppStorage storage, {ShareFileHook? shareFile}) {
@@ -189,17 +195,20 @@ void main() {
       final app = controllerWith(storage);
       app.run(() => app.ws.createProject(title: '项目'));
 
-      // 把目录设成只读，让备份写入失败
-      final madeReadOnly = Process.runSync('attrib', <String>['+R', tempDir.path]);
-      addTearDown(() => Process.runSync('attrib', <String>['-R', tempDir.path]));
-      if (madeReadOnly.exitCode != 0) {
+      // 把目录设成不可写，让备份写入失败。
+      // 走跨平台助手（Windows `attrib +R` / POSIX `chmod 0500`）：以前这里直接调 `attrib`，
+      // Ubuntu runner 上 `Process.runSync` 抛 ProcessException —— CI 从建立起就红在这一条上。
+      final locked = makeDirReadOnly(tempDir.path);
+      addTearDown(() => restoreDirWritable(tempDir.path));
+      if (!locked) {
         markTestSkipped('这个环境里设不了只读目录');
         return;
       }
 
       final error = app.snapshotBackupNow();
 
-      // 只读目录在 Windows 上未必拦得住写；拦不住时至少不能报错（下面按实际结果分别断言）
+      // 只读目录未必拦得住写（Windows 的 attrib 对目录不是强约束，Linux 上以 root 跑也拦不住），
+      // 拦不住时至少不能报错（下面按实际结果分别断言）
       if (storage.paths.rollingBackup(1).existsSync()) {
         expect(error, isNull, reason: '真的写出来了就该报成功');
       } else {

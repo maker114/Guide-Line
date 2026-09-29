@@ -38,6 +38,28 @@ class AtomicFile {
     }
   }
 
+  /// 测试用的失败注入点：**换掉"改名"这一步**（默认 `null` = 真的改名）。
+  ///
+  /// 为什么需要它：守 `_replace` / `_replaceViaOld` 兜底的用例（P1-1）原先靠
+  /// Windows 的 `attrib +R` 制造失败，而 `attrib` 是 Windows 专用命令 ——
+  /// Ubuntu CI 上 `Process.runSync` 直接抛 `ProcessException`，
+  /// **CI 从 2026-09-27 建立起就一直红在这两条用例上**。
+  /// 换成注入点之后，两个平台走的是**同一条**确定性路径，也不再依赖操作系统的
+  /// 权限语义（`chmod` 目录只读只会在创建 `.tmp` 时就抛，根本走不到要守的兜底；
+  /// Windows 上给目录加只读属性又拦不住新建文件）。
+  ///
+  /// 生产代码永不设置它。
+  static void Function(File from, File to)? renameHook;
+
+  static void _rename(File from, File to) {
+    final hook = renameHook;
+    if (hook != null) {
+      hook(from, to);
+      return;
+    }
+    from.renameSync(to.path);
+  }
+
   static File tmpOf(File f) => File('${f.path}.tmp');
 
   static File corruptOf(File f, int stamp) => File('${f.path}.corrupt.$stamp');
@@ -87,7 +109,7 @@ class AtomicFile {
   /// 任何一步失败，盘上都至少留着一份完整的数据（要么原文件，要么 `.old`）。
   void _replace(File tmp) {
     try {
-      tmp.renameSync(file.path);
+      _rename(tmp, file);
       return;
     } catch (error) {
       if (file.existsSync()) {
@@ -114,17 +136,17 @@ class AtomicFile {
       }
     }
     try {
-      file.renameSync(old.path);
+      _rename(file, old);
     } catch (_) {
       // 连中转都做不到：原文件还在原位，什么都没坏
       throw originalError;
     }
     try {
-      tmp.renameSync(file.path);
+      _rename(tmp, file);
     } catch (_) {
       // 新文件没就位：把原文件改回来，绝不让"目标位空着"
       try {
-        old.renameSync(file.path);
+        _rename(old, file);
       } catch (_) {
         // 连回改都失败：`.old` 仍在盘上，数据没丢，留给人工处理
       }

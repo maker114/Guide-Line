@@ -36,6 +36,26 @@
 
 ---
 
+## [1.9.3] - 2026-09-30
+
+> `1.9.2` 推上去之后 GitHub 立刻来报：CI #6 失败。查下来**不是这两天的改动** ——
+> 从 2026-09-27 加这个 workflow 的那次提交起（run #1…run #7），`analyze + test`
+> 这个作业**一次都没绿过**，`build apk (release)` 则一直成功。病因是本机（Windows）
+> 与 CI（Ubuntu）的差异：两条用例用 Windows 专用命令 `attrib` 制造写盘失败。
+
+### Fixed
+
+- **CI 从建立起就一直红**：`test/core/atomic_file_test.dart` 与
+  `test/app/app_controller_test.dart` 原先靠 `Process.runSync('attrib', ['+R', …])`
+  把文件/目录设成只读，而 `attrib` 只有 Windows 有 —— Ubuntu runner 上
+  `Process.runSync` 抛 `ProcessException`，连"设不上就 `markTestSkipped`"那句都轮不到。
+  现在：前者改成在 `AtomicFile.renameHook` 上**注入**失败（与 `fsyncHook` 同风格，
+  两端走同一条确定性路径，顺带把兜底的三条分支都覆盖上）；后者改用跨平台测试助手
+  `test/support/readonly_dir.dart`（Windows `attrib` / POSIX `chmod`），设不上就跳过。
+  以后再要"制造写盘失败"，只能用这个助手，不许再写平台专用命令。
+
+---
+
 ## [1.9.2] - 2026-09-29
 
 > `1.9.1` 把"大文件读成空"改成了"换个媒体类型去读"，但那条路**在真机上根本读不完**：
