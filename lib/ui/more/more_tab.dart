@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
+import '../../core/store/github_sync.dart';
 import '../../core/store/ui_prefs.dart';
 import '../../platform/data_directory.dart';
 import '../common/format.dart';
@@ -13,6 +14,7 @@ import 'appearance_page.dart';
 import 'archive_page.dart';
 import 'backups_page.dart';
 import 'export_page.dart';
+import 'github_backup_page.dart';
 import 'search_page.dart';
 import 'upcoming_page.dart';
 
@@ -115,6 +117,12 @@ class _MoreTabState extends State<MoreTab> {
           danger: app.exportOverdue,
           page: ExportPage(app: app),
         ),
+        _MoreItem(
+          icon: Icons.cloud_sync_outlined,
+          title: 'GitHub 备份同步',
+          subtitle: _gitHubSubtitle(context),
+          page: GitHubBackupPage(app: app),
+        ),
         const SectionHeader('关于'),
         ListTile(
           leading: const Icon(Icons.folder_outlined),
@@ -183,6 +191,29 @@ class _MoreTabState extends State<MoreTab> {
         return Text(text, style: Theme.of(context).textTheme.bodySmall);
       },
     );
+  }
+
+  /// GitHub 备份同步入口的副标题。
+  ///
+  /// 与 AI 那一条同一套写法：**配置读不出来也只当装饰**，不阻塞整页。
+  /// 记账（上次同步时间）是同步读的本地小文件，不必再起一个 `FutureBuilder`。
+  Widget _gitHubSubtitle(BuildContext context) {
+    if (!app.prefs.githubBackupEnabled) {
+      return Text('已关闭（实验性）', style: Theme.of(context).textTheme.bodySmall);
+    }
+    final owner = app.prefs.githubBackupOwner;
+    final repo = app.prefs.githubBackupRepo;
+    final record = app.readGitHubSyncRecord();
+
+    final String text;
+    if (owner.isEmpty || repo.isEmpty) {
+      text = '未配置：还没填仓库所有者或仓库名';
+    } else if (record == null) {
+      text = '$owner/$repo · 还没同步过';
+    } else {
+      text = '$owner/$repo · 上次同步 ${formatStamp(record.syncedAt)}';
+    }
+    return Text(text, style: Theme.of(context).textTheme.bodySmall);
   }
 }
 

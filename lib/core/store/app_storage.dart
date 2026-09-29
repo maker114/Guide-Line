@@ -9,6 +9,7 @@ import '../models/entity.dart';
 import '../models/enums.dart';
 import 'app_paths.dart';
 import 'atomic_file.dart';
+import 'github_sync.dart';
 import 'ui_prefs.dart';
 
 /// 启动加载报告：把"读到了什么"与"哪里有问题"一起交给上层。
@@ -784,6 +785,81 @@ class AppStorage {
       file.deleteSync();
     } catch (_) {
       // 删不掉也不影响：下次重置会整份覆盖
+    }
+  }
+
+  // -------------------------------------------------- GitHub 备份同步的记账
+
+  /// 「上次与 GitHub 同步到哪」的记账文件名。
+  ///
+  /// 与 [implementationHistoryFileName] / [resetSnapshotFileName] **同一档**：
+  /// 不是数据，不进主数据文件、不进导出、不进备份轮转，也没有 `schemaVersion`。
+  /// 区别在丢了会怎样 —— 前两份丢了是少一次"退回上一版"，这份丢了最坏是
+  /// 下一次同步判定退化成"两边都比对不出来"，让用户手动选一次，
+  /// **任何一条真实记录都不受影响**。
+  static const String githubSyncRecordFileName = 'github_sync.json';
+
+  File get _githubSyncFile => File(
+        '${paths.directory.path}${Platform.pathSeparator}$githubSyncRecordFileName',
+      );
+
+  /// 读回同步记账；没有 / 读不出 / 坏了一律返回 `null`（当"没同步过"）。
+  ///
+  /// 坏了不报错是有意的：它只决定"能不能自动判断该推还是该拉"，
+  /// 不该在启动或推送路径上抛异常。解析交给 `SyncRecord.parse` 自己做
+  /// 形状校验（缺键、类型不对都当没有）。
+  SyncRecord? readSyncRecord() {
+    final file = _githubSyncFile;
+    if (!file.existsSync()) return null;
+    try {
+      return SyncRecord.parse(file.readAsStringSync(encoding: utf8));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 记一次成功的同步。
+  ///
+  /// 写不进去**只当没记上**：文件已经推上去了（或已经拉下来了），
+  /// 真实结果不因为这一份记账写失败而改变 —— 与"护栏失败不阻断主流程"同一口径。
+  void writeSyncRecord(SyncRecord record) {
+    try {
+      paths.ensureDirectories();
+      AtomicFile(_githubSyncFile).writeText(record.toCanonicalText());
+    } catch (_) {
+      // 见上
+    }
+  }
+
+  /// 清掉记账（例如用户换了仓库 / 分支 / 路径：旧记账对新落点没有意义）。
+  void clearSyncRecord() {
+    final file = _githubSyncFile;
+    if (!file.existsSync()) return;
+    try {
+      file.deleteSync();
+    } catch (_) {
+      // 删不掉也不影响：下次同步会整份覆盖
+    }
+  }
+
+  /// 主数据文件里那句 `savedAt`：**本地数据最后一次落盘的时刻**。
+  ///
+  /// 冲突判定要拿它跟远程那份的 `exportedAt` 比。这里刻意**不用
+  /// `Workspace.buildStoreFile().savedAt`** —— 那个是每次调用现取的 `now()`，
+  /// 于是本地永远显得"刚改过"，「两边都改过」这条判定就再也退不出来。
+  ///
+  /// 纯读：不改盘、不轮转备份、不隔离坏文件；读不出返回 `null`
+  /// （当"说不清"，由调用方按"本地可能改过"处理，宁可多问一次）。
+  int? readStoreSavedAt() {
+    final file = paths.storeFile;
+    if (!file.existsSync()) return null;
+    try {
+      final decoded = Canonical.decode(file.readAsStringSync(encoding: utf8));
+      if (decoded is! Map) return null;
+      final savedAt = decoded['savedAt'];
+      return (savedAt is int && savedAt > 0) ? savedAt : null;
+    } catch (_) {
+      return null;
     }
   }
 

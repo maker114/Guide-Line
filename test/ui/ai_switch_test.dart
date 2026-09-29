@@ -125,7 +125,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('AI 整理'), findsOneWidget);
-    expect(find.textContaining('已关闭'), findsOneWidget);
+    // 断言收窄到「AI 整理」这一行：后来「数据安全」节多了
+    // 「GitHub 备份同步（实验性）」，它关着时写的是「已关闭（实验性）」，
+    // 整页 textContaining('已关闭') 会同时命中两行。
+    expect(
+      find.descendant(
+        of: find.widgetWithText(ListTile, 'AI 整理'),
+        matching: find.text('已关闭'),
+      ),
+      findsOneWidget,
+    );
   });
 }
 

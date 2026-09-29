@@ -7,15 +7,18 @@ import '../core/ids.dart';
 import '../core/json/store_file.dart';
 import '../core/models/ai_config.dart';
 import '../core/models/entity.dart';
+import '../core/models/github_backup_config.dart';
 import '../core/models/project.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
+import '../core/store/github_sync.dart';
 import '../core/store/ui_prefs.dart';
 import '../features/workspace.dart';
 import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
+import '../platform/github_backup_client.dart';
 
 /// 分享动作的可注入钩子（真机走 [DataTransferPlatform.shareFile]）。
 ///
@@ -47,10 +50,14 @@ class AppController extends ChangeNotifier {
     AiTextGenerator? aiGenerator,
     AiCredentialStore? credentialStore,
     ShareFileHook? shareFile,
+    GitHubBackupGateway? gitHubGateway,
+    GitHubCredentialStore? gitHubCredentials,
   })  : startupWarnings = List<String>.unmodifiable(startupWarnings),
         ai = aiGenerator ?? const HttpAiTextGenerator(),
         credentials = credentialStore ?? const SecureAiCredentialStore(),
-        shareFile = shareFile ?? _defaultShareFile;
+        shareFile = shareFile ?? _defaultShareFile,
+        gitHub = gitHubGateway ?? const HttpGitHubBackupGateway(),
+        gitHubStore = gitHubCredentials ?? const SecureGitHubCredentialStore();
 
   /// 从磁盘装配（唯一入口）。
   static Future<AppController> bootstrap({
@@ -58,6 +65,8 @@ class AppController extends ChangeNotifier {
     AiTextGenerator? aiGenerator,
     AiCredentialStore? credentialStore,
     ShareFileHook? shareFile,
+    GitHubBackupGateway? gitHubGateway,
+    GitHubCredentialStore? gitHubCredentials,
   }) async {
     final dir = await DataDirectory.resolve(override: dataDirectoryOverride);
     final storage = AppStorage(AppPaths(dir));
@@ -73,6 +82,8 @@ class AppController extends ChangeNotifier {
       aiGenerator: aiGenerator,
       credentialStore: credentialStore,
       shareFile: shareFile,
+      gitHubGateway: gitHubGateway,
+      gitHubCredentials: gitHubCredentials,
     ).._loadBackgroundBytes();
     // 灵感箱空态那句轮换文案**每次启动重抽**（ADR-084）。落进偏好是为了
     // "同一次运行里不再变" —— 界面只读它，不自己抽。
@@ -182,6 +193,12 @@ class AppController extends ChangeNotifier {
 
   /// 把文件交给系统分享面板的动作（默认走平台通道；用例注入假实现）。
   final ShareFileHook shareFile;
+
+  /// GitHub 备份同步的联网实现（默认走 Contents API；测试注入假实现）。
+  final GitHubBackupGateway gitHub;
+
+  /// GitHub Token 的保管处（与 AI 的 `apiKey` **分开存**，两者的权限量级不同）。
+  final GitHubCredentialStore gitHubStore;
 
   Workspace get ws => workspace;
 
@@ -803,6 +820,293 @@ class AppController extends ChangeNotifier {
     } catch (error) {
       return (text: null, error: '拆分失败：$error');
     }
+  }
+
+  // ------------------------------------------------- GitHub 备份同步（实验性）
+
+  /// 总开关关着时，推送 / 拉取一律拒绝的那句话。
+  static const String _gitHubDisabledMessage =
+      'GitHub 备份同步的开关还关着 —— 先在这一页打开「启用 GitHub 备份同步」，它才会连网';
+
+  /// 读 GitHub 备份同步的配置：非敏感部分在偏好里，Token 从安全存储取。
+  ///
+  /// 与 [readAiConfig] 同一口径：Token 读不出来当"没配置"，不报错 ——
+  /// 部分 ROM 上 Keystore 偶发失败，不该让设置页崩掉。
+  Future<({GitHubBackupConfig config, String token})> readGitHubBackupConfig() async {
+    final token = await gitHubStore.readToken();
+    return (
+      config: GitHubBackupConfig(
+        enabled: prefs.githubBackupEnabled,
+        owner: prefs.githubBackupOwner,
+        repo: prefs.githubBackupRepo,
+        branch: prefs.githubBackupBranch,
+        path: prefs.githubBackupPath,
+      ),
+      token: token ?? '',
+    );
+  }
+
+  /// 保存 GitHub 备份同步的配置。
+  ///
+  /// 换仓库 / 分支 / 路径时**连记账一起清掉**：旧记账说的是"另一个落点上
+  /// 我们同步到哪"，留着它会让冲突判定拿着错误的基线，把"两边都改过"
+  /// 误判成"只有一边改过" —— 那正是最不该出错的一步。
+  Future<String?> saveGitHubBackupConfig(
+    GitHubBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final old = prefs;
+    final moved = cleaned.owner != old.githubBackupOwner ||
+        cleaned.repo != old.githubBackupRepo ||
+        cleaned.branch != old.githubBackupBranch ||
+        cleaned.path != old.githubBackupPath;
+
+    try {
+      workspace.updatePrefs(
+        prefs.copyWith(
+          githubBackupEnabled: cleaned.enabled,
+          githubBackupOwner: cleaned.owner,
+          githubBackupRepo: cleaned.repo,
+          githubBackupBranch: cleaned.branch,
+          githubBackupPath: cleaned.path,
+        ),
+      );
+      final trimmed = token.trim();
+      if (trimmed.isEmpty) {
+        await gitHubStore.clearToken();
+      } else {
+        await gitHubStore.writeToken(trimmed);
+      }
+      if (moved) storage.clearSyncRecord();
+      gitHubConfigRevision += 1;
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '保存失败：$error';
+    }
+  }
+
+  /// GitHub 配置的版本号：每保存一次 +1（缓存了读结果的界面用它判新旧）。
+  int gitHubConfigRevision = 0;
+
+  /// 上次与 GitHub 同步的记账（没同步过返回 null）。
+  SyncRecord? readGitHubSyncRecord() => storage.readSyncRecord();
+
+  /// 真连一次 GitHub：读一下远程那一份，证明 Token、仓库、分支都对。
+  ///
+  /// **只读不写** —— "测试连接"不该顺手往用户仓库里留东西。
+  Future<({bool ok, String message})> testGitHubConnection(
+    GitHubBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (ok: false, message: reason);
+    if (token.trim().isEmpty) return (ok: false, message: '还没填 Token');
+
+    const host = 'https://api.github.com';
+    final where = '$host${cleaned.contentsApiPath}（分支 ${cleaned.branch}）';
+
+    try {
+      final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      if (remote == null) {
+        return (
+          ok: true,
+          message: '连上了，但远程还没有这份备份。\n'
+              '请求地址：$where\n'
+              '第一次「推送」会新建它。',
+        );
+      }
+      if (!remote.readable) {
+        return (
+          ok: true,
+          message: '连上了，但那份文件读不出 Guide Line 数据。\n'
+              '请求地址：$where\n'
+              '它可能不是你 App 推上去的 —— 推送会覆盖它。',
+        );
+      }
+      return (
+        ok: true,
+        message: '连通成功\n'
+            '请求地址：$where\n'
+            '远程那份：${formatStamp(remote.savedAt)} · '
+            '${liveRecordCount(remote.payload!.store)} 条活记录',
+      );
+    } on GitHubBackupException catch (error) {
+      return (ok: false, message: '连接失败\n请求地址：$where\n原因：${error.message}');
+    } catch (error) {
+      return (ok: false, message: '连接失败：$error');
+    }
+  }
+
+  /// 看远程现在是什么状态（**只读**，供界面在推送 / 拉取前把情况摆清楚）。
+  Future<({RemoteBackup? remote, SyncPlan? plan, String? error})> checkGitHubBackup(
+    GitHubBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (remote: null, plan: null, error: reason);
+    if (token.trim().isEmpty) return (remote: null, plan: null, error: '还没填 Token');
+
+    try {
+      final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      final local = workspace.buildStoreFile();
+      final plan = analyzeSync(
+        local: local,
+        // 本地那句 savedAt 要读**盘上**的：`buildStoreFile()` 现取 `now()`，
+        // 拿它做基线的话本地永远"刚改过"。
+        localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
+        remote: remote,
+        lastSync: storage.readSyncRecord(),
+      );
+      return (remote: remote, plan: plan, error: null);
+    } on GitHubBackupException catch (error) {
+      return (remote: null, plan: null, error: error.message);
+    } catch (error) {
+      return (remote: null, plan: null, error: '读取远程失败：$error');
+    }
+  }
+
+  /// 把当前数据推到 GitHub（覆盖远程那一份）。
+  ///
+  /// [overrideRemoteChanges] 是用户在"两边都改过"时明确选了"用本地覆盖远程"。
+  /// 不点它就不会覆盖 —— **这一条不许被界面绕过**：手机上把两份人生记录
+  /// 自动并起来，比让用户手动选一次危险得多。
+  Future<({bool ok, String message})> pushGitHubBackup(
+    GitHubBackupConfig config,
+    String token, {
+    bool overrideRemoteChanges = false,
+  }) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (ok: false, message: reason);
+    // 总开关是用户手上的闸：关着就是"别动网"（含"我改主意了"）。
+    // 界面会把按钮置灰，但灰按钮挡不住无障碍焦点与热键重入，所以这里再挡一次。
+    if (!cleaned.enabled) return (ok: false, message: _gitHubDisabledMessage);
+    if (token.trim().isEmpty) return (ok: false, message: '还没填 Token');
+
+    try {
+      final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      final local = workspace.buildStoreFile();
+      final plan = analyzeSync(
+        local: local,
+        localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
+        remote: remote,
+        lastSync: storage.readSyncRecord(),
+      );
+
+      if (plan.action == SyncAction.noChange) {
+        return (ok: true, message: '两边是同一份，没有要推的东西。');
+      }
+      if (plan.action == SyncAction.localEmpty) {
+        return (
+          ok: false,
+          message: '${plan.message}\n\n'
+              '为了不误擦远程，这里不往下走 —— 先在这台手机上恢复数据，或者去远程把那份存下来。',
+        );
+      }
+      if (plan.action == SyncAction.pull || plan.action == SyncAction.bothChanged) {
+        if (!overrideRemoteChanges) {
+          return (
+            ok: false,
+            message: '${plan.message}\n\n'
+                '要覆盖远程请再点一次「推送」并在确认框里选「用本地覆盖远程」。',
+          );
+        }
+      }
+
+      final now = Ids.nowMillis();
+      final bytes = ExportCodec.encode(local, exportedAt: now);
+      final written = await gitHub.writeBackup(
+        config: cleaned,
+        token: token.trim(),
+        bytes: bytes,
+        message: commitMessageFor(
+          nowMillis: now,
+          recordCount: liveRecordCount(local),
+        ),
+        knownSha: remote?.sha,
+      );
+
+      storage.writeSyncRecord(
+        SyncRecord(
+          syncedAt: now,
+          remoteSha: written.sha,
+          recordCount: liveRecordCount(local),
+        ),
+      );
+      notifyListeners();
+      return (
+        ok: true,
+        message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
+            '远程路径：${cleaned.path}（分支 ${cleaned.branch}）',
+      );
+    } on GitHubBackupException catch (error) {
+      return (ok: false, message: '推送失败：${error.message}');
+    } catch (error) {
+      return (ok: false, message: '推送失败：$error');
+    }
+  }
+
+  /// 先把远程那份解出来（**不落盘**），给界面做"拉取前预览"。
+  ///
+  /// 单独一个方法是因为"用远程覆盖本地"是覆盖性操作：用户必须先看到
+  /// **条数与时间**，点过确认，才允许调用 [pullGitHubBackup]。
+  Future<({RemoteBackup? remote, String? error})> previewGitHubPull(
+    GitHubBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (remote: null, error: reason);
+    if (!cleaned.enabled) return (remote: null, error: _gitHubDisabledMessage);
+    if (token.trim().isEmpty) return (remote: null, error: '还没填 Token');
+
+    try {
+      final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      if (remote == null) return (remote: null, error: '远程还没有这份备份，先推送一次');
+      if (!remote.readable) return (remote: null, error: '远程那份读不出 Guide Line 数据');
+      if (liveRecordCount(remote.payload!.store) == 0) {
+        return (remote: null, error: '远程那份是 0 条记录 —— 0 条不算可用备份，不能拿它覆盖本地');
+      }
+      return (remote: remote, error: null);
+    } on GitHubBackupException catch (error) {
+      return (remote: null, error: error.message);
+    } catch (error) {
+      return (remote: null, error: '读取远程失败：$error');
+    }
+  }
+
+  /// 用远程那份**整体替换**本地数据（用户已经在预览里确认过）。
+  ///
+  /// 走 [applyImport] 同一条路：强制轮转备份 → 原子写 → 重载工作区，
+  /// 所以"拉错了"还能在「备份与恢复」里退回。
+  Future<({bool ok, String message})> pullGitHubBackup(
+    GitHubBackupConfig config,
+    String token,
+  ) async {
+    final preview = await previewGitHubPull(config, token);
+    if (preview.remote == null) return (ok: false, message: preview.error ?? '读取远程失败');
+
+    final remote = preview.remote!;
+    final store = remote.payload!.store;
+    final count = liveRecordCount(store);
+
+    final error = applyImport(store);
+    if (error != null) return (ok: false, message: '拉取失败：$error');
+
+    final now = Ids.nowMillis();
+    storage.writeSyncRecord(
+      SyncRecord(syncedAt: now, remoteSha: remote.sha, recordCount: count),
+    );
+    notifyListeners();
+    return (
+      ok: true,
+      message: '已拉取远程那份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
+          '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
+    );
   }
 
   /// 灵感箱空态那句轮换文案：**每次启动抽一次**，种子落进偏好（ADR-084）。

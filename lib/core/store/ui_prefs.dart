@@ -21,6 +21,11 @@ class UiPrefs {
     this.aiModel = defaultAiModel,
     this.aiEnabled = true,
     this.emptyBoxSeed,
+    this.githubBackupEnabled = false,
+    this.githubBackupOwner = '',
+    this.githubBackupRepo = '',
+    this.githubBackupBranch = defaultGithubBranch,
+    this.githubBackupPath = defaultGithubBackupPath,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -67,6 +72,17 @@ class UiPrefs {
   /// 是 `deepseek-flash` 而不是 `deepseek-v4.1-flash` ——
   /// 官方发布说明写的是"将模型名称更改为 `deepseek-flash`"。
   static const String defaultAiModel = 'deepseek-flash';
+
+  /// GitHub 备份同步的默认分支。
+  ///
+  /// 与 `GitHubBackupConfig.defaultBranch` 是同一个值，但这里再写一份字面量：
+  /// **core 的偏好文件不认识平台层**（与 [defaultAiBaseUrl] 同一条理由）。
+  static const String defaultGithubBranch = 'main';
+
+  /// GitHub 备份同步的默认远程路径。
+  ///
+  /// 与 `GitHubBackupConfig.defaultPath` 同值同理由。
+  static const String defaultGithubBackupPath = 'backups/guideline-latest.json.gz';
 
   /// 已折叠的节点 id（项目树 / 任务线共用）
   final Set<String> collapsedIds;
@@ -136,6 +152,28 @@ class UiPrefs {
   /// 会自然落到新表上，不会留着一句已经从代码里删掉的话。
   final int? emptyBoxSeed;
 
+  /// GitHub 备份同步的**总开关**（默认**关**）。
+  ///
+  /// 与 [aiEnabled] 同一条口径：开关只决定"显不显示 / 能不能用"，
+  /// 不决定"记不记得住" —— 关掉不清 owner / repo / Token，也不删远程那份。
+  /// 默认关是因为它会把**整份数据**发到手机之外，而 AI 只发一个项目的清单。
+  final bool githubBackupEnabled;
+
+  /// GitHub 仓库所有者（**非敏感**）。
+  ///
+  /// Token **不在这里** —— 那个走 `flutter_secure_storage`，
+  /// 因为这个文件会进滚动备份与整库导出（与 [aiBaseUrl] 同一条理由）。
+  final String githubBackupOwner;
+
+  /// GitHub 仓库名（**非敏感**）。
+  final String githubBackupRepo;
+
+  /// GitHub 分支名（**非敏感**）。
+  final String githubBackupBranch;
+
+  /// 远程文件路径（**非敏感**）。
+  final String githubBackupPath;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -175,6 +213,11 @@ class UiPrefs {
     String? aiModel,
     bool? aiEnabled,
     Object? emptyBoxSeed = _unset,
+    bool? githubBackupEnabled,
+    String? githubBackupOwner,
+    String? githubBackupRepo,
+    String? githubBackupBranch,
+    String? githubBackupPath,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -198,6 +241,11 @@ class UiPrefs {
         aiEnabled: aiEnabled ?? this.aiEnabled,
         emptyBoxSeed:
             emptyBoxSeed == _unset ? this.emptyBoxSeed : emptyBoxSeed as int?,
+        githubBackupEnabled: githubBackupEnabled ?? this.githubBackupEnabled,
+        githubBackupOwner: githubBackupOwner ?? this.githubBackupOwner,
+        githubBackupRepo: githubBackupRepo ?? this.githubBackupRepo,
+        githubBackupBranch: githubBackupBranch ?? this.githubBackupBranch,
+        githubBackupPath: githubBackupPath ?? this.githubBackupPath,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -216,6 +264,11 @@ class UiPrefs {
         'aiModel': aiModel,
         'aiEnabled': aiEnabled,
         'emptyBoxSeed': emptyBoxSeed,
+        'githubBackupEnabled': githubBackupEnabled,
+        'githubBackupOwner': githubBackupOwner,
+        'githubBackupRepo': githubBackupRepo,
+        'githubBackupBranch': githubBackupBranch,
+        'githubBackupPath': githubBackupPath,
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -244,15 +297,26 @@ class UiPrefs {
       aiEnabled: json['aiEnabled'] != false,
       // 老偏好文件里没有这个键 → `null`，界面首帧自己抽一次
       emptyBoxSeed: json['emptyBoxSeed'] is int ? json['emptyBoxSeed'] as int : null,
+      // GitHub 备份同步：与 AI 那几项同一套"坏值 / 缺键静默回默认"的口径。
+      // 开关刻意**缺键即关**：它会把整份数据发到手机之外，不该继承一个"默认开"。
+      githubBackupEnabled: json['githubBackupEnabled'] == true,
+      githubBackupOwner: _readTrimmed(json['githubBackupOwner']),
+      githubBackupRepo: _readTrimmed(json['githubBackupRepo']),
+      githubBackupBranch: _readNonEmpty(json['githubBackupBranch'], defaultGithubBranch),
+      githubBackupPath: _readNonEmpty(json['githubBackupPath'], defaultGithubBackupPath),
     );
   }
+
+  /// 读一个"允许为空串"的文本偏好（空串是有意义的值：还没填）。
+  static String _readTrimmed(Object? value) => value is String ? value.trim() : '';
 
   /// 读主题模式：只认 [themeModes] 里那三个字面量，别的（含缺键、类型不对）一律
   /// 收回默认值。与其它偏好字段同一套"坏值不抛、静默回默认"的口径。
   static String _readThemeMode(Object? value) =>
       value is String && themeModes.contains(value) ? value : defaultThemeMode;
 
-  static String _readNonEmpty(Object? value, String fallback) {    if (value is! String) return fallback;
+  static String _readNonEmpty(Object? value, String fallback) {
+    if (value is! String) return fallback;
     final trimmed = value.trim();
     return trimmed.isEmpty ? fallback : trimmed;
   }
