@@ -39,15 +39,23 @@ void main() {
         'name': 'guideline-latest.json.gz',
       });
 
-  test('文件超过 1 MB：默认媒体类型只回空 content，就换 raw 再读一次', () async {
+  test('文件超过 1 MB：默认媒体类型只回空 content，就换 git/blobs 再读一次', () async {
     final bytes = realBackupBytes();
     final requests = <http.Request>[];
 
     final gateway = HttpGitHubBackupGateway(
       client: MockClient((request) async {
         requests.add(request);
-        if (request.headers['Accept'] == 'application/vnd.github.raw') {
-          return http.Response.bytes(bytes, 200);
+        if (request.url.path.contains('/git/blobs/')) {
+          return http.Response(
+            jsonEncode({
+              'sha': 'blob-big',
+              'size': bytes.length,
+              'encoding': 'base64',
+              'content': base64.encode(bytes),
+            }),
+            200,
+          );
         }
         return http.Response(bigFileMetadata(bytes.length), 200);
       }),
@@ -61,13 +69,38 @@ void main() {
     expect(remote.readable, isTrue);
     expect(requests, hasLength(2));
     expect(requests.first.headers['Accept'], 'application/vnd.github+json');
-    expect(requests.last.headers['Accept'], 'application/vnd.github.raw');
     expect(
       requests.last.url.path,
-      requests.first.url.path,
-      reason: '补读用的是同一个地址，只是换了个媒体类型',
+      '/repos/maker114/guideline-backup/git/blobs/blob-big',
+      reason: '补读走 Git Blobs API：raw 那条路实测 1.38 MB 传不完就被掐断',
     );
-    expect(requests.last.url.queryParameters['ref'], 'main');
+    expect(
+      requests.last.headers['Accept'],
+      'application/vnd.github+json',
+      reason: 'blob 回来的还是 JSON，内容是 base64 字段',
+    );
+  });
+
+  test('blob 回的是 utf-8（纯文本）：按文本字节用', () async {
+    final gateway = HttpGitHubBackupGateway(
+      client: MockClient((request) async {
+        if (request.url.path.contains('/git/blobs/')) {
+          return http.Response(
+            jsonEncode({
+              'sha': 'blob-text',
+              'encoding': 'utf-8',
+              'content': 'guideline',
+            }),
+            200,
+          );
+        }
+        return http.Response(bigFileMetadata(2 * 1024 * 1024), 200);
+      }),
+    );
+
+    final remote = await gateway.readBackup(config: config, token: token);
+
+    expect(utf8.decode(remote!.bytes), 'guideline');
   });
 
   test('1 MB 以内：base64 就在响应里，不多花那一个请求', () async {
@@ -92,13 +125,13 @@ void main() {
     final remote = await gateway.readBackup(config: config, token: token);
 
     expect(remote!.bytes, bytes);
-    expect(requests, hasLength(1), reason: '小文件不该多走一次 raw');
+    expect(requests, hasLength(1), reason: '小文件不该多走一次 blob');
   });
 
-  test('raw 那条路也被拒（403）：单列一条"太大"，不混成"读不出数据"', () async {
+  test('git/blobs 那条路也被拒（403）：单列一条"太大"，不混成"读不出数据"', () async {
     final gateway = HttpGitHubBackupGateway(
       client: MockClient((request) async {
-        if (request.headers['Accept'] == 'application/vnd.github.raw') {
+        if (request.url.path.contains('/git/blobs/')) {
           return http.Response('{"message":"too large"}', 403);
         }
         return http.Response(bigFileMetadata(2 * 1024 * 1024), 200);
@@ -161,5 +194,39 @@ void main() {
         ),
       ),
     );
+  });
+
+  group('读大文件的超时按体积放宽', () {
+    // 实测：1.38 MB 的备份在一条慢链路上要读 68 秒。固定 30 秒会把"正在读"
+    // 掐成「请求超时」，用户照样拿不到备份 —— 所以这条线必须跟着体积走。
+    test('小文件还是 30 秒那条线', () {
+      expect(
+        HttpGitHubBackupGateway.readBudgetFor(8 * 1024),
+        HttpGitHubBackupGateway.timeout,
+      );
+      expect(
+        HttpGitHubBackupGateway.readBudgetFor(null),
+        HttpGitHubBackupGateway.timeout,
+        reason: '元数据没给 size 时不猜，用默认那条线',
+      );
+      expect(
+        HttpGitHubBackupGateway.readBudgetFor(0),
+        HttpGitHubBackupGateway.timeout,
+      );
+    });
+
+    test('1.38 MB 给到两分钟以上，慢网也读得完', () {
+      final budget = HttpGitHubBackupGateway.readBudgetFor(1383786);
+
+      expect(budget.inSeconds, greaterThanOrEqualTo(68), reason: '实测那一次用了 68 秒');
+      expect(budget.inSeconds, lessThanOrEqualTo(150));
+    });
+
+    test('再大也不超过 5 分钟上限', () {
+      expect(
+        HttpGitHubBackupGateway.readBudgetFor(100 * 1024 * 1024),
+        HttpGitHubBackupGateway.maxReadTimeout,
+      );
+    });
   });
 }

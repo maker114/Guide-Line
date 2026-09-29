@@ -89,6 +89,27 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
 
   static const Duration timeout = Duration(seconds: 30);
 
+  /// 读大文件时的超时上限：**按体积放宽**，不跟 [timeout] 共用一条线。
+  ///
+  /// 这条线是实测出来的，不是拍的：1.38 MB 的备份在一条慢链路上
+  /// 读回来要 68 秒（约 28 KB/s），30 秒的固定超时会把"正在读"掐成
+  /// 「请求超时」—— 那和 PL-9 修之前的"静默 0 条"一样，用户拿不到备份，
+  /// 只是这回至少有句话。按 10 KB/s 打底、5 分钟封顶，慢网也读得完。
+  static const Duration maxReadTimeout = Duration(minutes: 5);
+
+  /// 每读 10 KB 给一秒。
+  static const int _readBytesPerSecond = 10 * 1024;
+
+  /// 按体积算读这份文件的超时：小文件仍是 [timeout]，大文件按
+  /// [_readBytesPerSecond] 放宽，不超过 [maxReadTimeout]。
+  static Duration readBudgetFor(int? byteCount) {
+    if (byteCount == null || byteCount <= 0) return timeout;
+    final seconds = (byteCount / _readBytesPerSecond).ceil();
+    return Duration(
+      seconds: seconds.clamp(timeout.inSeconds, maxReadTimeout.inSeconds),
+    );
+  }
+
   static const String _host = 'https://api.github.com';
 
   /// GitHub 要求带上 User-Agent，缺了会直接 403。
@@ -112,7 +133,8 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     final body = _decodedObject(response, uri);
     final sha = body['sha'];
     final content = body['content'];
-    final encoding = body['encoding'];
+    // 元数据里带着文件体积：读大文件时靠它算超时（见 [readBudgetFor]）。
+    final size = body['size'];
     if (sha is! String) {
       throw GitHubBackupException(
         '远程文件的格式不对（${uri.toString()}）：没读到 sha',
@@ -131,28 +153,38 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       // （`encoding` 写着 `none`），而 `base64.decode('')` 不抛错 ——
       // 旧写法于是把"文件太大"读成"这份备份读不出数据"：拉取永远失败，
       // 推送却照常能用，界面上看不出任何原因（ADR-090）。
-      bytes = await _readRawBytes(cleaned, token, uri, encoding: encoding);
+      bytes = await _readBlobBytes(
+        cleaned,
+        token,
+        sha,
+        knownSize: size is int ? size : null,
+      );
     }
 
     return RemoteBackup.fromBytes(path: cleaned.path, sha: sha, bytes: bytes);
   }
 
-  /// 用 raw 媒体类型把文件字节直接读回来（1–100 MB 的文件只有这一条路）。
+  /// 大文件走 **Git Blobs API** 把内容读回来（1–100 MB 只有这一条路）。
   ///
-  /// `/contents` 这个地址配上 `Accept: application/vnd.github.raw`，GitHub
-  /// 就把原始字节回给我们（不会再套一层 base64，也不会 302 到别处）。
-  /// 只在"默认媒体类型没给内容"时才走这里 —— 小文件不必多花一个请求。
-  Future<List<int>> _readRawBytes(
+  /// 为什么不直接用 `/contents` 配 `Accept: application/vnd.github.raw`：
+  /// 那条路实测**读不完** —— 1.38 MB 的备份传到 33 秒被掐断
+  /// （`ClientException: Connection closed while receiving data`），而改走
+  /// `git/blobs/{sha}`，同一个主机、同样带 Token 的普通 JSON 请求，
+  /// 1,875,799 字节 base64 一字不少地传完（实测 68 秒）。代价是 base64 让
+  /// 体积涨三分之一，换来的是"真能读回来"—— 这一条比省流量重要。
+  ///
+  /// [knownSize] 是元数据里的体积，用来按体积放宽超时：1.38 MB 实测要 68 秒，
+  /// 30 秒那条线会把"正在读"掐成「请求超时」（见 [readBudgetFor]）。
+  Future<List<int>> _readBlobBytes(
     GitHubBackupConfig config,
     String token,
-    Uri uri, {
-    Object? encoding,
+    String sha, {
+    int? knownSize,
   }) async {
+    final uri = Uri.parse('$_host${config.blobApiPath(sha)}');
     final response = await _send(
-      () => _client.get(
-        uri,
-        headers: _headers(token, mediaType: 'application/vnd.github.raw'),
-      ),
+      () => _client.get(uri, headers: _headers(token)),
+      budget: readBudgetFor(knownSize),
     );
 
     if (response.statusCode == 403 || response.statusCode == 413) {
@@ -164,14 +196,24 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       );
     }
     if (response.statusCode >= 400) _throwFor(response, uri);
-    if (response.bodyBytes.isEmpty) {
+
+    final body = _decodedObject(response, uri);
+    final content = body['content'];
+    final encoding = body['encoding'];
+    if (content is! String || content.isEmpty) {
       throw GitHubBackupException(
         '远程那份读回来是空的（encoding=${encoding ?? '未知'}）：'
         '文件可能刚被清空，也可能 GitHub 只回了元数据。\n'
         '重试一次；仍然如此就到仓库网页里看一眼这个文件',
       );
     }
-    return response.bodyBytes;
+    // blob 的 `content` 默认是 base64；纯文本文件才回 `utf-8`。
+    if (encoding == 'utf-8') return utf8.encode(content);
+    try {
+      return base64.decode(content.replaceAll(RegExp(r'\s'), ''));
+    } catch (error) {
+      throw GitHubBackupException('远程文件的内容解不开（$error）');
+    }
   }
 
   @override
@@ -309,16 +351,12 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     );
   }
 
-  Map<String, String> _headers(
-    String token, {
-    bool json = false,
-    String? mediaType,
-  }) =>
+  Map<String, String> _headers(String token, {bool json = false}) =>
       <String, String>{
         'Authorization': 'Bearer $token',
-        // 默认按 GitHub 自己那套 JSON 形状走；读 1 MB 以上的文件时换成 raw，
-        // 那一次回来的是文件本身，不是 JSON（见 [_readRawBytes]）。
-        'Accept': mediaType ?? 'application/vnd.github+json',
+        // 每一句都是普通的 JSON 请求：读大文件走 Git Blobs API，回来的也是
+        // JSON（内容是 base64 字段），不再有"这一次回来的是文件本身"那种特例。
+        'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': _userAgent,
         if (json) 'Content-Type': 'application/json',
@@ -340,9 +378,14 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
         '&per_page=1',
       );
 
-  Future<http.Response> _send(Future<http.Response> Function() request) async {
+  /// [budget] 只在读大文件时传（见 [readBudgetFor]）：其余请求都用 [timeout]。
+  Future<http.Response> _send(
+    Future<http.Response> Function() request, {
+    Duration? budget,
+  }) async {
+    final limit = budget ?? timeout;
     try {
-      return await request().timeout(timeout);
+      return await request().timeout(limit);
     } on SocketException catch (error) {
       // 权限缺失在 Dart 侧也表现为 SocketException（与 AI 那一侧同一个坑：
       // debug 清单有联网权限、release 没有），所以文案里要把这条说出来。
@@ -353,7 +396,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     } on HttpException {
       throw const GitHubBackupException('网络请求失败，稍后再试');
     } on TimeoutException {
-      throw const GitHubBackupException('请求超时（30 秒），稍后再试');
+      throw GitHubBackupException('请求超时（${limit.inSeconds} 秒），稍后再试');
     } catch (error) {
       throw GitHubBackupException('请求超时或中断（$error）');
     }

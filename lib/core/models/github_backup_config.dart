@@ -114,6 +114,13 @@ class GitHubBackupConfig {
   /// 只能另外问一句 —— 「测试连接」多花的这一个请求就花在这里。
   String get repositoryApiPath => '/repos/$owner/$repo';
 
+  /// 单个 blob 的地址（Git Blobs API，不含主机名）。
+  ///
+  /// 大文件**只能**从这里读回来：`/contents` 对 1 MB 以上的文件只回空
+  /// content，而配 `Accept: application/vnd.github.raw` 那条路实测读不完
+  /// （1.38 MB 传 33 秒被掐断）。这条回的是普通 JSON，内容是 base64。
+  String blobApiPath(String sha) => '/repos/$owner/$repo/git/blobs/$sha';
+
   GitHubBackupConfig copyWith({
     bool? enabled,
     String? owner,
