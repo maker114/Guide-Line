@@ -49,6 +49,7 @@ function Send([string]$method, [string]$url, $body, [string]$contentType) {
 
 $notes = 'tool/release-notes.md'
 $releases = @(
+  @{ Tag = 'v1.9.3'; Name = 'v1.9.3 — 两条用例不再依赖 Windows 专用命令，CI 首次变绿'; Section = 'v1.9.3'; Asset = 'dist/guideline-1.9.3.apk' },
   @{ Tag = 'v1.5.1'; Name = 'v1.5.1 — 文案去括号，版本号不再漂移'; Section = 'v1.5.1'; Asset = 'dist/guideline-1.5.1.apk' },
   @{ Tag = 'v1.5.0'; Name = 'v1.5.0 — 事件详情页改名 + 速记按钮两处修复'; Section = 'v1.5.0'; Asset = 'dist/guideline-1.5.0.apk' },
   @{ Tag = 'v1.4.0'; Name = 'v1.4.0 — 项目与事件的口径重定，42 项改动落地'; Section = 'v1.4.0'; Asset = 'dist/guideline-1.4.0.apk' },

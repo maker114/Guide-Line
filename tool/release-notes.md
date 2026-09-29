@@ -1,9 +1,39 @@
 # 发行说明（GitHub Release 正文）
 
-> 已发布：`v1.5.1` / `v1.5.0` / `v1.4.0` / `v1.3.0` 四个 Release 都已建好并挂上 APK
+> 已发布：`v1.9.3` / `v1.5.1` / `v1.5.0` / `v1.4.0` / `v1.3.0` 五个 Release 都已建好并挂上 APK
 > （由 `tool/publish-releases2.ps1` 用令牌调 API 发出的，幂等可重跑）。
 > 本文件是**同源的正文存档**：以后要改 Release 正文，改这里再重跑脚本，
 > 或直接在 GitHub 网页上编辑。
+
+---
+
+## v1.9.3 — 两条用例不再依赖 Windows 专用命令，CI 首次变绿
+
+CI 从建立起就一直红：两条用例用了 Windows 专用命令，Ubuntu runner 上直接抛异常。
+
+`1.9.2` 推上去之后 GitHub 立刻来报：CI #6 失败。查下来**不是这两天的改动** —— 从 2026-09-27
+加这个 workflow 的那次提交起（run #1…run #7），`analyze + test` 这个作业**一次都没绿过**，
+`build apk (release)` 则一直成功。病因是本机（Windows）与 CI（Ubuntu）的差异：
+两条用例用 Windows 专用命令 `attrib` 制造写盘失败。
+
+- **CI 从建立起就一直红**：`test/core/atomic_file_test.dart` 与
+  `test/app/app_controller_test.dart` 原先靠 `Process.runSync('attrib', ['+R', …])`
+  把文件 / 目录设成只读，而 `attrib` 只有 Windows 有 —— Ubuntu runner 上
+  `Process.runSync` 抛 `ProcessException`，连"设不上就 `markTestSkipped`"那句都轮不到。
+  现在：前者改成在 `AtomicFile.renameHook` 上**注入**失败（与 `fsyncHook` 同风格，
+  两端走同一条确定性路径，顺带把兜底的三条分支都覆盖上）；后者改用跨平台测试助手
+  `test/support/readonly_dir.dart`（Windows `attrib` / POSIX `chmod`），设不上就跳过。
+  以后再要"制造写盘失败"，只能用这个助手，不许再写平台专用命令。
+
+验收：`flutter analyze` 0 问题；`flutter test` 723 例全绿；
+CI run #8（提交 `4c22d5c`）**首次变绿** —— `analyze + test` 与 `build apk (release)` 两个作业都成功。
+本版只改测试与 CI 相关代码，应用行为没有变化。
+
+本版另附一次仓库维护：**补打 16 个缺失的版本标签**（`v1.5.2` … `v1.9.3`）。
+此前从 `v1.5.1` 之后一直没打过标签，标签与 Release 是两回事，这次只补了标签。
+
+安装包：`guideline-1.9.3.apk`（54.0 MB / 56,587,515 字节）
+sha256：`3eb71e77fe90f88d2487cff026d155862e9e0311db87849ab6432e307fc4011c`
 
 ---
 
