@@ -256,11 +256,11 @@ String labelOf(Entity entity) {
     final Event event => event.name,
     final Task task => task.title,
     final Inspiration inspiration => inspiration.text,
-    Tombstone _ => '（已彻底删除）',
+    Tombstone _ => '已彻底删除',
     _ => '',
   };
   final trimmed = raw.trim();
-  return trimmed.isEmpty ? '（无标题）' : trimmed;
+  return trimmed.isEmpty ? '无标题' : trimmed;
 }
 
 // ---------- 改动说明（需求③：黄色那两行底下的小字） ----------
@@ -321,7 +321,7 @@ const Map<String, String> _inspirationStatusWords = <String, String>{
 const Map<String, String> _taskTypeWords = <String, String>{
   'standard': '独立任务',
   'subtask': '子任务',
-  'parallel': '并行（历史取值）',
+  'parallel': '并行，历史取值',
 };
 
 /// 同一条记录里**哪些字段变了**（按键名排序，顺序稳定）。

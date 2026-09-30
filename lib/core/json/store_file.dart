@@ -80,7 +80,7 @@ class StoreFile {
         Canonical.readInt(map['schemaVersion'], 'store.schemaVersion', issues) ?? 0;
     if (schemaVersion > currentSchemaVersion) {
       issues.error(
-        '数据文件版本 $schemaVersion 高于本应用支持的 $currentSchemaVersion —— 请升级 App',
+        '数据文件版本 $schemaVersion 高于本应用支持的 $currentSchemaVersion，请升级 App',
       );
       return StoreFile.empty();
     }

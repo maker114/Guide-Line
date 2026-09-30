@@ -21,7 +21,7 @@ class Canonical {
   static String? readString(Object? value, String field, DecodeIssues issues) {
     if (value == null) return null;
     if (value is String) return value;
-    issues.error('$field 期望 string，实际 ${value.runtimeType} —— 按 null 处理');
+    issues.error('$field 期望 string，实际 ${value.runtimeType}，已按 null 处理');
     return null;
   }
 
@@ -30,20 +30,20 @@ class Canonical {
     if (value is int) return value;
     if (value is double) {
       if (value == value.roundToDouble()) {
-        issues.warn('$field 是浮点整数值 —— 已转为 int');
+        issues.warn('$field 是浮点整数值，已转为 int');
         return value.toInt();
       }
-      issues.error('$field 是小数，契约要求 int64 毫秒 —— 丢弃');
+      issues.error('$field 是小数，契约要求 int64 毫秒，已丢弃');
       return null;
     }
     if (value is String) {
       final parsed = int.tryParse(value);
       if (parsed != null) {
-        issues.warn('$field 是字符串数字 —— 已转为 int');
+        issues.warn('$field 是字符串数字，已转为 int');
         return parsed;
       }
     }
-    issues.error('$field 期望 int64，实际 ${value.runtimeType} —— 按 null 处理');
+    issues.error('$field 期望 int64，实际 ${value.runtimeType}，已按 null 处理');
     return null;
   }
 
@@ -52,15 +52,15 @@ class Canonical {
     if (value is bool) return value;
     if (value is String) {
       if (value == 'true') {
-        issues.warn('$field 是字符串布尔 —— 已转为 bool');
+        issues.warn('$field 是字符串布尔，已转为 bool');
         return true;
       }
       if (value == 'false') {
-        issues.warn('$field 是字符串布尔 —— 已转为 bool');
+        issues.warn('$field 是字符串布尔，已转为 bool');
         return false;
       }
     }
-    issues.error('$field 期望 bool，实际 ${value.runtimeType} —— 按默认值处理');
+    issues.error('$field 期望 bool，实际 ${value.runtimeType}，已按默认值处理');
     return null;
   }
 
@@ -68,7 +68,7 @@ class Canonical {
   static String? readDate(Object? value, String field, DecodeIssues issues) {
     if (value == null) return null;
     if (value is String && _datePattern.hasMatch(value)) return value;
-    issues.error('$field 不是 "YYYY-MM-DD" 形态：$value —— 置为 null');
+    issues.error('$field 不是 "YYYY-MM-DD" 形态：$value，已置为 null');
     return null;
   }
 
@@ -107,13 +107,13 @@ class Canonical {
   static List<String> readStringList(Object? value, String field, DecodeIssues issues) {
     if (value == null) return const <String>[];
     if (value is! List) {
-      issues.error('$field 期望 array，实际 ${value.runtimeType} —— 按空处理');
+      issues.error('$field 期望 array，实际 ${value.runtimeType}，已按空处理');
       return const <String>[];
     }
     final out = <String>[];
     for (final item in value) {
       if (item is! String) {
-        issues.error('$field 里有非字符串项（${item.runtimeType}）—— 跳过该项');
+        issues.error('$field 里有非字符串项：${item.runtimeType}，已跳过该项');
         continue;
       }
       final trimmed = item.trim();
@@ -146,7 +146,7 @@ class Canonical {
       final normalized = normalizeHexColor(value);
       if (normalized != null) return normalized;
     }
-    issues.error('$field 不是 "#rrggbb" 形态：$value —— 置为 null');
+    issues.error('$field 不是 "#rrggbb" 形态：$value，已置为 null');
     return null;
   }
 }

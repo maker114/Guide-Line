@@ -150,7 +150,7 @@ void main() {
         lastSync: null,
       );
       expect(plan.action, SyncAction.push);
-      expect(plan.message, contains('远程还没有这份备份'));
+      expect(plan.message, contains('远程尚未有这份备份'));
       expect(plan.needsExtraConfirm, isFalse);
     });
 
@@ -233,7 +233,7 @@ void main() {
         lastSync: SyncRecord(syncedAt: t2, remoteSha: 'sha-1', recordCount: 2),
       );
       expect(plan.action, SyncAction.noChange);
-      expect(plan.message, contains('谁都没改过'));
+      expect(plan.message, contains('两边都仍是上次同步时的状态'));
     });
 
     test('本地一条活记录都没有 → localEmpty，且要求额外确认一次', () {
@@ -245,7 +245,7 @@ void main() {
       );
       expect(plan.action, SyncAction.localEmpty);
       expect(plan.needsExtraConfirm, isTrue);
-      expect(plan.message, contains('擦成空'));
+      expect(plan.message, contains('本机当前没有记录'));
     });
 
     test('本地只有墓碑也算空 → localEmpty（与条数判据同一把尺子）', () {
@@ -426,8 +426,8 @@ void main() {
         isTrue,
         reason: '这中间没人动过云端，本机直接覆盖上去（需求④）',
       );
-      expect(plan.message, contains('云端还是上次同步过的那一次提交'));
-      expect(plan.message, contains('没有第三方改过'));
+      expect(plan.message, contains('云端仍是上次同步过的那一次提交'));
+      expect(plan.message, contains('没有第三方改动'));
     });
 
     test('对不上：还是普通推，要不要摆面板由上层按老规矩来', () {

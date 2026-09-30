@@ -60,7 +60,7 @@ class _AppearancePageState extends State<AppearancePage> {
                         title: Text(themeModeLabel(mode)),
                         subtitle: mode == UiPrefs.themeModeSystem
                             ? Text(
-                                '跟着系统的深色开关走',
+                                '跟随系统深色设置',
                                 style: theme.textTheme.labelSmall,
                               )
                             : null,

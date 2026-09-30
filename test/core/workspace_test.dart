@@ -1612,7 +1612,7 @@ void main() {
       expect(
         () => ws.moveTask(other.id, newParentTaskId: leaf.id),
         throwsA(
-          predicate<RuleViolation>((e) => e.message.contains('不能再挂东西')),
+          predicate<RuleViolation>((e) => e.message.contains('下面不能再添加下级')),
         ),
       );
       expect(ws.findTask(other.id)!.parentId, isNull, reason: '被拒绝就一条都不该动');
@@ -1638,7 +1638,7 @@ void main() {
       expect(
         () => ws.setTasksDue(<String>[a.id, b.id, archived.id], '2099-05-01'),
         throwsA(
-          predicate<RuleViolation>((e) => e.message.contains('已经归档了')),
+          predicate<RuleViolation>((e) => e.message.contains('需先取消归档再排期')),
         ),
       );
       expect(ws.findTask(a.id)!.dueAt, isNull, reason: '一条不合法就都不动');

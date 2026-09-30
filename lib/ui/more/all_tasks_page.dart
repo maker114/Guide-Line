@@ -156,7 +156,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
                     ? const EmptyState(
                         icon: Icons.checklist_outlined,
                         title: '没有符合条件的任务',
-                        hint: '换个筛选条件试试',
+                        hint: '请调整筛选条件后重试',
                       )
                     : ListView.builder(
                         padding: const EdgeInsets.only(bottom: 24),

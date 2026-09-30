@@ -103,7 +103,7 @@ class HandoffExport {
     if (children.isEmpty) {
       out
         ..add('')
-        ..add('（这个分类下面还没有目标）');
+        ..add('这个分类下面还没有目标');
     }
 
     for (final child in children) {

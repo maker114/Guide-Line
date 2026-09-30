@@ -205,7 +205,7 @@ void main() {
     expect(find.textContaining('2 个项目里'), findsOneWidget);
     expect(find.textContaining('已勾选'), findsWidgets);
     expect(find.textContaining('2 条'), findsOneWidget);
-    expect(find.textContaining('找不回来'), findsOneWidget);
+    expect(find.textContaining('删除后无法找回'), findsOneWidget);
 
     await tester.tap(find.text('清除'));
     await tester.pumpAndSettle();
@@ -264,7 +264,7 @@ void main() {
     // 明确警告（实机反馈要求）：范围、清什么、清单几条、不能撤销、退回只有一次
     expect(find.textContaining('只会动「清单项目壬」这一个项目'), findsOneWidget);
     expect(find.textContaining('正文与清单条目会被清空'), findsOneWidget);
-    expect(find.textContaining('清单 1 条'), findsOneWidget);
+    expect(find.textContaining('共 1 条清单'), findsOneWidget);
     expect(find.textContaining('不能撤销'), findsOneWidget);
     expect(find.textContaining('退回上一版'), findsOneWidget);
 
@@ -443,7 +443,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('交接说明 · 交接项目'), findsOneWidget);
-    expect(find.textContaining('不想给出去的部分删掉'), findsOneWidget);
+    expect(find.textContaining('不需要外发的部分删除即可'), findsOneWidget);
     expect(find.textContaining('文件会离开这台手机'), findsOneWidget, reason: '必须提醒隐私');
     expect(find.text('导出为 .md'), findsOneWidget);
 
@@ -507,7 +507,7 @@ void main() {
 
     // 建完要交代"建到哪去了" + 条目还在 + 能跳过去
     expect(find.textContaining('已建成任务：发布线'), findsOneWidget);
-    expect(find.textContaining('清单条目留着'), findsOneWidget);
+    expect(find.textContaining('清单条目保留'), findsOneWidget);
     await tester.tap(find.text('去看看'));
     await tester.pumpAndSettle();
     expect(find.byType(EventDetailPage), findsOneWidget);
@@ -525,7 +525,7 @@ void main() {
     await tester.tap(find.text('建成任务…'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('先去「事件」里开一条线'), findsOneWidget);
+    expect(find.textContaining('请先在「事件」中新建一条事件'), findsOneWidget);
     expect(app.ws.liveTasks, isEmpty);
     expect(app.ws.findProject(project.id)!.items.single.text, '写解析层');
   });

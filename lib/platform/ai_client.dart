@@ -168,18 +168,18 @@ class HttpAiTextGenerator implements AiTextGenerator {
       // 这个坑真踩过：debug 包有权限、release 包没有，于是"调试时好好的、
       // 装出来就连不上"，只看日志根本想不到是清单里少了一行。
       throw AiRequestException(
-        '连不上这个地址（${error.osError?.message ?? error.message}）\n'
-        '检查网络与该地址是否可达；若怎么都连不上，确认安装包的联网权限没有被去掉',
+        '连不上这个地址：${error.osError?.message ?? error.message}\n'
+        '请检查网络与该地址是否可达；若始终连不上，请确认安装包的联网权限没有被去掉',
       );
     } on HttpException {
       throw const AiRequestException('网络请求失败，稍后再试');
     } catch (error) {
       // 包含 TimeoutException：文案要说明"可能已经超时"而不是笼统的失败
-      throw AiRequestException('请求超时或中断（$error）');
+      throw AiRequestException('请求超时或中断：$error');
     }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const AiRequestException('密钥不对或没有权限，去设置里检查 API Key');
+      throw const AiRequestException('密钥不正确或没有权限，请在设置中检查 API Key');
     }
     if (response.statusCode == 429) {
       throw const AiRequestException('额度用完或被限流了，稍后再试或换一个 Key');
@@ -187,7 +187,7 @@ class HttpAiTextGenerator implements AiTextGenerator {
     if (response.statusCode == 404) {
       // 404 最常见的原因是地址拼错了。把**实际请求的地址**报出来，
       // 用户一眼就能看出是多写了路径还是少了域名 —— 只说"404"没法定位。
-      throw AiRequestException('地址不对（404）：${uri.toString()}\n去设置里核对 API 地址');
+      throw AiRequestException('地址不正确，HTTP 404：${uri.toString()}\n请在设置中核对 API 地址');
     }
     if (response.statusCode >= 400) {
       // 有些网关会用 HTML 报错页（"没有这个网站"之类），直接贴出来很难看，
@@ -205,16 +205,16 @@ class HttpAiTextGenerator implements AiTextGenerator {
     } catch (_) {
       throw const AiRequestException('返回的不是合法 JSON，可能这个地址不是 chat/completions 接口');
     }
-    if (root is! Map) throw const AiRequestException('返回结构看不懂，缺少 choices');
+    if (root is! Map) throw const AiRequestException('无法解析返回结构，缺少 choices');
 
     final choices = root['choices'];
     if (choices is! List || choices.isEmpty) {
-      throw const AiRequestException('模型没有返回内容（choices 为空）');
+      throw const AiRequestException('模型没有返回内容，choices 为空');
     }
     final first = choices.first;
-    if (first is! Map) throw const AiRequestException('返回结构看不懂');
+    if (first is! Map) throw const AiRequestException('无法解析返回结构');
     final message = first['message'];
-    if (message is! Map) throw const AiRequestException('返回结构看不懂，缺少 message');
+    if (message is! Map) throw const AiRequestException('无法解析返回结构，缺少 message');
 
     final content = message['content'];
     if (content is! String || content.trim().isEmpty) {
@@ -239,7 +239,7 @@ class HttpAiTextGenerator implements AiTextGenerator {
         .replaceAll(RegExp(r'<[^>]*>'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    if (stripped.isEmpty) return '（返回内容为空）';
+    if (stripped.isEmpty) return '返回内容为空';
     return stripped.length <= 160 ? stripped : '${stripped.substring(0, 160)}…';
   }
 

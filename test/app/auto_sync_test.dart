@@ -307,7 +307,7 @@ void main() {
       expect(app.autoSync.label, '没有可上传的记录');
       expect(
         app.autoSync.reason,
-        contains('擦成空的'),
+        contains('本机当前没有记录'),
         reason: '读坏了也会显示成 0 条，所以只说明、不动手',
       );
     });
@@ -498,7 +498,7 @@ void main() {
 
       final request = app.pendingStartupSync;
       expect(request, isNotNull, reason: '对不上就摆面板（需求⑤）');
-      expect(request!.message, contains('云端那一份比这台手机新'));
+      expect(request!.message, contains('云端数据比这台手机新'));
       expect(request.diff.removed, greaterThan(0), reason: '要能把"少掉的那几条"摆出来');
       expect(app.autoSync.phase, AutoSyncPhase.blocked);
       expect(app.autoSync.label, '云端有更新');

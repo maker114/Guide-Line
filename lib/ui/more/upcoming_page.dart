@@ -123,7 +123,7 @@ class UpcomingTasksPage extends StatelessWidget {
       if (done > 0) '已完成 $done 条',
       if (ignored > 0) '已搁置 $ignored 条',
     ];
-    final archivedNote = archived > 0 ? '；另有 $archived 条已归档，去归档区看' : '';
+    final archivedNote = archived > 0 ? '；另有 $archived 条已归档，请在归档区查看' : '';
     return '${parts.join(' · ')}$archivedNote';
   }
 }

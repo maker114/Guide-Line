@@ -454,7 +454,7 @@ void main() {
       );
       expect(
         app.startupWarnings.single,
-        contains('还在文件里'),
+        contains('仍在文件里'),
         reason: '这条告警的核心是让用户别做"重新开始记"这类动作',
       );
       expect(

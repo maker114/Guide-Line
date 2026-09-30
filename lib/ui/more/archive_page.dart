@@ -251,7 +251,7 @@ class _ArchivedPane extends StatelessWidget {
     return _Pane(
       // 「单独归档的子任务也能在这里找回」必须写出来（Q18）：任务线里现在
       // **不显示**已归档节点（显示与判定同一套取数），用户点进去会以为它没了。
-      note: '单独归档的子任务也会列在这里 —— 任务线里不显示已归档的节点。',
+      note: '单独归档的子任务也会列在这里；任务线里不显示已归档的节点。',
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 24),
         itemCount: items.length,

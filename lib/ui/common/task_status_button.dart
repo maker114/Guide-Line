@@ -73,7 +73,7 @@ class TaskStatusButton extends StatelessWidget {
   }
 
   /// 被挡住时的统一说明（锁形的吐司与 tooltip 共用）。
-  static const String blockedReason = '还有子任务未处理，先完成下级再勾这个';
+  static const String blockedReason = '还有子任务未处理，先完成下级，再勾选本任务。';
 }
 
 /// 三态选择面板（未完成 / 已完成 / 已搁置）。

@@ -172,7 +172,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 留在这一页并给提示，不 pop、不写盘、也不把灵感标成已合并
-    final message = find.textContaining('正文不能是空的');
+    final message = find.textContaining('正文不能为空；若只需新增清单条目');
     expect(message, findsOneWidget);
     // 报错吐司必须自己给文字色：底色是浅色的 errorContainer，默认文字色
     // （inverseOnSurface）在浅色主题下近乎纯白，压上去等于看不见。

@@ -93,7 +93,7 @@ class _FatalApp extends StatelessWidget {
               SelectableText(message),
               const SizedBox(height: 8),
               Text(
-                '你的数据文件没有被修改 —— 请把上面的信息发给我。',
+                '你的数据文件没有被修改，请把上面的信息发送给我。',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 16),

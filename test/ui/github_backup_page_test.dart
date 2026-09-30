@@ -156,11 +156,11 @@ void main() {
       final off = configured.copyWith(enabled: false);
       final pushed = await app.pushGitHubBackup(off, 'ghp_token');
       expect(pushed.ok, isFalse);
-      expect(pushed.message, contains('开关还关着'));
+      expect(pushed.message, contains('开关尚未启用'));
 
       final pulled = await app.previewGitHubPull(off, 'ghp_token');
       expect(pulled.remote, isNull);
-      expect(pulled.error, contains('开关还关着'));
+      expect(pulled.error, contains('开关尚未启用'));
 
       expect(gateway.readCount, 0);
       expect(gateway.writeCount, 0);
@@ -231,11 +231,11 @@ void main() {
       await openPage(tester, app);
       await tapAction(tester, '从 GitHub 拉取');
 
-      expect(find.text('用远程那份覆盖这台手机'), findsOneWidget);
+      expect(find.text('用远程备份覆盖这台手机'), findsOneWidget);
       expect(find.textContaining('项目 3'), findsOneWidget, reason: '远程那边有多少要说清');
       expect(find.textContaining(formatStamp(t1)), findsOneWidget, reason: '远程那份的时间要给');
       expect(
-        find.textContaining('这台手机（会被覆盖）· 项目 1'),
+        find.textContaining('这台手机 · 会被覆盖 · 项目 1'),
         findsOneWidget,
         reason: '现在这台上有什么要说清 —— 否则用户不知道会丢掉几条',
       );
@@ -262,8 +262,8 @@ void main() {
       await openPage(tester, app);
       await tapAction(tester, '从 GitHub 拉取');
 
-      expect(find.text('用远程那份覆盖这台手机'), findsNothing);
-      expect(find.textContaining('0 条不算可用备份'), findsOneWidget);
+      expect(find.text('用远程备份覆盖这台手机'), findsNothing);
+      expect(find.textContaining('远程备份是 0 条记录，不算可用备份'), findsOneWidget);
     });
 
     testWidgets('拉取之后写记账，页面上能看到上次同步时间与两个码', (tester) async {
@@ -414,7 +414,7 @@ class _FakeGateway implements GitHubBackupGateway {
     readCount += 1;
     if (repositoryMissing) {
       throw const GitHubBackupException(
-        '仓库或分支不存在（404）：核对所有者、仓库名、分支名是否正确',
+        '仓库或分支不存在，HTTP 404：核对所有者、仓库名、分支名是否正确',
       );
     }
     return repository;

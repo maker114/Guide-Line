@@ -197,7 +197,7 @@ void main() {
       findsOneWidget,
       reason: 'Q25 落地之后，这句不能再写"合并导入还没做"，要指向新入口',
     );
-    expect(find.textContaining('先「导出并分享」留个档'), findsOneWidget, reason: '要给出替代做法');
+    expect(find.textContaining('请先「导出并分享」留一份存档'), findsOneWidget, reason: '要给出替代做法');
   });
 
   testWidgets('取消就什么都不替换', (tester) async {
@@ -312,7 +312,7 @@ void main() {
     await openImportDialog(tester, app, fileWith(projects: <Entity>[grave]), entry: '合并导入');
 
     expect(find.textContaining('项目：新增 0 · 更新 0 · 保留 0 · 墓碑 1'), findsOneWidget);
-    expect(find.textContaining('墓碑是对方删掉的记录'), findsOneWidget, reason: '墓碑不能被当成"多出来一条数据"');
+    expect(find.textContaining('墓碑是对方删除过的记录'), findsOneWidget, reason: '墓碑不能被当成"多出来一条数据"');
 
     await tester.tap(find.widgetWithText(FilledButton, '合并'));
     await tester.pumpAndSettle();

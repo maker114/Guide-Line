@@ -219,7 +219,7 @@ class _SearchPageState extends State<SearchPage> {
                         ? const EmptyState(
                             icon: Icons.search_off,
                             title: '没有匹配的结果',
-                            hint: '换个词试试；已归档与已丢弃的去了归档区',
+                            hint: '请输入其他关键词；已归档与已丢弃的内容在归档区',
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
@@ -244,7 +244,7 @@ class _SearchPageState extends State<SearchPage> {
                                     // 与其让用户选上一个"选不了"的东西，不如明说
                                     : () => showToast(
                                         context,
-                                        '多选只收任务 —— 项目 / 事件 / 灵感请点开改',
+                                        '多选只支持任务；项目 / 事件 / 灵感请打开详情页修改',
                                       ),
                               );
                             },

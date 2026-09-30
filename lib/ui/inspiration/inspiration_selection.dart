@@ -313,7 +313,7 @@ class InspirationBatchActions {
 
     if (!context.mounted) return;
     if (merged == 0) {
-      showToast(context, '这一批都没并进去', error: true);
+      showToast(context, '选中的灵感都没有合并到项目。', error: true);
       return;
     }
     final skipNote = skipped.isEmpty ? '' : '；未处理 ${skipped.join('、')}';

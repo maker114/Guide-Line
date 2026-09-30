@@ -22,7 +22,7 @@ enum NodeStatus {
       case 'ignored':
         return NodeStatus.ignored;
       default:
-        onIssue?.call('未知 NodeStatus：$value —— 降级为 pending');
+        onIssue?.call('无法识别的 NodeStatus 取值 $value，已降级为 pending');
         return NodeStatus.pending;
     }
   }
@@ -45,7 +45,7 @@ enum InspirationStatus {
       case 'discarded':
         return InspirationStatus.discarded;
       default:
-        onIssue?.call('未知 InspirationStatus：$value —— 降级为 pending');
+        onIssue?.call('无法识别的 InspirationStatus 取值 $value，已降级为 pending');
         return InspirationStatus.pending;
     }
   }
@@ -83,7 +83,7 @@ enum TaskType {
       case 'parallel':
         return TaskType.parallel;
       default:
-        onIssue?.call('未知 TaskType：$value —— 降级为 subtask');
+        onIssue?.call('无法识别的 TaskType 取值 $value，已降级为 subtask');
         return TaskType.subtask;
     }
   }

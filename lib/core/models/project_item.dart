@@ -73,7 +73,7 @@ class ProjectItem {
 List<ProjectItem> readProjectItems(Object? value, String field, DecodeIssues issues) {
   if (value == null) return const <ProjectItem>[];
   if (value is! List) {
-    issues.error('$field 期望 array，实际 ${value.runtimeType} —— 按空处理');
+    issues.error('$field 期望 array，实际 ${value.runtimeType}，已按空处理');
     return const <ProjectItem>[];
   }
 
@@ -82,19 +82,19 @@ List<ProjectItem> readProjectItems(Object? value, String field, DecodeIssues iss
   for (var i = 0; i < value.length; i += 1) {
     final raw = value[i];
     if (raw is! Map) {
-      issues.error('$field[$i] 不是对象（${raw.runtimeType}）—— 跳过该条目');
+      issues.error('$field[$i] 不是对象：${raw.runtimeType}，已跳过该条目');
       continue;
     }
     final map = raw is Map<String, dynamic> ? raw : raw.cast<String, dynamic>();
     final id = Canonical.readString(map['id'], '$field[$i].id', issues);
     final text = Canonical.readString(map['text'], '$field[$i].text', issues);
     if (id == null || id.isEmpty || text == null || text.trim().isEmpty) {
-      issues.error('$field[$i] 缺 id 或 text 为空 —— 跳过该条目');
+      issues.error('$field[$i] 缺 id 或 text 为空，已跳过该条目');
       continue;
     }
     if (!seenIds.add(id)) {
       // 同 id 重复会让"按 id 找条目"出现二义性，后一条丢掉
-      issues.error('$field[$i] 的 id 与前面重复（$id）—— 跳过该条目');
+      issues.error('$field[$i] 的 id 与前面重复：$id，已跳过该条目');
       continue;
     }
     out.add(

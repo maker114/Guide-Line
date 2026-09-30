@@ -835,15 +835,15 @@ class _AppShellState extends State<AppShell> {
     final choice = await showStoreDiffSheet(
       context,
       diff: diff,
-      title: '这次改动要推上去',
-      baseLabel: '云端那一份（会被覆盖）',
-      targetLabel: '这台手机（会推上去）',
-      confirmLabel: '推上去',
-      cancelLabel: '先不推',
+      title: '本次改动需要推送',
+      baseLabel: '云端数据，将被覆盖',
+      targetLabel: '这台手机，将推送至云端',
+      confirmLabel: '推送',
+      cancelLabel: '暂不推送',
     );
     _autoPushSheetOpen = false;
     if (!mounted) return;
-    // 只有点了「推上去」才传。点了「先不推」，或者点空白/返回键划走，
+    // 只有点了「推送」才传。点了「暂不推送」，或者点空白/返回键划走，
     // 在这一屏是同一个意思：这一次不推（不记成失败）。
     if (choice == DiffSheetResult.confirm) {
       await widget.app.confirmPendingAutoPush();
@@ -866,7 +866,7 @@ class _AppShellState extends State<AppShell> {
       context,
       diff: request.diff,
       title: '云端和这台手机对不上',
-      baseLabel: '云端那一份',
+      baseLabel: '云端数据',
       targetLabel: '这台手机',
       confirmLabel: '覆盖云端数据',
       cancelLabel: '使用云端数据',
@@ -900,8 +900,8 @@ class _AppShellState extends State<AppShell> {
         title: const Text('连不上 GitHub'),
         content: Text(
           '${reason.isEmpty ? '没能连上 api.github.com。' : reason}\n\n'
-          '现在照常编辑没问题，但这段时间的改动跟云端对不上：'
-          '连上之后记得回同步页传一次；这期间别在另一台设备上同时改。',
+          '现在照常编辑不受影响，但这段时间的改动跟云端对不上：'
+          '连上之后请回同步页上传一次；这期间不要在另一台设备上同时修改。',
         ),
         actions: <Widget>[
           TextButton(
@@ -1236,7 +1236,7 @@ class _AppShellState extends State<AppShell> {
               if (app.exportOverdue) ...<Widget>[
                 const SizedBox(height: 8),
                 Text(
-                  '导出提醒已重新开始计时 —— 出过事故之后，先导出一份最要紧。',
+                  '导出提醒已重新开始计时，发生事故后请优先导出一份。',
                   style: Theme.of(dialogContext).textTheme.bodySmall,
                 ),
               ],

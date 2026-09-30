@@ -56,7 +56,7 @@ class BackupsPage extends StatelessWidget {
                 child: Text(
                   // 只留"会被覆盖、想反悔要尽快"这一句：它是丢失风险
                   '滚动备份只保留 ${AppPaths.rollingBackupCount} 份，'
-                  '会被后续保存一份份覆盖 —— 想反悔要尽快。',
+                  '会被后续保存依次覆盖；如需恢复到较早的备份请尽快。',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
@@ -76,7 +76,7 @@ class BackupsPage extends StatelessWidget {
                     // 时间已经在标签里了（`上一份 · 09-26 11:57 · 42 条`），
                     // 副标题只补体积与"点开能看差在哪" —— 同一行里把时间写两遍反而更难扫。
                     subtitle: Text(
-                      '${_formatBytes(entry.sizeBytes)} · 点开看与现在的差别',
+                      '${_formatBytes(entry.sizeBytes)} · 打开可查看与当前数据的差异',
                       style: theme.textTheme.labelSmall,
                     ),
                     onTap: () => _showDiff(context, entry),
@@ -137,12 +137,12 @@ class BackupsPage extends StatelessWidget {
       context,
       diff: diff,
       title: '「${entry.label}」与现在的差别',
-      baseLabel: '现在（会被换掉）· ${_countsText(local)}',
-      targetLabel: '这份备份（恢复后就是它）· ${_countsText(backup)}',
+      baseLabel: '现在 · 会被换掉 · ${_countsText(local)}',
+      targetLabel: '这份备份 · 恢复后即为该状态 · ${_countsText(backup)}',
       confirmLabel: '恢复这份',
       cancelLabel: '取消',
       danger: true,
-      note: '恢复之前，当前数据会先整体轮转进备份 —— 这一步可以再恢复回来。',
+      note: '恢复之前，当前数据会先整体轮转进备份，这一步可以再次恢复。',
     );
     if (choice != DiffSheetResult.confirm || !context.mounted) return;
     _applyRestore(context, entry);
@@ -184,7 +184,7 @@ class BackupsPage extends StatelessWidget {
       context,
       title: '删除备份',
       message: '删除「${entry.label}」。\n'
-          '这一步不可撤销；恢复不到这一份了。至少会保留一份备份。',
+          '这一步不可撤销，该备份将无法恢复。至少会保留一份备份。',
       confirmLabel: '删除',
       danger: true,
     );

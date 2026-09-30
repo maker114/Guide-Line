@@ -465,7 +465,7 @@ void main() {
 
       final error = storage.deleteBackup(only.path);
       expect(error, isNotNull, reason: '要给出拒绝原因');
-      expect(error, contains('至少保留一份'));
+      expect(error, contains('至少要保留一份'));
       expect(File(only.path).existsSync(), isTrue, reason: '拒绝之后文件必须原样在');
       expect(storage.listBackups().length, 1);
     });

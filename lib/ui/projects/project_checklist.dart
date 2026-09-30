@@ -238,7 +238,7 @@ class _ItemRow extends StatelessWidget {
     final events =
         app.ws.liveEvents.where((e) => !e.archived).toList(growable: false);
     if (events.isEmpty) {
-      showToast(context, '先去「事件」里开一条线');
+      showToast(context, '请先在「事件」中新建一条事件。');
       return;
     }
 
@@ -270,7 +270,7 @@ class _ItemRow extends StatelessWidget {
     if (messenger == null) return;
     messenger.showSnackBar(
       SnackBar(
-        content: Text('已建成任务：$eventName，清单条目留着'),
+        content: Text('已建成任务：$eventName，清单条目保留。'),
         action: SnackBarAction(
           label: '去看看',
           onPressed: () {

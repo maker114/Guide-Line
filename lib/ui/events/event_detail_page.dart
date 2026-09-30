@@ -1004,8 +1004,8 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
   actions.add(
     task.archived
         ? const TaskAction('unarchive', '取消归档', Icons.unarchive_outlined)
-        : const TaskAction('archive', '归档这条及其子任务', Icons.archive_outlined),
+        : const TaskAction('archive', '归档该任务及其子任务。', Icons.archive_outlined),
   );
-  actions.add(const TaskAction('delete', '删除这条及其子任务', Icons.delete_outline));
+  actions.add(const TaskAction('delete', '删除该任务及其子任务。', Icons.delete_outline));
   return actions;
 }

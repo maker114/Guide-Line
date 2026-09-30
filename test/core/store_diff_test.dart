@@ -158,7 +158,7 @@ void main() {
     final entries = diff.of(DocName.projects).entries;
     expect(entries.length, 1);
     expect(entries.single.kind, DiffKind.removed);
-    expect(entries.single.label, '（已彻底删除）');
+    expect(entries.single.label, '已彻底删除');
   });
 
   test('排序：红绿成对在前，纯新增的追加在最后', () {

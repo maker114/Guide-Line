@@ -80,7 +80,7 @@ class GitHubBackupConfig {
     // 仓库会被公开访问：私有仓库 + 明文上传时，这一条是唯一挡在
     // "人生记录躺在任何人都读得到的地址上"前面的东西。
     if (cleaned.isLikelyPublicRepo) {
-      return '这里要填仓库的所有者与仓库名，别把仓库地址整个粘进来';
+      return '这里要填仓库的所有者与仓库名，不要粘贴完整的仓库地址';
     }
 
     return null;

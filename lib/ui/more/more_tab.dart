@@ -141,7 +141,7 @@ class _MoreTabState extends State<MoreTab> {
   /// 导出入口的副标题：把"多久没导出"直接摆在列表上。
   String _exportSubtitle() {
     final last = app.lastExportedAt;
-    if (last == null) return '还没有导出过 —— 数据只在这台手机里';
+    if (last == null) return '还没有导出过；数据只在这台手机里';
     final when = relativeTime(last);
     if (app.exportOverdue) {
       return '上次导出 $when，已超过 ${AppController.exportReminderDays} 天';

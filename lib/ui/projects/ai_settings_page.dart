@@ -116,7 +116,7 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                   label: '模型',
                   hint: AiConfig.defaultModel,
                   controller: _model,
-                  helper: '默认 deepseek-flash；换别的兼容端点时填那边的模型名',
+                  helper: '默认 deepseek-flash；改用其它兼容端点时填写该端点的模型名。',
                 ),
                 _Field(
                   label: 'API Key',

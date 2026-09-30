@@ -115,7 +115,7 @@ MoveCheck checkMove({
     return const MoveCheck(allowed: false, reason: '不能移动到自身下面');
   }
   if (index.wouldCreateCycle(nodeId, newParentId)) {
-    return const MoveCheck(allowed: false, reason: '不能移动到自己的后代下面（会形成环）');
+    return const MoveCheck(allowed: false, reason: '不能移动到自己的后代下面，会形成环');
   }
   if (!index.fitsDepthLimit(nodeId, newParentId, maxDepth)) {
     return MoveCheck(allowed: false, reason: '会超过 $maxDepth 层上限');

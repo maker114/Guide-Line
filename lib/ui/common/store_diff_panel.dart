@@ -48,17 +48,17 @@ Future<DiffSheetResult> showStoreDiffSheet(
       note: note,
     ),
   );
-  // 没点按钮就关掉 = "我还没想好"，与点了「先不推」不是一回事：
+  // 没点按钮就关掉 = "我还没想好"，与点了「暂不推送」不是一回事：
   // 启动比对（需求⑤）靠这个差别决定要不要把那枚黄胶囊留在右上角。
   return result ?? DiffSheetResult.dismissed;
 }
 
 /// 用户在差异面板上点出来的结果。
 enum DiffSheetResult {
-  /// 主按钮（[StoreDiffSheet.confirmLabel]）—— 例如「覆盖云端数据」「推上去」。
+  /// 主按钮（[StoreDiffSheet.confirmLabel]）—— 例如「覆盖云端数据」「推送」。
   confirm,
 
-  /// 次按钮（[StoreDiffSheet.cancelLabel]）—— 例如「使用云端数据」「先不推」。
+  /// 次按钮（[StoreDiffSheet.cancelLabel]）—— 例如「使用云端数据」「暂不推送」。
   cancel,
 
   /// 没点按钮就关掉了（返回键 / 划走 / 点面板外）—— 一个字节都没动。
@@ -132,7 +132,7 @@ class StoreDiffSheet extends StatelessWidget {
                     _Legend(
                       background: colors.modifiedBackground,
                       foreground: colors.modifiedForeground,
-                      text: '修改的那两行是黄的（上一行旧、下一行新）',
+                      text: '修改的两行以黄色标示，上一行为旧内容，下一行为新内容。',
                     ),
                   ],
                   const SizedBox(height: 10),

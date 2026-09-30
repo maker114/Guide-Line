@@ -82,8 +82,8 @@ class _ExportPageState extends State<ExportPage> {
                       const SizedBox(height: 8),
                       Text(
                         app.exportOverdue
-                            ? '建议每 ${AppController.exportReminderDays} 天导出一次 —— '
-                                '没有云端，手机丢了或卸载了，数据就只剩这份导出。'
+                            ? '建议每 ${AppController.exportReminderDays} 天导出一次。'
+                                '没有云端，手机丢失或卸载后，数据只剩这份导出。'
                             : '导出的备份还不算旧。',
                         style: theme.textTheme.bodySmall,
                       ),
@@ -123,8 +123,8 @@ class _ExportPageState extends State<ExportPage> {
                 child: Text('说明', style: theme.textTheme.labelLarge),
               ),
               // 只留与"会不会丢数据"有关的两条
-              const _Bullet('「从文件导入」是整体替换：文件里有什么，这台手机就变成什么。'
-                  '替换前会先留一份备份，导错了可以在「备份与恢复」里退回来。'),
+              const _Bullet('「从文件导入」是整体替换：这台手机会变成文件里的内容。'
+                  '替换前会先留一份备份，导入有误可以在「备份与恢复」里恢复。'),
               const _Bullet('「合并导入」同一条记录以较新的一方为准，合并前同样先留一份备份。'),
             ],
           ),
@@ -209,7 +209,7 @@ class _ExportPageState extends State<ExportPage> {
         '${_netChangeText(_totalOf(current), _totalOf(incoming))}\n'
         '\n'
         '导入是整体替换，不会把两份数据合起来；想让两边各有的记录都留下，用「合并导入」。\n'
-        '想留住现在这份数据，先「导出并分享」留个档，再导入。\n'
+        '想保留当前数据，请先「导出并分享」留一份存档，再执行导入。\n'
         '替换前当前数据会先整体轮转进备份，可在「备份与恢复」里退回。';
 
     // 整体替换会把现有数据整份换掉：只给条数不够 —— 条数一样也可能换掉了一条、
@@ -219,8 +219,8 @@ class _ExportPageState extends State<ExportPage> {
             context,
             diff: diff,
             title: '导入并替换全部数据',
-            baseLabel: '当前（会被替换）· ${_countsText(current)}',
-            targetLabel: '文件（导入后就是它）· ${_countsText(incoming)}',
+            baseLabel: '当前 · 会被替换 · ${_countsText(current)}',
+            targetLabel: '文件 · 导入后即为该状态 · ${_countsText(incoming)}',
             confirmLabel: '整体替换',
             cancelLabel: '取消',
             danger: true,
@@ -378,12 +378,12 @@ String _mergePreviewText(String fileName, int? exportedAt, MergeReport report) {
     '合计：${report.changeSummary}',
     '',
     // 只留"谁的改动会赢"这一句（数据风险）；"合并是两份并成一份"那类解释删掉
-    '同一秒里的改动以本机为准 —— 对方在同一秒改的那条不会覆盖你手上的这份。',
+    '同一秒里的改动以本机为准；对方在同一秒修改的那条不会覆盖本机正在使用的记录。',
   ];
   if (report.tombstones > 0) {
     // 墓碑是"对方删过"的唯一证据，混在"新增"里会被当成多出来的数据，
     // 所以单独解释一句：它并进来是为了不让删掉的记录在下次导入时复活。
-    lines.add('${report.tombstones} 条墓碑是对方删掉的记录：并进来是为了不让它下次导入时复活。');
+    lines.add('${report.tombstones} 条墓碑是对方删除过的记录：保留它们是为了避免这些记录在下次导入时重新出现。');
   }
   if (report.danglingReferences > 0) {
     lines.add('合并后有 ${report.danglingReferences} 处引用指向不存在的记录：'
@@ -392,7 +392,7 @@ String _mergePreviewText(String fileName, int? exportedAt, MergeReport report) {
   if (report.duplicatesCollapsed > 0) {
     lines.add('文件里有 ${report.duplicatesCollapsed} 条同 id 的重复记录，已折叠，只认第一条。');
   }
-  lines.add('合并前当前数据会先整体轮转进备份，滚动只留 10 份，想退回要尽快。');
+  lines.add('合并前当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。');
   return lines.join('\n');
 }
 

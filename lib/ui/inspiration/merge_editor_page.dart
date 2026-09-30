@@ -139,7 +139,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
     final text = _implementation.text.trim();
     if (text.isEmpty) {
       // 空正文会把「如何解决」清没，业务层同样会拒；提示留在这一页更近
-      showToast(context, '正文不能是空的；想只留清单条目就用「作为清单条目」', error: true);
+      showToast(context, '正文不能为空；若只需新增清单条目，请使用「作为清单条目」。', error: true);
       return;
     }
     if (text == widget.project.implementation.trim()) {
@@ -253,7 +253,7 @@ class _MergeEditorPageState extends State<MergeEditorPage> {
                   keyboardType: TextInputType.multiline,
                   decoration: InputDecoration(
                     border: const OutlineInputBorder(),
-                    hintText: '改成你要的样子',
+                    hintText: '输入修改后的正文。',
                   ),
                 ),
               ),

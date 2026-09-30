@@ -126,7 +126,7 @@ void main() {
     // 长按项目命中：多选只收任务，得说明白
     await tester.longPress(find.text('任务项目'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('多选只收任务'), findsOneWidget);
+    expect(find.textContaining('多选只支持任务'), findsOneWidget);
     expect(find.text('已选 1 条'), findsNothing);
 
     await tester.longPress(find.text('甲任务'));

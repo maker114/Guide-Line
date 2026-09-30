@@ -186,15 +186,15 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
     if (widget.target == AiWriteTarget.checklist) {
       final existing = _beforeItems.length;
       if (_applied) {
-        return '已写入。写入前那一批清单已留档，想反悔就点下面轻提示里的「退回上一版」——只值一次。';
+        return '已写入。写入前的清单已留档，点下方提示里的「退回上一版」可以还原，该留档仅能使用一次。';
       }
       return existing == 0
           ? '这条项目现在没有清单条目，写入就是新建这些条目；正文不动。'
-          : '写入会顶掉现在这 $existing 条清单，正文不动；写入后可以退回一次。';
+          : '写入会替换现有的 $existing 条清单条目，正文不变；写入后可退回一次。';
     }
     return _applied
-        ? '已写入。写入前的那一版正文已留档，想反悔就点上面的「退回上一版」——'
-            '留档只值一次反悔，退回后即销掉。'
+        ? '已写入。写入前的正文已留档，点上方「退回上一版」可以还原；'
+            '该留档仅能反悔一次，退回后立即失效。'
         : '写入会覆盖原来的「如何解决」，清单条目不动；写入前会自动留一份旧版。';
   }
 
@@ -247,9 +247,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
       final ok = await confirmAction(
         context,
         title: '替换现有清单',
-        message: '会先清空现在这 ${_beforeItems.length} 条，写入这 ${lines.length} 条。\n'
-            '换个说法不改变事实的话：拆出来的是一次性结果，原来那几条不会退回 ——\n'
-            '要退回只能靠写入后那一句轻提示里的按钮（只值一次）。',
+        message: '会先清空现有 ${_beforeItems.length} 条，再写入 ${lines.length} 条。本次拆分为一次性结果，原有条目不会自动退回，如需退回只能使用写入后提示里的按钮，该按钮仅能使用一次。',
         confirmLabel: '替换',
         danger: true,
       );
@@ -314,8 +312,7 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
     final ok = await confirmAction(
       context,
       title: '退回上一版',
-      message: '把「如何解决」换回 AI 覆盖之前那一版？\n'
-          '这份留档只会用这一次，退回之后就销掉了。',
+      message: '将「如何解决」还原为 AI 覆盖之前的那一版？该留档仅能使用一次，退回后立即失效。',
       confirmLabel: '退回',
     );
     if (!ok || !mounted) return;
@@ -381,7 +378,7 @@ Future<void> startAiSummarize(
     final goSettings = await confirmAction(
       context,
       title: '还没配好 AI',
-      message: '$reason。\n\n去设置里填 API 地址与 Key 吗？Key 存在系统安全存储里，不会进备份或导出',
+      message: '$reason。\n\n前往设置填写 API 地址与 Key？Key 存在系统安全存储中，不会进入备份或导出。',
       confirmLabel: '去设置',
     );
     if (goSettings && context.mounted) {

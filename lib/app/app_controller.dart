@@ -340,7 +340,7 @@ class AppController extends ChangeNotifier {
       // 内存退回动作前：宁可让界面"这次没生效"，也不能显示一个磁盘上没有的状态
       workspace.rollbackTo(before);
       notifyListeners();
-      return '保存失败，这次改动没有写入磁盘（${error.message}）。请检查存储空间后重试。';
+      return '保存失败，这次改动没有写入磁盘：${error.message}。请检查存储空间后重试。';
     }
   }
 
@@ -408,13 +408,13 @@ class AppController extends ChangeNotifier {
     try {
       storage.save(workspace.buildStoreFile(), forceRotate: true);
     } on FileSystemException catch (error) {
-      return '保存失败，这次备份没有写进磁盘（${error.message}）。请检查存储空间后重试。';
+      return '保存失败，这次备份没有写进磁盘：${error.message}。请检查存储空间后重试。';
     }
     // 主文件写成功 ≠ 备份写成功：**盘上真有这一份才算成功**（P1-3）。
     // 旧实现只据此返回 null；磁盘满时备份一份都没写出，界面却报"已备份一份"。
     if (!storage.paths.rollingBackup(1).existsSync()) {
-      return '备份没有写进磁盘 —— 最近这一份没能留下，'
-          '请检查存储空间或权限后重试（主数据文件本身已保存）。';
+      return '备份没有写进磁盘，本次备份未能保存。'
+          '请检查存储空间或权限后重试；（主数据文件本身已保存）';
     }
     notifyListeners();
     return null;
@@ -572,8 +572,8 @@ class AppController extends ChangeNotifier {
       }
       return (
         ok: true,
-        message: '文件只落在应用私有目录（$name），没有离开手机 —— '
-            '导出提醒不会销账；想销账请成功分享一次。',
+        message: '文件只落在应用私有目录：$name，没有离开手机，'
+            '导出提醒不会销账；如需销账请成功分享一次。',
       );
     } catch (error) {
       return (ok: false, message: '导出失败：$error');
@@ -605,7 +605,7 @@ class AppController extends ChangeNotifier {
       );
       return (
         ok: true,
-        message: shared ? '已导出并分享：$name' : '文件只落在应用私有目录：$name（没有分享出去）',
+        message: shared ? '已导出并分享：$name' : '文件只落在应用私有目录：$name，没有分享出去。',
       );
     } catch (error) {
       return (ok: false, message: '导出失败：$error');
@@ -809,7 +809,7 @@ class AppController extends ChangeNotifier {
     final project = workspace.findProject(projectId);
     if (project == null || project.deleted) return (text: null, error: '项目不存在');
     if (project.implementation.trim().isEmpty) {
-      return (text: null, error: '正文还是空的，先写点东西再拆');
+      return (text: null, error: '正文为空，请先填写正文再拆分。');
     }
 
     final config = await readAiConfig();
@@ -838,7 +838,7 @@ class AppController extends ChangeNotifier {
 
   /// 总开关关着时，推送 / 拉取一律拒绝的那句话。
   static const String _gitHubDisabledMessage =
-      'GitHub 备份同步的开关还关着 —— 先在这一页打开「启用 GitHub 备份同步」，它才会连网';
+      'GitHub 备份同步的开关尚未启用，请先在这一页打开「启用 GitHub 备份同步」';
 
   /// 「远程提交」那一行：**双端对版本的凭证**（ADR-089）。
   ///
@@ -846,7 +846,7 @@ class AppController extends ChangeNotifier {
   /// 这一行是给用户对版本的，含糊过去比不给更糟。
   static String _remoteCommitLine(RemoteCommit? commit) {
     if (commit == null || !commit.known) {
-      return '远程提交：读不到（这个路径还没有提交，或者分支里一条提交都没有）';
+      return '远程提交：读不到。这个路径还没有提交，或者分支里一条提交都没有。';
     }
     final when = commit.committedAt == null ? '' : ' · ${formatStamp(commit.committedAt)}';
     return '远程提交：${shortSha(commit.sha)}$when';
@@ -930,7 +930,7 @@ class AppController extends ChangeNotifier {
     if (token.trim().isEmpty) return (ok: false, message: '还没填 Token');
 
     const host = 'https://api.github.com';
-    final where = '$host${cleaned.contentsApiPath}（分支 ${cleaned.branch}）';
+    final where = '$host${cleaned.contentsApiPath}，分支 ${cleaned.branch}';
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
@@ -949,28 +949,28 @@ class AppController extends ChangeNotifier {
             repo.defaultBranch.isEmpty ? '' : '，默认分支 ${repo.defaultBranch}';
         return (
           ok: true,
-          message: '连通成功：仓库 ${repo.fullName} 在'
-              '（${repo.isPrivate ? '私有' : '公开'}$branchNote）。\n'
+          message: '连通成功：仓库 ${repo.fullName} 存在，'
+              '${repo.isPrivate ? '私有' : '公开'}$branchNote。\n'
               '请求地址：$where\n'
               '${_remoteCommitLine(commit)}\n'
-              '这个路径还没有备份 —— 第一次「推送」会新建它；'
-              '分支名写错也会长这样，对一下上面的默认分支。',
+              '这个路径还没有备份，第一次「推送」会新建它；'
+              '分支名写错也会得到同样的结果，请核对上面的默认分支。',
         );
       }
       if (!remote.readable) {
         return (
           ok: true,
-          message: '连上了，但那份文件读不出 Guide Line 数据。\n'
+          message: '连上了，但该文件读不出 Guide Line 数据。\n'
               '请求地址：$where\n'
               '${_remoteCommitLine(commit)}\n'
-              '它可能不是你 App 推上去的 —— 推送会覆盖它。',
+              '它可能不是本 App 推送的，推送会覆盖它。',
         );
       }
       return (
         ok: true,
         message: '连通成功\n'
             '请求地址：$where\n'
-            '远程那份：${formatStamp(remote.savedAt)} · '
+            '远程备份：${formatStamp(remote.savedAt)} · '
             '${liveRecordCount(remote.payload!.store)} 条活记录\n'
             '${_remoteCommitLine(commit)}',
       );
@@ -1057,7 +1057,7 @@ class AppController extends ChangeNotifier {
   /// 启动那次**静默比对**（需求⑤）攒下的待办：非 null ⇒ 外壳摆差异面板。
   ///
   /// 与 [pendingAutoPushDiff] 分开，是因为问的不是同一件事：那个问"这一次改的要推
-  /// 上去，你看一眼"（按钮是推上去 / 先不推），这个问"一进来就发现两边对不上，
+  /// 上去，你看一眼"（按钮是推送 / 暂不推送），这个问"一进来就发现两边对不上，
   /// 你要用哪一边"（按钮是覆盖云端数据 / 使用云端数据）—— 面板同一扇，
   /// 按下去做的事不一样。
   StartupSyncRequest? pendingStartupSync;
@@ -1174,7 +1174,7 @@ class AppController extends ChangeNotifier {
     }
     final plan = check.plan;
     if (plan == null) {
-      _setAutoSync(const AutoSyncState.failed('比对不出结果，去同步页看看'));
+      _setAutoSync(const AutoSyncState.failed('比对不出结果，请到同步页查看。'));
       return;
     }
 
@@ -1211,8 +1211,8 @@ class AppController extends ChangeNotifier {
           // （需求④⑤）。这扇面板的两个按钮都会改数据，所以点空白关不掉。
           pendingStartupSync = StartupSyncRequest(
             diff: diff,
-            message: '云端那一份已经不是上次同步过的那一次提交了（提交码对不上），'
-                '这台手机上也有改动。要用哪一边？',
+            message: '云端数据已经不是上次同步过的那一次提交，提交码对不上，'
+                '这台手机上也有改动。请选择保留哪一边的数据。',
           );
         }
         // 停在"等你决定"：黄胶囊把这件事摆在右上角（需求：不传也要说一声）。
@@ -1233,8 +1233,8 @@ class AppController extends ChangeNotifier {
           pendingStartupSync = StartupSyncRequest(
             diff: choiceDiff,
             message: plan.action == SyncAction.pull
-                ? '云端那一份比这台手机新，提交码也对不上。要用哪一边？'
-                : '云端和这台手机都改过，提交码也对不上。要用哪一边？',
+                ? '云端数据比这台手机新，提交码对不上。请选择保留哪一边的数据。'
+                : '云端和这台手机都改过，提交码对不上。请选择保留哪一边的数据。',
           );
         }
         // 编辑路上（announce）刻意**不替用户拉**：拉下来会覆盖手上这份，
@@ -1256,7 +1256,7 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  /// 用户在差异面板上点了「推上去」：这一趟才真的传。
+  /// 用户在差异面板上点了「推送」：这一趟才真的传。
   Future<void> confirmPendingAutoPush() async {
     if (pendingAutoPushDiff == null) return;
     pendingAutoPushDiff = null;
@@ -1265,7 +1265,7 @@ class AppController extends ChangeNotifier {
     await _pushAutoSync(saved.config, saved.token);
   }
 
-  /// 用户在差异面板上点了「先不推」：静默收场 —— 这是他选的，**不记成失败**。
+  /// 用户在差异面板上点了「暂不推送」：静默收场 —— 这是他选的，**不记成失败**。
   void cancelPendingAutoPush() {
     if (pendingAutoPushDiff == null) return;
     pendingAutoPushDiff = null;
@@ -1395,7 +1395,7 @@ class AppController extends ChangeNotifier {
         return (
           ok: false,
           message: '${plan.message}\n\n'
-              '为了不误擦远程，这里不往下走 —— 先在这台手机上恢复数据，或者去远程把那份存下来。',
+              '为避免误覆盖远程数据，这里不再继续：请先在这台手机上恢复数据，或者到远程把备份保存下来。',
         );
       }
       if (plan.action == SyncAction.pull || plan.action == SyncAction.bothChanged) {
@@ -1436,7 +1436,7 @@ class AppController extends ChangeNotifier {
         ok: true,
         message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
             '提交 ${shortSha(written.commitSha)} · 内容码 ${shortSha(written.sha)}\n'
-            '远程路径：${cleaned.path}（分支 ${cleaned.branch}）\n'
+            '远程路径：${cleaned.path}，分支 ${cleaned.branch}\n'
             '提交码是"同一次上传"的凭证：另一台手机上读到同一个码，就是同一份。',
       );
     } on GitHubBackupException catch (error) {
@@ -1470,13 +1470,13 @@ class AppController extends ChangeNotifier {
         return (remote: null, commit: null, error: '远程还没有这份备份，先推送一次');
       }
       if (!remote.readable) {
-        return (remote: null, commit: null, error: '远程那份读不出 Guide Line 数据');
+        return (remote: null, commit: null, error: '远程备份读不出 Guide Line 数据');
       }
       if (liveRecordCount(remote.payload!.store) == 0) {
         return (
           remote: null,
           commit: null,
-          error: '远程那份是 0 条记录 —— 0 条不算可用备份，不能拿它覆盖本地',
+          error: '远程备份是 0 条记录，不算可用备份，不能用它覆盖本地。',
         );
       }
       final commit = await gitHub.latestCommit(config: cleaned, token: token.trim());
@@ -1519,7 +1519,7 @@ class AppController extends ChangeNotifier {
     notifyListeners();
     return (
       ok: true,
-      message: '已拉取远程那份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
+      message: '已拉取远程备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
           '提交 ${shortSha(commit?.sha ?? '')} · 内容码 ${shortSha(remote.sha)}\n'
           '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
     );
@@ -1546,8 +1546,8 @@ class AppController extends ChangeNotifier {
       // 用户看到的会是一个空库（本应用读不懂那份文件），最容易误判成"数据全没了"，
       // 从而做出"重新开始记"或"重新导入"这类会真正造成损失的动作。
       warnings.add(
-        '数据文件由更新版本的 App 写入，本版本读不懂，已保持原样未改动 —— '
-        '你的数据还在文件里，升级 App 后即可看到；在此之前本版本的改动不会被保存。',
+        '数据文件由更新版本的 App 写入，本版本无法读取，已保持原样未改动。'
+        '你的数据仍在文件里，升级 App 后即可看到；在此之前本版本的改动不会被保存。',
       );
       return warnings;
     }
@@ -1555,7 +1555,7 @@ class AppController extends ChangeNotifier {
       warnings.add('主数据文件损坏，已从备份自动恢复');
     }
     if (report.quarantinedPaths.isNotEmpty) {
-      warnings.add('检测到损坏文件（已隔离保留现场，未覆盖）：${report.quarantinedPaths.length} 个');
+      warnings.add('检测到损坏文件，已隔离保留现场且未覆盖原文件：${report.quarantinedPaths.length} 个');
     }
     if (report.issues.errors.isNotEmpty) {
       warnings.add('解析时发现 ${report.issues.errors.length} 处问题，已按数据契约降级处理');

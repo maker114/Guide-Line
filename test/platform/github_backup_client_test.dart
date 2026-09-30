@@ -144,7 +144,7 @@ void main() {
         isA<GitHubBackupException>().having(
           (error) => error.message,
           'message',
-          contains('太大'),
+          contains('远程备份过大'),
         ),
       ),
     );

@@ -248,7 +248,7 @@ void main() {
       );
       expect(text, startsWith('# 分类：还没装东西的分类\n'));
       expect(text, contains('- 目标 0 个'));
-      expect(text, contains('（这个分类下面还没有目标）'));
+      expect(text, contains('这个分类下面还没有目标'));
     });
   });
 }

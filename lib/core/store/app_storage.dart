@@ -80,7 +80,7 @@ class AppStorage {
       if (recovery != null) {
         store = recovery.store;
         recoveredFrom = recovery.path;
-        issues.error('主数据文件不存在 —— 已从备份恢复：${recovery.path}');
+        issues.error('主数据文件不存在，已从备份恢复：${recovery.path}');
         _writeBackRecovered(store, stamp, issues);
       }
     } else {
@@ -103,8 +103,8 @@ class AppStorage {
         // 隔离它、或用空数据盖掉它，都是不可逆的数据丢失 —— 用户的真数据就在里面。
         // 所以这里什么都不动：主文件留在原地，只把情况告诉用户。
         issues.error(
-          '主数据文件由更新版本的 App 写入 —— 已保持原样未改动。'
-          '请升级 App 后再打开，否则这次看到的会是空数据。',
+          '主数据文件由更新版本的 App 写入，已保持原样未改动。'
+          '请升级 App 后再打开，否则本次会显示为空数据。',
         );
         lockedByNewerSchema = true;
         _lockedByNewerSchema = true;
@@ -112,7 +112,7 @@ class AppStorage {
         store = parsed.store!;
       } else {
         // 主文件读不出来 / 读不了 → 隔离现场，然后尝试最近的备份
-        issues.error('主数据文件无法解析 —— 已隔离保留现场');
+        issues.error('主数据文件无法解析，已隔离保留现场');
         quarantined.add(AtomicFile(file).quarantine(stamp));
         _pruneQuarantine();
         final recovery = _loadNewestBackup(issues);
@@ -692,7 +692,7 @@ class AppStorage {
       return '这不是一份可删除的备份';
     }
     if (entries.length <= 1) {
-      return '至少保留一份备份 —— 没有云端时它是唯一的安全网';
+      return '至少要保留一份备份，没有云端时它是唯一的安全网';
     }
     final file = File(backupPath);
     if (file.existsSync()) file.deleteSync();

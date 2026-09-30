@@ -340,8 +340,8 @@ SyncPlan analyzeSync({
   if (localCount == 0) {
     return SyncPlan(
       action: SyncAction.localEmpty,
-      message: '这台手机上现在一条记录都没有（远程那一份有 $remoteCount 条）。\n'
-          '推上去等于把远程那份擦成空的 —— 确定要这么做吗？',
+      message: '本机当前没有记录，远程备份中有 $remoteCount 条。\n'
+          '推送会用本机的空数据覆盖远程备份，请确认是否继续。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );
@@ -350,8 +350,8 @@ SyncPlan analyzeSync({
   if (remote == null || !remote.readable) {
     return SyncPlan(
       action: SyncAction.push,
-      message: '远程还没有这份备份。\n'
-          '推送会把当前 $localCount 条记录写上去，并新建这次提交。',
+      message: '远程尚未有这份备份。\n'
+          '推送会写入当前 $localCount 条记录，并新建一次提交。',
       localSavedAt: localSavedAt,
     );
   }
@@ -360,7 +360,7 @@ SyncPlan analyzeSync({
   if (!remote.usable) {
     return SyncPlan(
       action: SyncAction.push,
-      message: '远程那份读不出可用记录（0 条不算可用备份）。\n'
+      message: '远程备份读不出可用记录，0 条不算可用备份。\n'
           '推送会用当前 $localCount 条记录覆盖它，并从这次起留下可回退的历史。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
@@ -392,9 +392,9 @@ SyncPlan analyzeSync({
     return SyncPlan(
       action: SyncAction.push,
       trustedOverwrite: true,
-      message: '云端还是上次同步过的那一次提交（${shortSha(remoteCommitSha)}）——'
-          '这中间没有第三方改过，本地直接覆盖云端。\n'
-          '本地 $localCount 条，云端那一份 $remoteCount 条。',
+      message: '云端仍是上次同步过的那一次提交 ${shortSha(remoteCommitSha)}，'
+          '这期间没有第三方改动，本地可以直接覆盖云端。\n'
+          '本地 $localCount 条，云端 $remoteCount 条。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );
@@ -409,8 +409,8 @@ SyncPlan analyzeSync({
   if (localChanged && !remoteChanged) {
     return SyncPlan(
       action: SyncAction.push,
-      message: '本地比远程新：本地 ${formatStamp(localSavedAt)}（$localCount 条），'
-          '远程 ${formatStamp(remoteSavedAt)}（$remoteCount 条）。',
+      message: '本地比远程新：本地 ${formatStamp(localSavedAt)}，共 $localCount 条；'
+          '远程 ${formatStamp(remoteSavedAt)}，共 $remoteCount 条。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );
@@ -419,8 +419,8 @@ SyncPlan analyzeSync({
   if (!localChanged && remoteChanged) {
     return SyncPlan(
       action: SyncAction.pull,
-      message: '远程比本地新：远程 ${formatStamp(remoteSavedAt)}（$remoteCount 条），'
-          '本地 ${formatStamp(localSavedAt)}（$localCount 条）。',
+      message: '远程比本地新：远程 ${formatStamp(remoteSavedAt)}，共 $remoteCount 条；'
+          '本地 ${formatStamp(localSavedAt)}，共 $localCount 条。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );
@@ -432,8 +432,8 @@ SyncPlan analyzeSync({
   if (!localChanged && !remoteChanged) {
     return SyncPlan(
       action: SyncAction.noChange,
-      message: '两边都还是上次同步时的那一份（本地 ${formatStamp(localSavedAt)}，'
-          '远程 ${formatStamp(remoteSavedAt)}），中间谁都没改过。\n'
+      message: '两边都仍是上次同步时的状态，本地 ${formatStamp(localSavedAt)}，'
+          '远程 ${formatStamp(remoteSavedAt)}，期间双方都没有改动。\n'
           '共 $localCount 条记录，不需要推送也不需要拉取。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
@@ -443,9 +443,9 @@ SyncPlan analyzeSync({
   // 两边都动过：给两个数字，让用户在知道各自条数的前提下自己选。
   return SyncPlan(
     action: SyncAction.bothChanged,
-    message: '两边都改过：本地 ${formatStamp(localSavedAt)}（$localCount 条），'
-        '远程 ${formatStamp(remoteSavedAt)}（$remoteCount 条）。\n'
-        '按时间看${_newerSide(localSavedAt, remoteSavedAt)}更新，但条数差多少得你自己定 —— '
+    message: '两边都改过：本地 ${formatStamp(localSavedAt)}，共 $localCount 条；'
+        '远程 ${formatStamp(remoteSavedAt)}，共 $remoteCount 条。'
+        '按时间看${_newerSide(localSavedAt, remoteSavedAt)}更新，但保留哪一边需要自行判断，'
         '这一步不会自动合并。',
     localSavedAt: localSavedAt,
     remoteSavedAt: remoteSavedAt,

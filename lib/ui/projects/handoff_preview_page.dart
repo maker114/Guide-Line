@@ -58,7 +58,7 @@ class _HandoffPreviewPageState extends State<HandoffPreviewPage> {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Text(
-              '可以直接改 —— 不想给出去的部分删掉即可。',
+              '可以直接修改，不需要外发的部分删除即可。',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -111,7 +111,7 @@ class _HandoffPreviewPageState extends State<HandoffPreviewPage> {
   Future<void> _export() async {
     final text = _text.text.trim();
     if (text.isEmpty) {
-      showToast(context, '内容是空的，没什么可导出的', error: true);
+      showToast(context, '内容为空，无法导出。', error: true);
       return;
     }
     setState(() => _busy = true);

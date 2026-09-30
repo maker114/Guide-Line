@@ -85,7 +85,7 @@ class Document {
       final purgedAt =
           Canonical.readInt(raw['purged_at'], '${name.fileName}.items[$index].purged_at', issues);
       if (id == null || purgedAt == null) {
-        issues.error('${name.fileName}.items[$index]：墓碑骨架缺少 id / purged_at —— 丢弃');
+        issues.error('${name.fileName}.items[$index]：墓碑骨架缺少 id / purged_at，已丢弃');
         return null;
       }
       return Tombstone(id: id, purgedAt: purgedAt);

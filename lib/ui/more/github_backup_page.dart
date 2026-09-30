@@ -171,7 +171,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         setState(() => _busy = false);
         _setResult(
           '${plan.message}\n\n'
-          '为了不误擦远程，这里不往下走 —— 先在这台手机上恢复数据，或者去远程把那份存下来。',
+          '为避免覆盖远程备份，此处不再继续。请先在本机恢复数据，或前往 GitHub 保存远程备份。',
         );
         return;
       case SyncAction.bothChanged:
@@ -180,7 +180,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         final ok = await _confirmPushOverwrite(
           local: local,
           remoteStore: remoteStore,
-          title: '覆盖远程那份备份',
+          title: '覆盖远程备份',
           message: '${plan.message}\n\n'
               '当前这台手机：$localText\n'
               '${_remoteCommitText(check.remoteCommit)}\n\n'
@@ -199,7 +199,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           local: local,
           remoteStore: remoteStore,
           title: '推送到 GitHub',
-          message: '会把当前 $localText 推上去，覆盖远程那一份路径上的文件。\n\n'
+          message: '会把当前 $localText 上传到 GitHub，覆盖远程同一路径上的文件。\n\n'
               '远程：${plan.remoteSavedAt == null ? '还没有这份文件' : formatStamp(plan.remoteSavedAt)}\n'
               '${_remoteCommitText(check.remoteCommit)}',
           confirmLabel: '推送',
@@ -248,23 +248,23 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         ? (await showStoreDiffSheet(
             context,
             diff: diff,
-            title: '用远程那份覆盖这台手机',
-            baseLabel: '这台手机（会被覆盖）· $current',
-            targetLabel: '云端（会拉下来）· ${formatStamp(remote.savedAt)} · $incoming',
+            title: '用远程备份覆盖这台手机',
+            baseLabel: '这台手机 · 会被覆盖 · $current',
+            targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
             confirmLabel: '拉取并覆盖',
             cancelLabel: '取消',
             danger: true,
             note: '${_remoteCommitText(preview.commit)}\n\n'
-                '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
+                '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
           )) ==
               DiffSheetResult.confirm
         : await confirmAction(
             context,
-            title: '用远程那份覆盖这台手机',
+            title: '用远程备份覆盖这台手机',
             message: '远程：${formatStamp(remote.savedAt)} · $incoming\n'
                 '${_remoteCommitText(preview.commit)}\n'
                 '现在这台上：$current\n\n'
-                '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
+                '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
             confirmLabel: '拉取并覆盖',
             danger: true,
           );
@@ -308,8 +308,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       context,
       diff: diff,
       title: title,
-      baseLabel: '云端（会被覆盖）· ${_countsText(liveCountsOf(remote))}',
-      targetLabel: '这台手机（会推上去）· ${_countsText(liveCountsOf(local))}',
+      baseLabel: '云端 · 会被覆盖 · ${_countsText(liveCountsOf(remote))}',
+      targetLabel: '这台手机 · 会上传 · ${_countsText(liveCountsOf(local))}',
       confirmLabel: confirmLabel,
       cancelLabel: '取消',
       danger: danger,
@@ -386,7 +386,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 SwitchListTile(
                   value: _enabled,
                   title: const Text('启用 GitHub 备份同步'),
-                  subtitle: const Text('关掉不会丢配置，也不会删掉远程那份\n开着时：每次回到主页会自动上传这次改动（只上传，不会自动拉回）'),
+                  subtitle: const Text('关掉不会丢配置，也不会删除远程备份。\n开着时：每次回到主页会自动上传这次改动，只上传、不会自动拉回。'),
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
                 const Divider(height: 1),
@@ -398,7 +398,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 ),
                 _Field(
                   label: '仓库名',
-                  hint: '例如 guideline-backup（建议用私有仓库）',
+                  hint: '例如 guideline-backup，建议使用私有仓库',
                   controller: _repo,
                 ),
                 _Field(
@@ -415,7 +415,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 _SectionLabel('凭据'),
                 _Field(
                   label: 'Token',
-                  hint: _tokenStored ? '已保存（留空表示不改）' : '至少要能读写这个仓库',
+                  hint: _tokenStored ? '已保存，留空表示不修改' : '至少要能读写这个仓库',
                   controller: _token,
                   obscure: true,
                   helper: '只存系统安全存储（Android Keystore）；不进偏好文件、不进备份、不进整库导出',
@@ -426,8 +426,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
                     child: Text(
-                      '开关关着：推送与拉取都点不动（测试连接是只读的，随时可用）。'
-                      '这一页不会在你没点的时候自己连网。',
+                      '开关关着：推送与拉取均不可用；测试连接是只读的，随时可用。'
+                      '这一页不会在未操作时自行联网。',
                     ),
                   ),
                 _ActionTile(
@@ -439,7 +439,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 _ActionTile(
                   icon: Icons.cloud_upload_outlined,
                   title: '推送到 GitHub',
-                  subtitle: '用这台手机的数据覆盖远程那一份（推送前会确认）',
+                  subtitle: '用这台手机的数据覆盖远程备份，推送前会确认',
                   onTap: (_busy || !_enabled) ? null : _push,
                 ),
                 _ActionTile(
@@ -462,15 +462,15 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                   ),
                 if (_result != null) _ResultBox(text: _result!, error: _isErrorText(_result!)),
                 _SectionLabel('会发出去什么'),
-                const _Bullet('整份数据文件（压缩后），也就是「导出」会生成的那一份：'
+                const _Bullet('整份数据文件，压缩后即「导出」会生成的那一份：'
                     '项目、灵感、事件、任务，含墓碑与偏好文件之外的记录'),
-                const _Bullet('推上去之后，它就在你的 GitHub 仓库里以「明文」（gzip）存在着 —— '
-                    '所以这个仓库必须是私有的'),
+                const _Bullet('上传之后，这份数据会以明文 gzip 的形式存在于你的 GitHub 仓库，'
+                    '因此这个仓库必须是私有的。'),
                 const _Bullet('每次推送都是仓库里的一次提交，所以旧版本可以从提交历史里找回'),
                 _SectionLabel('不会发出去什么'),
                 const _Bullet('Token 本身：它只存在系统安全存储里，连偏好文件的键都不出现'),
-                const _Bullet('不会自动推送、不会在启动时检查远程 —— 这一版只有你亲手点的两下'),
-                const _Bullet('不会把远程那份自动和本地合并：两边都改过时，只由你选一个方向'),
+                const _Bullet('不会自动推送、不会在启动时检查远程；这一版只有手动触发的两次操作。'),
+                const _Bullet('不会把远程备份与本地数据自动合并；两端都改过时，只由你选择合并方向。'),
               ],
             ),
     );

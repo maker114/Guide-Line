@@ -137,7 +137,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     final size = body['size'];
     if (sha is! String) {
       throw GitHubBackupException(
-        '远程文件的格式不对（${uri.toString()}）：没读到 sha',
+        '远程文件的格式不对：${uri.toString()}，没有读到 sha',
       );
     }
 
@@ -146,7 +146,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       try {
         bytes = base64.decode(content.replaceAll(RegExp(r'\s'), ''));
       } catch (error) {
-        throw GitHubBackupException('远程文件的内容解不开（$error）');
+        throw GitHubBackupException('远程文件的内容解不开：$error');
       }
     } else {
       // 1 MB 以上的文件，默认的 object 媒体类型只回一个**空 content**
@@ -191,8 +191,8 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       // 单文件读取上限（100 MB）：这也是推送的极限。单列一条可读文案，
       // 不把它混进"这份备份读不出数据"里 —— 那会让人以为是文件坏了。
       throw const GitHubBackupException(
-        '远程那份太大，GitHub 不给通过接口读回来（单文件 100 MB 上限）。\n'
-        '到仓库网页里手动下载它，或者把备份瘦下来再试',
+        '远程备份过大，超过 GitHub 单文件 100 MB 上限，无法通过接口读回。\n'
+        '请到仓库网页手动下载，或减小备份体积后重试',
       );
     }
     if (response.statusCode >= 400) _throwFor(response, uri);
@@ -202,9 +202,9 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     final encoding = body['encoding'];
     if (content is! String || content.isEmpty) {
       throw GitHubBackupException(
-        '远程那份读回来是空的（encoding=${encoding ?? '未知'}）：'
-        '文件可能刚被清空，也可能 GitHub 只回了元数据。\n'
-        '重试一次；仍然如此就到仓库网页里看一眼这个文件',
+        '远程备份读回的内容为空，encoding 为 ${encoding ?? '未知'}：'
+        '文件可能刚被清空，也可能 GitHub 只返回了元数据。\n'
+        '请重试一次；若仍然为空，请到仓库网页查看这个文件',
       );
     }
     // blob 的 `content` 默认是 base64；纯文本文件才回 `utf-8`。
@@ -212,7 +212,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
     try {
       return base64.decode(content.replaceAll(RegExp(r'\s'), ''));
     } catch (error) {
-      throw GitHubBackupException('远程文件的内容解不开（$error）');
+      throw GitHubBackupException('远程文件的内容解不开：$error');
     }
   }
 
@@ -326,7 +326,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       root = jsonDecode(response.body);
     } catch (error) {
       throw GitHubBackupException(
-        'GitHub 返回的不是 JSON（${uri.toString()}）：${_brief(response.body)}',
+        'GitHub 返回的不是 JSON：${uri.toString()}，${_brief(response.body)}',
       );
     }
     if (root is! List || root.isEmpty) return null;
@@ -390,15 +390,15 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       // 权限缺失在 Dart 侧也表现为 SocketException（与 AI 那一侧同一个坑：
       // debug 清单有联网权限、release 没有），所以文案里要把这条说出来。
       throw GitHubBackupException(
-        '连不上 api.github.com（${error.osError?.message ?? error.message}）\n'
-        '检查网络与该地址是否可达；若怎么都连不上，确认安装包的联网权限没有被去掉',
+        '连不上 api.github.com：${error.osError?.message ?? error.message}\n'
+        '请检查网络与该地址是否可达；若始终连不上，请确认安装包的联网权限没有被去掉',
       );
     } on HttpException {
       throw const GitHubBackupException('网络请求失败，稍后再试');
     } on TimeoutException {
-      throw GitHubBackupException('请求超时（${limit.inSeconds} 秒），稍后再试');
+      throw GitHubBackupException('请求超过 ${limit.inSeconds} 秒未完成，请稍后再试');
     } catch (error) {
-      throw GitHubBackupException('请求超时或中断（$error）');
+      throw GitHubBackupException('请求超时或中断：$error');
     }
   }
 
@@ -408,11 +408,11 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       root = jsonDecode(response.body);
     } catch (error) {
       throw GitHubBackupException(
-        'GitHub 返回的不是 JSON（${uri.toString()}）：${_brief(response.body)}',
+        'GitHub 返回的不是 JSON：${uri.toString()}，${_brief(response.body)}',
       );
     }
     if (root is! Map) {
-      throw GitHubBackupException('GitHub 返回的不是对象（${uri.toString()}）');
+      throw GitHubBackupException('GitHub 返回的不是对象：${uri.toString()}');
     }
     return Map<String, dynamic>.from(root);
   }
@@ -429,8 +429,8 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
         );
       case 404:
         throw GitHubBackupException(
-          '仓库或分支不存在（404）：${uri.toString()}\n'
-          '核对所有者、仓库名、分支名是否正确 —— 私有仓库用错 Token 也会显示 404',
+          '仓库或分支不存在，HTTP 404：${uri.toString()}\n'
+          '请核对所有者、仓库名、分支名是否正确；私有仓库用错 Token 也会返回 404',
         );
       case 409:
         throw const GitHubBackupException(
@@ -446,7 +446,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
         );
     }
     if (response.statusCode >= 500) {
-      throw const GitHubBackupException('GitHub 那边出错了（5xx），过一会儿再试');
+      throw const GitHubBackupException('GitHub 服务端出错，HTTP 5xx，请稍后再试');
     }
     throw GitHubBackupException(
       'GitHub 返回 ${response.statusCode}：${_brief(response.body)}',
@@ -459,7 +459,7 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
         .replaceAll(RegExp(r'<[^>]*>'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    if (stripped.isEmpty) return '（空响应）';
+    if (stripped.isEmpty) return '空响应';
     return stripped.length <= 160 ? stripped : '${stripped.substring(0, 160)}…';
   }
 }

@@ -34,15 +34,15 @@ class RuleViolation implements Exception {
 /// 照旧能改能删（《数据契约》§7 禁止删枚举值，删了会静默改写老数据）。
 /// 拒绝时把替代做法一并说出来，免得用户以为"这个功能坏了"。
 const String _parallelGone =
-    '「并列任务」已废除 —— 两件并行的事请开两个「事件」，'
-    '或者把两条并成同一个节点下的两条子任务';
+    '「并列任务」已废除。两件并行的事请开两个「事件」，'
+    '或者把两条并成同一个节点下的两条子任务。';
 
 /// 「正文与进来时一模一样」时拒绝合并的文案（Q8）。
 ///
 /// 界面上最该看到的那一句就是这个 —— 它同时是两个可点动作的名字，
 /// 所以抽成常量、界面与业务层共用一份，免得两处说法慢慢走偏。
 const String implementationUnchanged =
-    '正文没有变化，这条灵感还没写进项目 —— 用「追加原文」或「作为清单条目」';
+    '正文没有变化，这条灵感还没写进项目。请用「追加原文」或「作为清单条目」。';
 
 /// 批量合并灵感的**落点**（Q37）—— 与单条的两个方法一一对应：
 /// [MergeLanding.implementation] ↔ [Workspace.mergeInspiration]，
@@ -1846,7 +1846,7 @@ class Workspace {
     if (targets.isEmpty) return;
     for (final task in targets) {
       if (task.archived) {
-        throw RuleViolation('「${task.title}」已经归档了 —— 先取消归档再排期');
+        throw RuleViolation('「${task.title}」已归档，需先取消归档再排期。');
       }
     }
 
@@ -1943,13 +1943,13 @@ class Workspace {
       if (parentTask.eventId != targetEvent) throw const RuleViolation('父任务属于其它事件');
       // 只有 `standard` / 历史 `parallel` 能装东西，`subtask` 是叶子
       if (!parentTask.canHaveChild(TaskType.subtask)) {
-        throw RuleViolation('「${parentTask.title}」是子任务，下面不能再挂东西');
+        throw RuleViolation('「${parentTask.title}」是子任务，下面不能再添加下级。');
       }
       // 挂到节点下 = 自己变成 `subtask`，而子任务不能再有下级
       if (parentChanged && descendantCount > 0) {
         throw RuleViolation(
-          '这条任务下面还有 $descendantCount 个下级 —— 挂到别的节点下它就成了子任务，'
-          '而子任务不能再有下级。先把下级移走，或者把它留在主线上',
+          '这条任务下面还有 $descendantCount 个下级，挂到别的节点下它就成了子任务，'
+          '而子任务不能再有下级。需先把下级移走，或者把它留在主线上。',
         );
       }
     }

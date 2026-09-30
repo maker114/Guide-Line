@@ -307,8 +307,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     final ok = await confirmAction(
       context,
       title: '清除已完成条目',
-      message: '会删掉 ${scope.projects} 个项目里「已勾选」的 ${scope.items} 条清单条目。\n'
-          '没勾的条目、正文、名字都不动；删掉的找不回来（清单没有回收站）。',
+      message: '会删除 ${scope.projects} 个项目里「已勾选」的 ${scope.items} 条清单条目。'
+          '未勾选的条目、正文与名字均不受影响；删除后无法找回，清单没有回收站。',
       confirmLabel: '清除',
       danger: true,
     );
@@ -356,9 +356,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     final ok = await confirmAction(
       context,
       title: title,
-      message: '$range，$what'
-          '（清单 ${impact.items} 条）—— 名字、标识色、日期与归档状态都不动。\n'
-          '不能撤销：重置没有回收站，退回只给一次（执行后提示里那个「退回上一版」）。',
+      message: '$range，$what，共 ${impact.items} 条清单；'
+          '名字、标识色、日期与归档状态均不变。此操作不能撤销，重置没有回收站，'
+          '退回机会只有一次，入口在执行后提示里的「退回上一版」。',
       confirmLabel: '重置',
       danger: true,
     );
@@ -407,7 +407,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           duration: const Duration(seconds: 8),
           backgroundColor: scheme.surfaceContainerHighest,
           content: Text(
-            '$title完成：$projectCount 个项目已清空。点右边可以退回来（只值一次）',
+            '$title完成：$projectCount 个项目已清空。点右侧的「退回上一版」可以还原，仅能使用一次。',
             style: TextStyle(color: scheme.onSurface),
           ),
           action: SnackBarAction(
@@ -473,7 +473,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           projectId: project.id,
           // 分类顺带说到"含几个目标"：一份说明里装了几件事，用户得先知道
           projectTitle: isCategory
-              ? '${project.title}（含 ${children.length} 个目标）'
+              ? '${project.title}，含 ${children.length} 个目标'
               : project.title,
           markdown: markdown,
         ),
@@ -542,8 +542,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     final ok = await confirmAction(
       context,
       title: '清空清单',
-      message: '会删掉现在这 $count 条条目。\n'
-          '正文（「如何解决」）不受影响，还在原地。',
+      message: '会删除现有 $count 条清单条目。'
+          '正文「如何解决」不受影响，仍会保留。',
       confirmLabel: '清空',
       danger: true,
     );
@@ -572,9 +572,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       final ok = await confirmAction(
         context,
         title: '从正文重拆',
-        message: '会先清空现在这 ${project.items.length} 条，再按正文重新拆成 ${lines.length} 条'
-            ' —— 怎么拆是猜的，拆错了只能一条条改回来。\n'
-            '正文本身不会动。',
+        message: '会先清空现有 ${project.items.length} 条，再按正文重新拆成 ${lines.length} 条。'
+            '拆分方式是程序推测的，拆错只能逐条改回。正文本身不会改动。',
         confirmLabel: '重拆',
         danger: true,
       );
@@ -873,7 +872,7 @@ class _ImplementationBody extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 6),
             child: Text(
-              '正文还空着 —— 清单里的条目不受影响，切回「清单」就能看到',
+              '正文仍为空，清单里的条目不受影响，切回「清单」即可看到。',
               style: theme.textTheme.bodySmall,
             ),
           ),
