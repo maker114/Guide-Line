@@ -60,6 +60,20 @@ IconData entityTypeIcon(Entity entity) {
   return Icons.help_outline;
 }
 
+/// 数据集合名（版本差异面板等在标题里点出"哪一类变了"）。
+String docNameLabel(DocName name) {
+  switch (name) {
+    case DocName.projects:
+      return '项目';
+    case DocName.inspirations:
+      return '灵感';
+    case DocName.events:
+      return '事件';
+    case DocName.tasks:
+      return '任务';
+  }
+}
+
 /// 实体的显示标题（各实体字段名不同：`title` / `name` / `text`）。
 String entityTitle(Entity entity) {
   if (entity is Project) return entity.title;

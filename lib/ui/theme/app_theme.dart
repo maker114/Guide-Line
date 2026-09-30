@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/json/canonical.dart';
 import '../../core/models/project_palette.dart';
 import '../../core/store/ui_prefs.dart';
+import '../common/diff_colors.dart';
 import '../common/urgency.dart';
 import 'shape_tokens.dart';
 
@@ -185,9 +186,10 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
     colorScheme: applyAccent(neutral, seed, brightness),
     brightness: brightness,
     useMaterial3: true,
-    // 紧迫度色阶（绿→红）注册在主题里，控件只按档位取色
+    // 紧迫度色阶（绿→红）与版本差异红绿都注册在主题里，控件只按档位取色
     extensions: <ThemeExtension<dynamic>>[
       brightness == Brightness.dark ? UrgencyColors.dark : UrgencyColors.light,
+      brightness == Brightness.dark ? DiffColors.dark : DiffColors.light,
     ],
     // 形状走《界面规范》，能在这里设的就不在控件里各写一遍。
     // `cardTheme` 的 margin 与 shape 要一起给：只改 shape 不改 margin，

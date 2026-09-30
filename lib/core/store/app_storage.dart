@@ -633,6 +633,28 @@ class AppStorage {
     return parsed.store!;
   }
 
+  /// **只读**一份备份的内容，用于"恢复之前先看看差在哪"（不动主文件、不写任何东西）。
+  ///
+  /// 判据与 [restoreFromBackup] 一字不差：路径必须是 [listBackups] 列得出的，
+  /// 而且那份备份至少得有一条记录。放水的话，差异面板会替一份"0 条"的假备份
+  /// 摆出一屏"把现有数据全删了"的红行 —— 比不显示更吓人。
+  ///
+  /// 返回 `null` = 读不了 / 不可用，界面照实说，不要编造一份空版本。
+  StoreFile? readBackupStore(String backupPath) {
+    final known = listBackups().any((entry) => entry.path == backupPath);
+    if (!known) return null;
+    final file = File(backupPath);
+    if (!file.existsSync()) return null;
+    try {
+      final parsed = _tryParse(file.readAsStringSync(encoding: utf8), DecodeIssues());
+      final store = parsed.store;
+      if (store == null || !_hasAnyRecord(store)) return null;
+      return store;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// 删掉某一份备份。
   ///
   /// 两条安全线，都是刻意的：

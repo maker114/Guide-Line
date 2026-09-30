@@ -691,6 +691,31 @@ void main() {
       expect(ws.markerColorUsage()[hex], isNull, reason: '删掉的项目不该继续占着色');
     });
 
+    test('用量统计不数已归档的（2026-09-30 实机反馈）', () {
+      // 归档 = "收起来了"：它不在项目树 / 事件列表里露面，却还占着一支色的话，
+      // 色环上那些永远选不到的色就没法解释。**自动分配读同一份口径**，
+      // 所以归档之后那支色应当又变回"用得最少"。
+      final hex = ProjectPalette.hexes.first.toLowerCase();
+      final project = ws.createProject(title: '要归档的项目');
+      ws.setProjectColor(project.id, hex);
+      final event = ws.createEvent(name: '要归档的事件');
+      ws.setEventColor(event.id, hex);
+      expect(ws.markerColorUsage()[hex], 2);
+
+      ws.setProjectArchived(project.id, true);
+      ws.setEventArchived(event.id, true);
+
+      expect(ws.markerColorUsage()[hex], isNull, reason: '归档的不再占色');
+      expect(
+        ws.nextProjectColor(),
+        ProjectPalette.hexes.first,
+        reason: '让出来的色要能被自动分配重新选中 —— 两处必须是同一个口径',
+      );
+
+      ws.setProjectArchived(project.id, false);
+      expect(ws.markerColorUsage()[hex], 1, reason: '取消归档后照旧占色');
+    });
+
     test('新建项目自动拿到一个色板里的颜色', () {
       final project = ws.createProject(title: '第一个');
       expect(project.color, isNotNull);

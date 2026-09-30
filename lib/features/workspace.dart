@@ -626,8 +626,15 @@ class Workspace {
   ///   · **项目与分类一起数**（分类就是有下级的项目，两者共用同一套色板，
   ///     分开数反而对不上"这一支色被占了多少"）；
   ///   · **只数活着的**（已删除的不算）；
+  ///   · **已归档的也不算**（2026-09-30 实机反馈）：归档的意思是"收起来了"，
+  ///     它既不在项目树里露面、也不该继续占着一支色 —— 否则归档得越多，
+  ///     色环上那些永远也选不到的色就越让人费解；
   ///   · 事件也一起数 —— 虽然事件不在项目树里，但同一支色在两个地方都出现时，
   ///     用户仍然会把它当成"同一个东西"。
+  ///
+  /// 「算不算占色」只有 [_colorHoldingProjects] / [_colorHoldingEvents] 一处口径，
+  /// [nextProjectColor] 与 [nextEventColor] 也读它 —— 两处各写一遍必然漂成
+  /// "色环说 0、自动分配却躲着这支色"。
   ///
   /// **键一律小写**（`#78d2ca`）：落盘的色值经 `Canonical.normalizeHexColor`
   /// 规范成小写，而色板 `ProjectPalette.hexes` 写的是大写 —— 两边的口径必须对齐，
@@ -643,12 +650,10 @@ class Workspace {
       out[key] = (out[key] ?? 0) + 1;
     }
 
-    for (final project in allProjects) {
-      if (project.deleted) continue;
+    for (final project in _colorHoldingProjects) {
       count(project.color);
     }
-    for (final event in allEvents) {
-      if (event.deleted) continue;
+    for (final event in _colorHoldingEvents) {
       count(event.color);
     }
     return out;
@@ -716,13 +721,26 @@ class Workspace {
   ///
   /// 色板只有一份（`ProjectPalette.hexes`）—— 界面的取色器与这里的自动分配共用，
   /// 不各写一份（放在 core 是因为 features 不能依赖 ui）。
-  String nextProjectColor() => _leastUsedColor(liveProjects.map((p) => p.color));
+  String nextProjectColor() =>
+      _leastUsedColor(_colorHoldingProjects.map((p) => p.color));
 
   /// 事件标识色：同一个算法，统计的是事件。
   ///
   /// 事件与项目共用一份色板 —— 它们从不出现在同一个列表里，不需要两套色，
   /// 而共用能让"这根竖条是什么颜色 = 什么东西"的印象保持一致。
-  String nextEventColor() => _leastUsedColor(liveEvents.map((e) => e.color));
+  String nextEventColor() =>
+      _leastUsedColor(_colorHoldingEvents.map((e) => e.color));
+
+  /// 「占着一支标识色」的项目 / 事件：**活着的、且未归档的**。
+  ///
+  /// 这是唯一口径（见 [markerColorUsage] 的说明）：色环上的用量角标与自动选色
+  /// 都读它。归档与删除的差别在于归档还能取消，但"此刻它不露面"是共同的，
+  /// 因此两者都不占色。
+  Iterable<Project> get _colorHoldingProjects =>
+      liveProjects.where((p) => !p.archived);
+
+  Iterable<Event> get _colorHoldingEvents =>
+      liveEvents.where((e) => !e.archived);
 
   /// 取**用得最少**的那个色板色：删掉几条之后颜色会自然让出来，不会一直往下轮。
   String _leastUsedColor(Iterable<String?> colors) {

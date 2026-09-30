@@ -9,6 +9,7 @@ import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/store/export_codec.dart';
 import 'package:guideline/platform/data_transfer_platform.dart';
+import 'package:guideline/ui/common/store_diff_panel.dart';
 import 'package:guideline/ui/more/export_page.dart';
 
 /// Q13：导入前的确认框不能只列"文件里有什么" —— 用户唯一能用来决策的信息是
@@ -16,6 +17,11 @@ import 'package:guideline/ui/more/export_page.dart';
 ///   · 「当前」与「文件」并排，四类记录都给；
 ///   · 给一句净变化（将减少 / 将增加 / 条数相当）；
 ///   · 两侧口径一致，都是**活记录**（墓碑不算）—— 墓碑算进去的话两个数就对不上了。
+///
+/// 2026-09-30（handoff 界面优化）：整体覆盖类的确认从"一句话的框"换成
+/// **`StoreDiffSheet` 差异面板** —— 条数之外还要逐条摆出"多了哪几条、哪几条会被换掉"。
+/// 上面三件事一条都没少：数字与说明现在摆在面板的图例行与 `note` 里（所以断言
+/// 找的是面板，不再是 `AlertDialog`）。
 ///
 /// Q25：「合并导入」是同一个页面上的第二条路，守住四件事：
 ///   · **先预览后落盘** —— 四个集合各给"新增 / 更新 / 保留 / 墓碑"，用户点确认前
@@ -118,17 +124,17 @@ void main() {
 
     await openImportDialog(tester, app, bytes);
 
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(StoreDiffSheet), findsOneWidget);
     expect(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(StoreDiffSheet),
         matching: find.textContaining('当前：项目 2 · 灵感 1 · 事件 1 · 任务 2'),
       ),
       findsOneWidget,
     );
     expect(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(StoreDiffSheet),
         matching: find.textContaining('文件：项目 1 · 灵感 0 · 事件 0 · 任务 0'),
       ),
       findsOneWidget,
@@ -136,7 +142,7 @@ void main() {
     );
     expect(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(StoreDiffSheet),
         matching: find.textContaining('将减少 5 条'),
       ),
       findsOneWidget,
@@ -185,7 +191,7 @@ void main() {
 
     expect(
       find.descendant(
-        of: find.byType(AlertDialog),
+        of: find.byType(StoreDiffSheet),
         matching: find.textContaining('「合并导入」'),
       ),
       findsOneWidget,
@@ -222,7 +228,7 @@ void main() {
 
     await openImportDialog(tester, app, bytes, entry: '合并导入');
 
-    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(find.byType(StoreDiffSheet), findsOneWidget);
     expect(
       find.textContaining('项目：新增 1 · 更新 0 · 保留 0 · 墓碑 0'),
       findsOneWidget,

@@ -1,23 +1,31 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/json/store_file.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/github_backup_config.dart';
 import '../../core/store/github_sync.dart';
+import '../../core/store/store_diff.dart';
+import '../common/commit_lcd.dart';
 import '../common/dialogs.dart';
 import '../common/keyboard_dismiss_guard.dart';
+import '../common/store_diff_panel.dart';
 import '../theme/shape_tokens.dart';
 
 /// 「GitHub 备份同步」页。
 ///
 /// 这一页只做一件事：把手机上这份数据推到用户自己的私有仓库，或反过来拉回来。
 /// 三条口径是写死的，别在别处再实现一遍：
-///   · **纯手动**：不做启动检查、不做编辑后自动推送 —— 只有你亲手点的两下才会连网；
+///   · **这一页上是纯手动**：不做启动检查、也不在这一页里自动推送 ——
+///     页面上的两下永远是你亲手点的（自动上传走的是另一条路：
+///     `AppController.autoSyncAfterHome`，回到主页时比对并上传，见 handoff #87c57e）；
 ///   · **不做自动合并**：两边都改过时只把情况摆出来，让用户自己选；
 ///   · **推送前确认、拉取前先预览条数与时间再确认**：两端都是覆盖性操作。
+///     自动那条路**只上传、不自动拉**，一样要看着差异点确认才覆盖云端。
 ///
 /// 为什么要在页面上摆出**提交码**（ADR-089）：它是"这是哪一次上传"的凭证 ——
 /// 两台手机上读到同一个提交码，就是同一份；内容码相同并不说明这一点。
+/// 最顶上那格点阵屏（[CommitLcd]）就是这枚凭证的"读数窗"。
 class GitHubBackupPage extends StatefulWidget {
   const GitHubBackupPage({super.key, required this.app});
 
@@ -149,6 +157,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     final plan = check.plan!;
     final local = app.ws.buildStoreFile();
     final localText = _countsText(liveCountsOf(local));
+    // 远程那份的原文（能读到才有）—— 有它就能把"推上去会盖掉哪几条"逐条摆出来
+    final remoteStore = check.remote?.payload?.store;
 
     var override = false;
 
@@ -167,8 +177,9 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       case SyncAction.bothChanged:
       case SyncAction.pull:
         if (!mounted) return;
-        final ok = await confirmAction(
-          context,
+        final ok = await _confirmPushOverwrite(
+          local: local,
+          remoteStore: remoteStore,
           title: '覆盖远程那份备份',
           message: '${plan.message}\n\n'
               '当前这台手机：$localText\n'
@@ -184,8 +195,9 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         override = true;
       case SyncAction.push:
         if (!mounted) return;
-        final ok = await confirmAction(
-          context,
+        final ok = await _confirmPushOverwrite(
+          local: local,
+          remoteStore: remoteStore,
           title: '推送到 GitHub',
           message: '会把当前 $localText 推上去，覆盖远程那一份路径上的文件。\n\n'
               '远程：${plan.remoteSavedAt == null ? '还没有这份文件' : formatStamp(plan.remoteSavedAt)}\n'
@@ -227,18 +239,34 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
 
     final remote = preview.remote!;
     final incoming = _countsText(liveCountsOf(remote.payload!.store));
-    final current = _countsText(liveCountsOf(app.ws.buildStoreFile()));
+    final local = app.ws.buildStoreFile();
+    final current = _countsText(liveCountsOf(local));
 
-    final ok = await confirmAction(
-      context,
-      title: '用远程那份覆盖这台手机',
-      message: '远程：${formatStamp(remote.savedAt)} · $incoming\n'
-          '${_remoteCommitText(preview.commit)}\n'
-          '现在这台上：$current\n\n'
-          '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
-      confirmLabel: '拉取并覆盖',
-      danger: true,
-    );
+    // 拉回也是整份覆盖：把"会被换掉的哪些、换回来的哪些"逐条摆出来（第 3 条反馈）
+    final diff = diffStores(base: local, target: remote.payload!.store);
+    final ok = diff.hasChanges
+        ? await showStoreDiffSheet(
+            context,
+            diff: diff,
+            title: '用远程那份覆盖这台手机',
+            baseLabel: '这台手机（会被覆盖）· $current',
+            targetLabel: '云端（会拉下来）· ${formatStamp(remote.savedAt)} · $incoming',
+            confirmLabel: '拉取并覆盖',
+            cancelLabel: '取消',
+            danger: true,
+            note: '${_remoteCommitText(preview.commit)}\n\n'
+                '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
+          )
+        : await confirmAction(
+            context,
+            title: '用远程那份覆盖这台手机',
+            message: '远程：${formatStamp(remote.savedAt)} · $incoming\n'
+                '${_remoteCommitText(preview.commit)}\n'
+                '现在这台上：$current\n\n'
+                '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
+            confirmLabel: '拉取并覆盖',
+            danger: true,
+          );
     if (!ok) {
       setState(() => _busy = false);
       return;
@@ -248,6 +276,44 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     if (!mounted) return;
     setState(() => _busy = false);
     _setResult(result.message);
+  }
+
+  /// 推送前的确认：**能和云端比对就把差异逐条摆出来**，比不了才退回一句话的收据式确认。
+  ///
+  /// 方向是固定的：基准＝云端、对方＝这台手机 —— 这一屏回答的是
+  /// "推上去之后云端会变成什么样、会丢掉哪几条"（用户口径：与云端比对后上传，
+  /// **出现偏差才**弹差异面板）。远程还没有这份文件时没有可比的旧版本，就不弹。
+  Future<bool> _confirmPushOverwrite({
+    required StoreFile local,
+    required StoreFile? remoteStore,
+    required String title,
+    required String message,
+    required String confirmLabel,
+    bool danger = false,
+  }) async {
+    final remote = remoteStore;
+    final diff = remote == null ? null : diffStores(base: remote, target: local);
+    // 比不了（第一次同步、云端还没有那份文件）或两边一样：退回原来那句话的确认框。
+    if (diff == null || remote == null || !diff.hasChanges) {
+      return confirmAction(
+        context,
+        title: title,
+        message: message,
+        confirmLabel: confirmLabel,
+        danger: danger,
+      );
+    }
+    return showStoreDiffSheet(
+      context,
+      diff: diff,
+      title: title,
+      baseLabel: '云端（会被覆盖）· ${_countsText(liveCountsOf(remote))}',
+      targetLabel: '这台手机（会推上去）· ${_countsText(liveCountsOf(local))}',
+      confirmLabel: confirmLabel,
+      cancelLabel: '取消',
+      danger: danger,
+      note: message,
+    );
   }
 
   static String _countsText(Map<DocName, int> counts) => DocName.values
@@ -277,6 +343,10 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         '提交 ${shortSha(record.commitSha)} · 内容码 ${shortSha(record.remoteSha)}';
   }
 
+  /// 这台手机此刻站着的提交码（记账里的那一次上传）。没同步过就是空串，
+  /// 点阵屏收到空串会**整屏变暗** —— 不写"未知"之类的字。
+  String _currentCommitSha() => app.readGitHubSyncRecord()?.commitSha ?? '';
+
   /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
   static String _remoteCommitText(RemoteCommit? commit) =>
       commit == null || !commit.known
@@ -302,10 +372,17 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: <Widget>[
+                // 最顶上单开的这一格：**这台手机当前站在哪次提交上**。
+                // 不配标题文字 —— 没有提交号时它就是一块熄着的屏，写"未知"
+                // 反而是往界面上摆一句假话（点阵屏自己会说明问题）。
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  child: CommitLcd(commitSha: _currentCommitSha()),
+                ),
                 SwitchListTile(
                   value: _enabled,
                   title: const Text('启用 GitHub 备份同步'),
-                  subtitle: const Text('关掉不会丢配置，也不会删掉远程那份'),
+                  subtitle: const Text('关掉不会丢配置，也不会删掉远程那份\n开着时：每次回到主页会自动上传这次改动（只上传，不会自动拉回）'),
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
                 const Divider(height: 1),

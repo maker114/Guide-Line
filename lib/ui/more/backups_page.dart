@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/json/store_file.dart';
+import '../../core/models/enums.dart';
 import '../../core/store/app_paths.dart';
 import '../../core/store/app_storage.dart';
+import '../../core/store/github_sync.dart';
+import '../../core/store/store_diff.dart';
 import '../common/dialogs.dart';
+import '../common/labels.dart';
+import '../common/store_diff_panel.dart';
 
 /// 备份与恢复。
 ///
@@ -68,11 +74,12 @@ class BackupsPage extends StatelessWidget {
                     ),
                     title: Text(entry.label),
                     // 时间已经在标签里了（`上一份 · 09-26 11:57 · 42 条`），
-                    // 副标题只补体积 —— 同一行里把时间写两遍反而更难扫。
+                    // 副标题只补体积与"点开能看差在哪" —— 同一行里把时间写两遍反而更难扫。
                     subtitle: Text(
-                      _formatBytes(entry.sizeBytes),
+                      '${_formatBytes(entry.sizeBytes)} · 点开看与现在的差别',
                       style: theme.textTheme.labelSmall,
                     ),
+                    onTap: () => _showDiff(context, entry),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
@@ -109,6 +116,38 @@ class BackupsPage extends StatelessWidget {
     showToast(context, '已写入一份备份');
   }
 
+  /// 点开一份备份：**先把"它和现在差在哪"摆出来**，再让人决定要不要恢复。
+  ///
+  /// 懒加载（点开才读盘）：备份有十几份，进页面就把每一份都读出来解析一遍、
+  /// 只为在列表里摆个数字，不值。方向是"恢复之后手机上会变成什么样"——
+  /// 基准＝现在（红＝会被换掉的），对方＝那份备份（绿＝恢复后会有的）。
+  Future<void> _showDiff(BuildContext context, BackupEntry entry) async {
+    final backup = app.readBackupStore(entry.path);
+    if (backup == null) {
+      showToast(context, '这份备份里读不出可用的数据', error: true);
+      return;
+    }
+    final local = app.ws.buildStoreFile();
+    final diff = diffStores(base: local, target: backup);
+    if (!diff.hasChanges) {
+      showToast(context, '「${entry.label}」和现在的数据一模一样');
+      return;
+    }
+    final ok = await showStoreDiffSheet(
+      context,
+      diff: diff,
+      title: '「${entry.label}」与现在的差别',
+      baseLabel: '现在（会被换掉）· ${_countsText(local)}',
+      targetLabel: '这份备份（恢复后就是它）· ${_countsText(backup)}',
+      confirmLabel: '恢复这份',
+      cancelLabel: '取消',
+      danger: true,
+      note: '恢复之前，当前数据会先整体轮转进备份 —— 这一步可以再恢复回来。',
+    );
+    if (!ok || !context.mounted) return;
+    _applyRestore(context, entry);
+  }
+
   Future<void> _restore(BuildContext context, BackupEntry entry) async {
     final ok = await confirmAction(
       context,
@@ -119,13 +158,25 @@ class BackupsPage extends StatelessWidget {
       danger: true,
     );
     if (!ok || !context.mounted) return;
+    _applyRestore(context, entry);
+  }
 
+  /// 真正落盘那一步 —— 差异面板与确认框两条路都汇到这里。
+  void _applyRestore(BuildContext context, BackupEntry entry) {
     final error = app.restoreBackup(entry.path);
     if (error != null) {
       showToast(context, error, error: true);
       return;
     }
     showToast(context, '已恢复到「${entry.label}」');
+  }
+
+  /// 面板顶部那两行说明里的条数（活记录，与列表标签里的条数同源）。
+  static String _countsText(StoreFile store) {
+    final counts = liveCountsOf(store);
+    return DocName.values
+        .map((name) => '${docNameLabel(name)} ${counts[name] ?? 0}')
+        .join(' · ');
   }
 
   Future<void> _delete(BuildContext context, BackupEntry entry) async {

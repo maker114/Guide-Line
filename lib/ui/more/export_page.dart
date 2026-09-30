@@ -2,13 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/ids.dart';
+import '../../core/json/store_file.dart';
 import '../../core/models/entity.dart';
 import '../../core/models/enums.dart';
 import '../../core/store/export_codec.dart';
 import '../../core/store/merge.dart';
+import '../../core/store/store_diff.dart';
 import '../../platform/data_transfer_platform.dart';
 import '../common/dialogs.dart';
 import '../common/format.dart';
+import '../common/store_diff_panel.dart';
 
 /// 导出 / 导入。
 ///
@@ -195,23 +198,41 @@ class _ExportPageState extends State<ExportPage> {
     // `Workspace.liveProjects` 那几个视图完全一样，两个数才可能对得上。
     final current = _currentCounts;
     final incoming = _liveCountsOf(payload);
+    final local = widget.app.ws.buildStoreFile();
+    final diff = diffStores(base: local, target: payload.store);
 
-    final ok = await confirmAction(
-      context,
-      title: '导入并替换全部数据',
-      message: '文件名：${picked.file.name}\n'
-          '导出时间：${payload.exportedAt == null ? '未知' : formatTimestamp(payload.exportedAt!)}\n'
-          '\n'
-          '当前：${_countsText(current)}\n'
-          '文件：${_countsText(incoming)}\n'
-          '${_netChangeText(_totalOf(current), _totalOf(incoming))}\n'
-          '\n'
-          '导入是整体替换，不会把两份数据合起来；想让两边各有的记录都留下，用「合并导入」。\n'
-          '想留住现在这份数据，先「导出并分享」留个档，再导入。\n'
-          '替换前当前数据会先整体轮转进备份，可在「备份与恢复」里退回。',
-      confirmLabel: '整体替换',
-      danger: true,
-    );
+    final message = '文件名：${picked.file.name}\n'
+        '导出时间：${payload.exportedAt == null ? '未知' : formatTimestamp(payload.exportedAt!)}\n'
+        '\n'
+        '当前：${_countsText(current)}\n'
+        '文件：${_countsText(incoming)}\n'
+        '${_netChangeText(_totalOf(current), _totalOf(incoming))}\n'
+        '\n'
+        '导入是整体替换，不会把两份数据合起来；想让两边各有的记录都留下，用「合并导入」。\n'
+        '想留住现在这份数据，先「导出并分享」留个档，再导入。\n'
+        '替换前当前数据会先整体轮转进备份，可在「备份与恢复」里退回。';
+
+    // 整体替换会把现有数据整份换掉：只给条数不够 —— 条数一样也可能换掉了一条、
+    // 条数变多也可能顺手删了三条。所以能比就**逐条摆出来**（第 3 条反馈）。
+    final ok = diff.hasChanges
+        ? await showStoreDiffSheet(
+            context,
+            diff: diff,
+            title: '导入并替换全部数据',
+            baseLabel: '当前（会被替换）· ${_countsText(current)}',
+            targetLabel: '文件（导入后就是它）· ${_countsText(incoming)}',
+            confirmLabel: '整体替换',
+            cancelLabel: '取消',
+            danger: true,
+            note: message,
+          )
+        : await confirmAction(
+            context,
+            title: '导入并替换全部数据',
+            message: message,
+            confirmLabel: '整体替换',
+            danger: true,
+          );
     if (!ok || !context.mounted) return;
 
     final error = widget.app.applyImport(payload.store);
@@ -232,8 +253,9 @@ class _ExportPageState extends State<ExportPage> {
     final picked = await _pickAndDecode(context, dialogTitle: '选择要合并的导出文件');
     if (picked == null || !context.mounted) return;
 
+    final local = widget.app.ws.buildStoreFile();
     final outcome = mergeStoresWithReport(
-      widget.app.ws.buildStoreFile(),
+      local,
       picked.payload.store,
       nowMillis: Ids.nowMillis(),
     );
@@ -249,13 +271,29 @@ class _ExportPageState extends State<ExportPage> {
       return;
     }
 
-    final ok = await confirmAction(
-      context,
-      title: '合并导入：两份并成一份',
-      message: _mergePreviewText(picked.file.name, picked.payload.exportedAt, report),
-      confirmLabel: '合并',
-      danger: true,
-    );
+    final preview = _mergePreviewText(picked.file.name, picked.payload.exportedAt, report);
+    // 合并的结果也**逐条摆出来**：报告说的是"每一类新增/更新多少"，
+    // 面板说的是"具体多了哪几条、哪几条被顶掉"——后者才是"我敢不敢按下去"的依据。
+    final diff = diffStores(base: local, target: outcome.store);
+    final ok = diff.hasChanges
+        ? await showStoreDiffSheet(
+            context,
+            diff: diff,
+            title: '合并导入：两份并成一份',
+            baseLabel: '现在这台手机 · ${_countsText(_currentCounts)}',
+            targetLabel: '合并后 · ${_countsText(_liveCountsOfStore(outcome.store))}',
+            confirmLabel: '合并',
+            cancelLabel: '取消',
+            danger: true,
+            note: preview,
+          )
+        : await confirmAction(
+            context,
+            title: '合并导入：两份并成一份',
+            message: preview,
+            confirmLabel: '合并',
+            danger: true,
+          );
     if (!ok || !context.mounted) return;
 
     final error = widget.app.applyMergedStore(outcome.store);
@@ -287,15 +325,18 @@ typedef _LiveCounts = ({int projects, int inspirations, int events, int tasks});
 /// `ExportPayload.counts` 是含墓碑的，这里**刻意不用它**：同一个确认框里
 /// "当前"按活记录算、"文件"按含墓碑算的话，两个数根本对不上，
 /// 比不给数字更糟（用户会以为自己看错了）。
-_LiveCounts _liveCountsOf(ExportPayload payload) => (
-      projects: _liveItemCount(payload, DocName.projects),
-      inspirations: _liveItemCount(payload, DocName.inspirations),
-      events: _liveItemCount(payload, DocName.events),
-      tasks: _liveItemCount(payload, DocName.tasks),
+_LiveCounts _liveCountsOf(ExportPayload payload) => _liveCountsOfStore(payload.store);
+
+/// 任意一份 store 的活记录数（差异面板里"这一版是多少"用它）。
+_LiveCounts _liveCountsOfStore(StoreFile store) => (
+      projects: _liveItemCountIn(store, DocName.projects),
+      inspirations: _liveItemCountIn(store, DocName.inspirations),
+      events: _liveItemCountIn(store, DocName.events),
+      tasks: _liveItemCountIn(store, DocName.tasks),
     );
 
-int _liveItemCount(ExportPayload payload, DocName name) =>
-    payload.store.documentOf(name).items.where((item) => !item.deleted).length;
+int _liveItemCountIn(StoreFile store, DocName name) =>
+    store.documentOf(name).items.where((item) => !item.deleted).length;
 
 int _totalOf(_LiveCounts counts) =>
     counts.projects + counts.inspirations + counts.events + counts.tasks;

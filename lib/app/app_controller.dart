@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -13,12 +14,14 @@ import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
 import '../core/store/github_sync.dart';
+import '../core/store/store_diff.dart';
 import '../core/store/ui_prefs.dart';
 import '../features/workspace.dart';
 import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
 import '../platform/github_backup_client.dart';
+import 'auto_sync_state.dart';
 
 /// 分享动作的可注入钩子（真机走 [DataTransferPlatform.shareFile]）。
 ///
@@ -112,9 +115,12 @@ class AppController extends ChangeNotifier {
   ///
   /// 只认 `PageRoute`：`showDialog` / 底部面板 / 弹出菜单走的是 `PopupRoute`，
   /// 它们不是"编辑页面"，不该打断或重置会话。
+  ///
+  /// 回到外壳这一下同时是**自动同步的触发点**（handoff #87c57e）：先落盘，再看要不要
+  /// 自动上传 —— 两件事都在 [autoSyncAfterHome] 里，顺序也在那儿，别在这里拆开。
   late final NavigatorObserver editSessionObserver = _EditSessionObserver(
     onEnter: storage.beginEditSession,
-    onLeave: storage.endEditSession,
+    onLeave: () => unawaited(autoSyncAfterHome()),
   );
 
   /// 启动时清一次回收站（墓碑只留 `trashRetentionDays` 天）。
@@ -386,6 +392,12 @@ class AppController extends ChangeNotifier {
     }
     return error;
   }
+
+  /// **只读**一份备份的内容，供"恢复之前先看差在哪"的差异面板用。
+  ///
+  /// 不动主文件、不写盘、不通知刷新：它只是把盘上那份读出来给界面比。
+  /// 返回 `null` = 读不了 / 那份备份不可用，界面照实说。
+  StoreFile? readBackupStore(String path) => storage.readBackupStore(path);
 
   /// 手动留一份备份（「立即备份一份」）：**强制轮转**，不等最小间隔。
   ///
@@ -1016,6 +1028,128 @@ class AppController extends ChangeNotifier {
         error: '读取远程失败：$error',
       );
     }
+  }
+
+  // ── 回到主页的自动同步（handoff #87c57e） ──────────────────────────────
+  //
+  // 一条硬口径：**自动同步只"上传"，从不"覆盖式拉取"**（ADR-091，ADR-088 的延伸）。
+  // 本机的改动是本机发生的，自动传上去是顺水推舟；云端比本机新、或者两边都改过，
+  // 是要覆盖掉用户手上这份数据的动作 —— 那种事必须由人在同步页上看着条数点确认。
+
+  /// 自动同步的当前状态（标题栏右侧那枚指示器读它）。
+  AutoSyncState autoSync = const AutoSyncState.idle();
+
+  /// 自动同步停在"要不要把这份推上去"这一步时的差异（非 null ⇒ 外壳弹差异面板）。
+  ///
+  /// 为什么把这个存在控制器上而不是直接弹：弹面板要 `BuildContext`，而控制器是
+  /// **不带界面**的。它把"该问了"这件事摆出来，外壳看到就来问 —— 于是
+  /// 「比对 → 该推的推 / 有偏差才问」这一整条流程，在没有界面的测试里也能跑完。
+  StoreDiff? pendingAutoPushDiff;
+
+  void _setAutoSync(AutoSyncState next) {
+    if (next == autoSync) return;
+    autoSync = next;
+    notifyListeners();
+  }
+
+  /// 「回到主页」时跑一次：收掉编辑会话，再看要不要自动上传。
+  ///
+  /// **这里刻意不额外落盘**。handoff 说的"回到主页产生一次保存"，在 App 里
+  /// 早就已经是"每一笔动作各自落一次盘"（`AppStorage.save` 由每个动作调），
+  /// 回主页时盘上就是最新的；而在这里再补一次 `save` 不是"更保险"，是有害的：
+  /// 主文件里的 `savedAt` 会被顶到现在，`analyzeSync` 于是永远判"本地改过"，
+  /// 于是①每一次回主页都多推一个内容一字不差的提交，②本来只是**云端更新**
+  /// 的情况会被判成"两边都改过"（那时本地时间戳凭空变新），把该拉的说成冲突。
+  /// 所以这一次只做两件事：收会话，然后拿盘上的时间戳与云端比。
+  ///
+  /// 每一次回主页都真的连一次网（用户口径：回到主页自动开始同步，指示器就在
+  /// 标题栏右侧转）—— 比对结果是什么都不做时，指示器**回到静默**而不是留一个
+  /// "已同步"：那一下并没有传任何东西，摆个绿胶囊是骗人。
+  Future<void> autoSyncAfterHome() async {
+    storage.endEditSession();
+    // 正在传 / 已经有一个待确认的差异摆着时，不再叠第二次比对。
+    if (autoSync.isRunning || pendingAutoPushDiff != null) return;
+
+    final saved = await readGitHubBackupConfig();
+    // 总开关关着 = 别动网（含"我改主意了"）：连指示器都不出现。
+    if (!saved.config.enabled) return;
+
+    final local = workspace.buildStoreFile();
+
+    _setAutoSync(const AutoSyncState.running());
+    final check = await checkGitHubBackup(saved.config, saved.token);
+    if (check.error != null) {
+      _setAutoSync(AutoSyncState.failed(check.error!));
+      return;
+    }
+    final plan = check.plan;
+    if (plan == null) {
+      _setAutoSync(const AutoSyncState.failed('比对不出结果，去同步页看看'));
+      return;
+    }
+
+    switch (plan.action) {
+      case SyncAction.noChange:
+        // 两边本来就一样：没什么可说的，回到静默（不留一个"成功"骗人）。
+        _setAutoSync(const AutoSyncState.idle());
+      case SyncAction.push:
+        final remoteStore = check.remote?.payload?.store;
+        // 远程那份读不出来（还没有这个文件 = 头一次同步）：没有旧版本可比，
+        // 也就没什么可摆的，直接传。
+        if (remoteStore == null) {
+          await _pushAutoSync(saved.config, saved.token);
+          return;
+        }
+        final diff = diffStores(base: remoteStore, target: local);
+        if (!diff.hasChanges) {
+          // 记录一条不差 ⇒ 推上去只是把同一份内容再提交一次，没意义。
+          _setAutoSync(const AutoSyncState.idle());
+          return;
+        }
+        // 有偏差才问（用户口径：与云端比对后上传，出现偏差才弹差异面板）。
+        pendingAutoPushDiff = diff;
+        notifyListeners();
+      case SyncAction.bothChanged:
+        _setAutoSync(
+          const AutoSyncState.failed('云端和这台手机都改过，没替你选哪边（去同步页决定）'),
+        );
+      case SyncAction.pull:
+        _setAutoSync(
+          const AutoSyncState.failed('云端那份比这台手机新，自动同步不替你拉回来（去同步页拉）'),
+        );
+      case SyncAction.localEmpty:
+        _setAutoSync(
+          const AutoSyncState.failed('这台手机没有可上传的记录，不拿空文件去覆盖云端'),
+        );
+    }
+  }
+
+  /// 用户在差异面板上点了「推上去」：这一趟才真的传。
+  Future<void> confirmPendingAutoPush() async {
+    if (pendingAutoPushDiff == null) return;
+    pendingAutoPushDiff = null;
+    _setAutoSync(const AutoSyncState.running());
+    final saved = await readGitHubBackupConfig();
+    await _pushAutoSync(saved.config, saved.token);
+  }
+
+  /// 用户在差异面板上点了「先不推」：静默收场 —— 这是他选的，**不记成失败**。
+  void cancelPendingAutoPush() {
+    if (pendingAutoPushDiff == null) return;
+    pendingAutoPushDiff = null;
+    _setAutoSync(const AutoSyncState.idle());
+  }
+
+  /// 把这一趟自动上传做完，并把结果翻成指示器的四态。
+  Future<void> _pushAutoSync(GitHubBackupConfig config, String token) async {
+    final result = await pushGitHubBackup(config, token);
+    if (!result.ok) {
+      _setAutoSync(AutoSyncState.failed(result.message));
+      return;
+    }
+    // 提交码从记账里回读：pushGitHubBackup 已经把这一次的码写进去了，
+    // 不必为了显示再改一次它的返回值（那个签名手工页也在用）。
+    _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
   }
 
   /// 把当前数据推到 GitHub（覆盖远程那一份）。

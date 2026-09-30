@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../core/rules/archive_zone.dart';
+import '../core/store/store_diff.dart';
 import '../platform/data_directory.dart';
 import '../platform/shortcut_channel.dart';
 import 'common/dialogs.dart';
+import 'common/store_diff_panel.dart';
+import 'common/sync_status_indicator.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
 import 'more/more_tab.dart';
@@ -768,16 +771,76 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _pageProgress.value = _index.toDouble();
     _pages.addListener(_syncPageProgress);
+    // 自动同步"有偏差才问"的那张面板靠这条监听弹出来：控制器摆出
+    // `pendingAutoPushDiff`，外壳看到就来问（理由见 AppController 上的注释）。
+    widget.app.addListener(_onAppChanged);
     _bindCaptureShortcut();
   }
 
   @override
   void dispose() {
+    widget.app.removeListener(_onAppChanged);
     _pages
       ..removeListener(_syncPageProgress)
       ..dispose();
     _pageProgress.dispose();
     super.dispose();
+  }
+
+  /// 自动同步的差异面板同一时刻只开一张（重复弹两张会把用户按在确认键上）。
+  bool _autoPushSheetOpen = false;
+
+  void _onAppChanged() {
+    final diff = widget.app.pendingAutoPushDiff;
+    if (diff == null || _autoPushSheetOpen || !mounted) return;
+    _autoPushSheetOpen = true;
+    // 监听回调是在 notifyListeners() 里跑的，那一帧不能开路由 —— 挪到帧后。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _askAutoPush(diff));
+  }
+
+  /// 「回到主页自动同步」走到"云端那份会被覆盖"这一步时的问法。
+  ///
+  /// 只在**真有偏差**时才走到这里（没偏差的直接传了，见 `autoSyncAfterHome`）——
+  /// 弹一次能看清楚的改动清单，比让用户事后去 GitHub 上猜自己推了什么强。
+  Future<void> _askAutoPush(StoreDiff diff) async {
+    if (!mounted) {
+      _autoPushSheetOpen = false;
+      return;
+    }
+    final confirmed = await showStoreDiffSheet(
+      context,
+      diff: diff,
+      title: '这次改动要推上去',
+      baseLabel: '云端那一份（会被覆盖）',
+      targetLabel: '这台手机（会推上去）',
+      confirmLabel: '推上去',
+      cancelLabel: '先不推',
+    );
+    _autoPushSheetOpen = false;
+    if (!mounted) return;
+    if (confirmed) {
+      await widget.app.confirmPendingAutoPush();
+    } else {
+      widget.app.cancelPendingAutoPush();
+    }
+  }
+
+  /// 同步没完成的原因（点红色胶囊看）—— 原话照摆，不去掉细节。
+  Future<void> _showAutoSyncReason() async {
+    final reason = widget.app.autoSync.reason;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('这次没能上传'),
+        content: Text(reason.isEmpty ? '没有拿到原因。' : reason),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 把 `PageController` 的像素偏移换算成"第几页 + 小数"，喂给底栏。
@@ -896,6 +959,13 @@ class _AppShellState extends State<AppShell> {
               titleAt: (index) => _titleAt(app, index),
             ),
             actions: <Widget>[
+              // 自动同步指示器（handoff #87c57e）：在传时转缺口圆环、传完变绿胶囊
+              // 带提交号、没传成变红，静默时整块不出现。**不跟页号走** ——
+              // "我这份数据上传了没"和当前翻到哪一页无关。
+              SyncStatusIndicator(
+                state: app.autoSync,
+                onShowReason: () => _showAutoSyncReason(),
+              ),
               if (_index == 3)
                 TextButton(
                   onPressed: () => _showAbout(context),

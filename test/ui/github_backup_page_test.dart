@@ -13,6 +13,7 @@ import 'package:guideline/core/store/export_codec.dart';
 import 'package:guideline/core/store/github_sync.dart';
 import 'package:guideline/platform/data_directory.dart';
 import 'package:guideline/platform/github_backup_client.dart';
+import 'package:guideline/ui/common/commit_lcd.dart';
 import 'package:guideline/ui/more/github_backup_page.dart';
 
 /// GitHub 备份同步是**正式功能**，这一页守住四件"不许悄悄发生"的事：
@@ -233,7 +234,11 @@ void main() {
       expect(find.text('用远程那份覆盖这台手机'), findsOneWidget);
       expect(find.textContaining('项目 3'), findsOneWidget, reason: '远程那边有多少要说清');
       expect(find.textContaining(formatStamp(t1)), findsOneWidget, reason: '远程那份的时间要给');
-      expect(find.textContaining('现在这台上：项目 1'), findsOneWidget);
+      expect(
+        find.textContaining('这台手机（会被覆盖）· 项目 1'),
+        findsOneWidget,
+        reason: '现在这台上有什么要说清 —— 否则用户不知道会丢掉几条',
+      );
       expect(
         find.textContaining('远程提交：abc1234'),
         findsOneWidget,
@@ -315,6 +320,48 @@ void main() {
         contains(AppInfo.versionLabel),
         reason: '提交说明里带版本号，GitHub 的提交列表里才看得出是哪一版推的',
       );
+    });
+  });
+
+  group('页顶那台提交号点阵屏', () {
+    testWidgets('一进来就摆在最上面；还没有记账时全暗、不写假文字', (tester) async {
+      final app = await boot(_FakeGateway(), _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+
+      await openPage(tester, app);
+
+      final lcd = find.byType(CommitLcd);
+      expect(lcd, findsOneWidget, reason: '当前提交号要单开一框，摆在标题栏下面第一个位置');
+      expect(
+        tester.getTopLeft(lcd).dy,
+        lessThan(tester.getTopLeft(find.text('启用 GitHub 备份同步')).dy),
+        reason: '它在最上面，不是埋在「同步」那一段里',
+      );
+      expect(find.text('未知'), findsNothing, reason: '没有提交号时全暗，不给假文字');
+      expect(app.readGitHubSyncRecord(), isNull);
+    });
+
+    testWidgets('同步过一次之后：屏上那串就是记账里存的提交号', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      final handle = tester.ensureSemantics();
+
+      await openPage(tester, app);
+      await tapAction(tester, '从 GitHub 拉取');
+      await tester.tap(find.text('拉取并覆盖'));
+      await tester.pumpAndSettle();
+
+      expect(app.readGitHubSyncRecord()!.commitSha, 'abc1234def5678');
+      expect(
+        find.bySemanticsLabel('当前提交号 abc1234def5678'),
+        findsOneWidget,
+        reason: '点阵是画出来的，读屏只能靠语义标签；标签要给完整提交号',
+      );
+      handle.dispose();
     });
   });
 }
