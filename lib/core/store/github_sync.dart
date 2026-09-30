@@ -42,6 +42,7 @@ class SyncPlan {
     required this.message,
     this.localSavedAt,
     this.remoteSavedAt,
+    this.trustedOverwrite = false,
   });
 
   final SyncAction action;
@@ -54,6 +55,15 @@ class SyncPlan {
 
   /// 远程那一份的最后修改时间（没有这份文件时为 null）。
   final int? remoteSavedAt;
+
+  /// 这一趟是**可信覆盖**：云端的提交码跟上次成功同步记下的那一个一字不差，
+  /// 说明这中间没有第三方动过云端 —— 于是本地直接覆盖它，不必再摆差异面板
+  /// （需求④ / ADR-093）。
+  ///
+  /// 与 [needsExtraConfirm] 是两码事：那个管"本地是空的、别把云端擦掉"，这个管
+  /// "这一趟不用问"。判据只看提交码，**不看时间戳** —— 换台设备改过云端时，
+  /// 时间戳可能还不如本地新，只有提交码能回答"是不是同一次上传"（ADR-089）。
+  final bool trustedOverwrite;
 
   /// 推送之前需不需要用户额外确认一次。
   ///
@@ -74,6 +84,7 @@ class SyncRecord {
     required this.remoteSha,
     required this.recordCount,
     this.commitSha = '',
+    this.offlineWarnedOn = '',
   });
 
   /// 上次成功同步的时刻（毫秒）。
@@ -91,6 +102,13 @@ class SyncRecord {
   /// "那时还没记"，不能让一次正常的同步被说成双端版本对不上。
   final String commitSha;
 
+  /// 「GitHub 未连接」那条警告**当天已经弹过一次**的日期（`YYYY-MM-DD`）。
+  ///
+  /// 空串 = 还没弹过。需求⑤要的是"连不上就警告"，而每次启动都弹一遍在断网的
+  /// 日子里会变成噪音，所以按天记账（ADR-093）。它与 [commitSha] 同一个性质：
+  /// **丢了不影响任何一条真实记录**，最坏是当天多弹一次。
+  final String offlineWarnedOn;
+
   /// 有没有可用的记账。
   static SyncRecord? parse(String? text) {
     if (text == null) return null;
@@ -103,11 +121,13 @@ class SyncRecord {
       if (syncedAt is! int || sha is! String || count is! int) return null;
       if (sha.isEmpty || syncedAt <= 0 || count < 0) return null;
       final commit = root['commitSha'];
+      final warned = root['offlineWarnedOn'];
       return SyncRecord(
         syncedAt: syncedAt,
         remoteSha: sha,
         recordCount: count,
         commitSha: commit is String ? commit : '',
+        offlineWarnedOn: warned is String ? warned : '',
       );
     } catch (_) {
       // 记账坏了就当没有：它只影响"能不能自动判断"，不影响任何真实数据。
@@ -121,6 +141,7 @@ class SyncRecord {
         'recordCount': recordCount,
         // 未知就不写出去：与"空值不写出"的契约口径一致。
         if (commitSha.isNotEmpty) 'commitSha': commitSha,
+        if (offlineWarnedOn.isNotEmpty) 'offlineWarnedOn': offlineWarnedOn,
       });
 
   SyncRecord copyWith({
@@ -128,12 +149,14 @@ class SyncRecord {
     String? remoteSha,
     int? recordCount,
     String? commitSha,
+    String? offlineWarnedOn,
   }) =>
       SyncRecord(
         syncedAt: syncedAt ?? this.syncedAt,
         remoteSha: remoteSha ?? this.remoteSha,
         recordCount: recordCount ?? this.recordCount,
         commitSha: commitSha ?? this.commitSha,
+        offlineWarnedOn: offlineWarnedOn ?? this.offlineWarnedOn,
       );
 }
 
@@ -232,6 +255,31 @@ String shortSha(String sha) {
   return sha.length <= 7 ? sha : sha.substring(0, 7);
 }
 
+/// 云端此刻的提交码，跟上一次成功同步记下的那一个**对得上**吗（需求④）。
+///
+/// "对得上"的严格含义是**两侧都非空且一字相等**。三种看着像、其实都不算的情形：
+///   · 老记账里没有 `commitSha`（1.8.5 及以前建的）→ 未知，不能说成"没被改过"；
+///   · 这一次没读到提交码（网络半通 / 仓库刚建 / 分支名写错）→ 同样未知；
+///   · 两边都是空串 → 空串在这里是"不知道"，不是"两边一样"。
+/// 只有真的对得上，才敢把"本地无条件覆盖云端"放出去（ADR-093）。
+bool commitCodeMatches({String? remoteCommitSha, String? lastSyncedCommitSha}) {
+  final remote = remoteCommitSha ?? '';
+  final last = lastSyncedCommitSha ?? '';
+  if (remote.isEmpty || last.isEmpty) return false;
+  return remote == last;
+}
+
+/// 这句错是不是"连不上 GitHub"（需求⑤：连不上要单独给一句警告 + 一枚常驻胶囊，
+/// 跟"这次真的失败了"分开说）。
+///
+/// 只认网络层那几句原话（文案来自 `lib/platform/github_backup_client.dart`）：
+/// Token 无效、路径写错、文件太大都是另一种失败，该红就红 —— 把它们混进
+/// "网络不好"，用户会一直等一个永远不会来的自动重试。
+bool looksOffline(String message) =>
+    message.contains('连不上') ||
+    message.contains('网络请求失败') ||
+    message.contains('请求超时');
+
 /// 目标仓库本身（不是里面的文件）：只用来回答"这个仓库到底在不在、我看不看得见"。
 ///
 /// 存在的理由是一个具体的坑（ADR-090）：Contents API 对"仓库/权限不对"和
@@ -282,6 +330,7 @@ SyncPlan analyzeSync({
   required int? localSavedAt,
   required RemoteBackup? remote,
   required SyncRecord? lastSync,
+  String remoteCommitSha = '',
 }) {
   final localCount = liveRecordCount(local);
   final remoteSavedAt = remote?.savedAt;
@@ -323,6 +372,29 @@ SyncPlan analyzeSync({
       action: SyncAction.noChange,
       message: '两边最后都改于 ${formatStamp(localSavedAt)}，是同一份。\n'
           '共 $localCount 条记录，不需要推送也不需要拉取。',
+      localSavedAt: localSavedAt,
+      remoteSavedAt: remoteSavedAt,
+    );
+  }
+
+  // 需求④（ADR-093）：云端的提交码跟上次记账一致 ⇒ 这中间**没有第三方动过云端**
+  // ⇒ 本地的改动直接覆盖上去，不摆差异面板、不追问。
+  //
+  // 位置：排在"两边时间戳一样（同一份）"**之后** —— 同一份内容不该为了覆盖再提交一次
+  // （ADR-091 反对"内容一字不差的提交"，那会让仓库里堆满无意义的提交）；又排在
+  // localEmpty 之后 —— 本机 0 条仍然停手（Q-1：读坏了也会显示成 0 条）。靠时间戳分流
+  // 的那几条都在它后面：时间戳只能得出"本地新 → 推"或者"两边都动过 → 让用户选"，
+  // 而后者正是这一段要免掉的追问。
+  if (commitCodeMatches(
+    remoteCommitSha: remoteCommitSha,
+    lastSyncedCommitSha: lastSync?.commitSha,
+  )) {
+    return SyncPlan(
+      action: SyncAction.push,
+      trustedOverwrite: true,
+      message: '云端还是上次同步过的那一次提交（${shortSha(remoteCommitSha)}）——'
+          '这中间没有第三方改过，本地直接覆盖云端。\n'
+          '本地 $localCount 条，云端那一份 $remoteCount 条。',
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );

@@ -1016,6 +1016,9 @@ class AppController extends ChangeNotifier {
         localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
         remote: remote,
         lastSync: storage.readSyncRecord(),
+        // 需求④（ADR-093）：云端**此刻**那一次提交的码。它跟上次同步记账里那一个
+        // 一致，就说明这中间没有第三方动过云端，本机可以直接覆盖上去。
+        remoteCommitSha: remoteCommit?.sha ?? '',
       );
       return (remote: remote, remoteCommit: remoteCommit, plan: plan, error: null);
     } on GitHubBackupException catch (error) {
@@ -1032,9 +1035,14 @@ class AppController extends ChangeNotifier {
 
   // ── 回到主页的自动同步（handoff #87c57e） ──────────────────────────────
   //
-  // 一条硬口径：**自动同步只"上传"，从不"覆盖式拉取"**（ADR-091，ADR-088 的延伸）。
+  // 一条硬口径：**"覆盖式"的动作一律要人先看过差异**（ADR-091/092，延伸到 ADR-093）。
   // 本机的改动是本机发生的，自动传上去是顺水推舟；云端比本机新、或者两边都改过，
-  // 是要覆盖掉用户手上这份数据的动作 —— 那种事必须由人在同步页上看着条数点确认。
+  // 是要覆盖掉某一边数据的动作 —— 那种事必须由人看着差异亲手点一次。
+  //
+  // ADR-093 在这一条上开了两处口子，都是有据可依的：
+  //   · 云端的提交码跟上次同步记账**对得上** ⇒ 这中间没有第三方动过云端，本机直接
+  //     覆盖上去（需求④）——"没人动过"本身就是"不必再看一眼"的理由；
+  //   · 每次进软件先做一次**静默比对**（不转圈），不一致就把那扇面板端出来（需求⑤）。
 
   /// 自动同步的当前状态（标题栏右侧那枚指示器读它）。
   AutoSyncState autoSync = const AutoSyncState.idle();
@@ -1046,13 +1054,62 @@ class AppController extends ChangeNotifier {
   /// 「比对 → 该推的推 / 有偏差才问」这一整条流程，在没有界面的测试里也能跑完。
   StoreDiff? pendingAutoPushDiff;
 
+  /// 启动那次**静默比对**（需求⑤）攒下的待办：非 null ⇒ 外壳摆差异面板。
+  ///
+  /// 与 [pendingAutoPushDiff] 分开，是因为问的不是同一件事：那个问"这一次改的要推
+  /// 上去，你看一眼"（按钮是推上去 / 先不推），这个问"一进来就发现两边对不上，
+  /// 你要用哪一边"（按钮是覆盖云端数据 / 使用云端数据）—— 面板同一扇，
+  /// 按下去做的事不一样。
+  StartupSyncRequest? pendingStartupSync;
+
+  /// 启动比对连不上 GitHub 时要弹的那句警告；外壳弹完必须调
+  /// [ackStartupOfflineWarning]。null = 这次不弹（连上了，或者今天已经弹过）。
+  String? pendingStartupOfflineWarning;
+
+  /// `done` 那颗绿胶囊自己收场的计时器（需求②：停 2 秒再按动画收掉）。
+  Timer? _autoHideTimer;
+
+  /// 绿胶囊停多久自己消失。纯计时、不联网，所以在没有界面的测试里也等得起。
+  static const Duration autoSyncDoneLinger = Duration(seconds: 2);
+
   void _setAutoSync(AutoSyncState next) {
     if (next == autoSync) return;
+    _autoHideTimer?.cancel();
+    _autoHideTimer = null;
     autoSync = next;
+    // 只有"传上去了"会自己收场：黄/红是"要你看一眼"的，常驻到下一次同步成功。
+    if (next.phase == AutoSyncPhase.done) {
+      _autoHideTimer = Timer(autoSyncDoneLinger, _hideAutoSyncDone);
+    }
     notifyListeners();
   }
 
-  /// 「回到主页」时跑一次：收掉编辑会话，再看要不要自动上传。
+  void _hideAutoSyncDone() {
+    _autoHideTimer = null;
+    if (autoSync.phase != AutoSyncPhase.done) return;
+    autoSync = const AutoSyncState.idle();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    // 计时器到点还会摸一次 notifyListeners：不在这里掐掉，退出界面之后就会炸。
+    _autoHideTimer?.cancel();
+    _autoHideTimer = null;
+    super.dispose();
+  }
+
+  /// 今天（本地时区）的 `YYYY-MM-DD`。
+  ///
+  /// 「GitHub 未连接」的警告按**天**只弹一次（Q-6），所以存日期而不是时间戳：
+  /// 过了零点，第二天开机就该重新提醒一次。
+  static String todayKey([DateTime? now]) {
+    final at = now ?? DateTime.now();
+    String two(int value) => value.toString().padLeft(2, '0');
+    return '${at.year}-${two(at.month)}-${two(at.day)}';
+  }
+
+  /// 「回到主页」时跑一次：收掉编辑会话，**这一趟真的编辑过**才看一眼要不要传。
   ///
   /// **这里刻意不额外落盘**。handoff 说的"回到主页产生一次保存"，在 App 里
   /// 早就已经是"每一笔动作各自落一次盘"（`AppStorage.save` 由每个动作调），
@@ -1062,13 +1119,37 @@ class AppController extends ChangeNotifier {
   /// 的情况会被判成"两边都改过"（那时本地时间戳凭空变新），把该拉的说成冲突。
   /// 所以这一次只做两件事：收会话，然后拿盘上的时间戳与云端比。
   ///
-  /// 每一次回主页都真的连一次网（用户口径：回到主页自动开始同步，指示器就在
-  /// 标题栏右侧转）—— 比对结果是什么都不做时，指示器**回到静默**而不是留一个
-  /// "已同步"：那一下并没有传任何东西，摆个绿胶囊是骗人。
+  /// 需求①（ADR-093）：以前是"每一次回主页都连一次网"，于是翻个列表、看一眼统计
+  /// 也会转一次圈。现在闸门设在**数据修订号**上（`AppStorage.dataRevision`）：
+  /// 进编辑会话时记下基线，出会话时对一下 —— 这一趟一条记录都没写过就直接收场，
+  /// 不联网、指示器也不出现。闸门认的是"写没写过盘"，不是"点没点过界面"：
+  /// 进了输入框又原样退出来、点了取消，都不算编辑。
+  ///
+  /// 比对结果是什么都不做时，指示器**回到静默**而不是留一个"已同步"：
+  /// 那一下并没有传任何东西，摆个绿胶囊是骗人。
   Future<void> autoSyncAfterHome() async {
+    // 要在 endEditSession() 之前问：会话基线是那时清掉的。
+    final edited = storage.editedSinceSessionStart;
     storage.endEditSession();
-    // 正在传 / 已经有一个待确认的差异摆着时，不再叠第二次比对。
-    if (autoSync.isRunning || pendingAutoPushDiff != null) return;
+    if (!edited) return;
+    await _autoSyncOnce(announce: true);
+  }
+
+  /// 每次进软件跑一次**静默比对**（需求⑤）：不转圈，只看要不要摆差异面板。
+  ///
+  /// 与 [autoSyncAfterHome] 的分工：那条是"这一趟改过东西了，顺手传上去"，
+  /// 这条是"开机先看一眼手上这份跟云端对不对得上"。总开关关着时**完全不联网**：
+  /// 不弹窗、不画胶囊（用户口径）。
+  Future<void> startupSyncCheck() => _autoSyncOnce(announce: false);
+
+  /// 比对一次，并按计划行事。
+  ///
+  /// [announce] = 要不要转那颗圆环。编辑后的自动同步转（用户要看它在动），
+  /// 启动那次静默比对**不转** —— 需求⑤说的"不显示右上角圆环"。
+  Future<void> _autoSyncOnce({required bool announce}) async {
+    if (autoSync.isRunning) return;
+    // 已经摆着一个待确认的差异时，不再叠第二次比对。
+    if (pendingAutoPushDiff != null || pendingStartupSync != null) return;
 
     final saved = await readGitHubBackupConfig();
     // 总开关关着 = 别动网（含"我改主意了"）：连指示器都不出现。
@@ -1076,10 +1157,19 @@ class AppController extends ChangeNotifier {
 
     final local = workspace.buildStoreFile();
 
-    _setAutoSync(const AutoSyncState.running());
+    if (announce) _setAutoSync(const AutoSyncState.running());
     final check = await checkGitHubBackup(saved.config, saved.token);
     if (check.error != null) {
-      _setAutoSync(AutoSyncState.failed(check.error!));
+      final reason = check.error!;
+      if (looksOffline(reason)) {
+        // 连不上：黄胶囊常驻（不自己消失），点开能看网络那句原话。
+        _setAutoSync(AutoSyncState.offline(reason));
+        // "继续编辑可能与云端产生差异"那句主动警告只在开机那一次（需求⑤）：
+        // 编辑路上连不上时胶囊就在眼前，不必再打断一次。
+        if (!announce) _offerOfflineWarning(reason);
+      } else {
+        _setAutoSync(AutoSyncState.failed(reason));
+      }
       return;
     }
     final plan = check.plan;
@@ -1091,8 +1181,15 @@ class AppController extends ChangeNotifier {
     switch (plan.action) {
       case SyncAction.noChange:
         // 两边本来就一样：没什么可说的，回到静默（不留一个"成功"骗人）。
-        _setAutoSync(const AutoSyncState.idle());
+        if (announce) _setAutoSync(const AutoSyncState.idle());
+        return;
       case SyncAction.push:
+        if (plan.trustedOverwrite) {
+          // 需求④：云端还是上次同步留下的那一次提交 ⇒ 这中间没有第三方动过云端，
+          // 本机这份直接覆盖上去 —— 不摆面板、不追问。
+          await _pushAutoSync(saved.config, saved.token);
+          return;
+        }
         final remoteStore = check.remote?.payload?.store;
         // 远程那份读不出来（还没有这个文件 = 头一次同步）：没有旧版本可比，
         // 也就没什么可摆的，直接传。
@@ -1103,24 +1200,59 @@ class AppController extends ChangeNotifier {
         final diff = diffStores(base: remoteStore, target: local);
         if (!diff.hasChanges) {
           // 记录一条不差 ⇒ 推上去只是把同一份内容再提交一次，没意义。
-          _setAutoSync(const AutoSyncState.idle());
+          if (announce) _setAutoSync(const AutoSyncState.idle());
           return;
         }
-        // 有偏差才问（用户口径：与云端比对后上传，出现偏差才弹差异面板）。
-        pendingAutoPushDiff = diff;
+        if (announce) {
+          // 有偏差才问（用户口径：与云端比对后上传，出现偏差才弹差异面板）。
+          pendingAutoPushDiff = diff;
+        } else {
+          // 开机这一次：提交码对不上、本机又有改动 ⇒ 摆面板让用户选"用哪一边"
+          // （需求④⑤）。这扇面板的两个按钮都会改数据，所以点空白关不掉。
+          pendingStartupSync = StartupSyncRequest(
+            diff: diff,
+            message: '云端那一份已经不是上次同步过的那一次提交了（提交码对不上），'
+                '这台手机上也有改动。要用哪一边？',
+          );
+        }
+        // 停在"等你决定"：黄胶囊把这件事摆在右上角（需求：不传也要说一声）。
+        _setAutoSync(
+          AutoSyncState.blocked(label: '本地有改动', reason: plan.message),
+        );
         notifyListeners();
+        return;
       case SyncAction.bothChanged:
-        _setAutoSync(
-          const AutoSyncState.failed('云端和这台手机都改过，没替你选哪边（去同步页决定）'),
-        );
       case SyncAction.pull:
+        final remoteForChoice = check.remote?.payload?.store;
+        final choiceDiff = remoteForChoice == null
+            ? null
+            : diffStores(base: remoteForChoice, target: local);
+        if (!announce && choiceDiff != null && choiceDiff.hasChanges) {
+          // 开机这一次：两边对不上，摆面板让用户选（需求⑤）。
+          // 返回键 = 没选 = 一个字节没动，只把黄胶囊留在原处。
+          pendingStartupSync = StartupSyncRequest(
+            diff: choiceDiff,
+            message: plan.action == SyncAction.pull
+                ? '云端那一份比这台手机新，提交码也对不上。要用哪一边？'
+                : '云端和这台手机都改过，提交码也对不上。要用哪一边？',
+          );
+        }
+        // 编辑路上（announce）刻意**不替用户拉**：拉下来会覆盖手上这份，
+        // 那种事要在同步页上看着条数点确认（ADR-091）—— 这里只把原因摆出来。
         _setAutoSync(
-          const AutoSyncState.failed('云端那份比这台手机新，自动同步不替你拉回来（去同步页拉）'),
+          AutoSyncState.blocked(
+            label: plan.action == SyncAction.pull ? '云端有更新' : '两边都改过',
+            reason: plan.message,
+          ),
         );
+        notifyListeners();
+        return;
       case SyncAction.localEmpty:
+        // 本机 0 条：读坏了也会显示成 0 条，所以**不拿空文件去覆盖云端**（Q-2）。
         _setAutoSync(
-          const AutoSyncState.failed('这台手机没有可上传的记录，不拿空文件去覆盖云端'),
+          AutoSyncState.blocked(label: '没有可上传的记录', reason: plan.message),
         );
+        return;
     }
   }
 
@@ -1152,6 +1284,73 @@ class AppController extends ChangeNotifier {
     _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
   }
 
+  /// 用户在开机那扇面板上点了「覆盖云端数据」：把本机这份推上去。
+  ///
+  /// 与自动推送的区别是这一步有**明确授权**：用户看过差异、亲手选了"用本机覆盖
+  /// 云端"，所以连 pull / bothChanged 也让它过（等于在同步页上点过那第二次确认）。
+  Future<void> acceptStartupPush() async {
+    if (pendingStartupSync == null) return;
+    pendingStartupSync = null;
+    _setAutoSync(const AutoSyncState.running());
+    final saved = await readGitHubBackupConfig();
+    final result = await pushGitHubBackup(
+      saved.config,
+      saved.token,
+      overrideRemoteChanges: true,
+    );
+    if (!result.ok) {
+      _setAutoSync(AutoSyncState.failed(result.message));
+      return;
+    }
+    _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
+  }
+
+  /// 用户在开机那扇面板上点了「使用云端数据」：拿云端那份覆盖本机。
+  ///
+  /// 覆盖之前会先轮转一次本地备份（[pullGitHubBackup] 里面做的），所以点错了
+  /// 还能从备份里退回来。
+  Future<void> acceptStartupPull() async {
+    if (pendingStartupSync == null) return;
+    pendingStartupSync = null;
+    _setAutoSync(const AutoSyncState.running());
+    final saved = await readGitHubBackupConfig();
+    final result = await pullGitHubBackup(saved.config, saved.token);
+    if (!result.ok) {
+      _setAutoSync(AutoSyncState.failed(result.message));
+      return;
+    }
+    // 拉下来之后本机就等于云端那一次提交：绿胶囊上摆的正是那个码。
+    _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
+  }
+
+  /// 面板被返回键 / 划走关掉：**一个字节都没动**，只把待办清掉。
+  ///
+  /// 黄胶囊留着 —— 它本来就是"现在跟云端对不上"的常驻说明，不该跟着面板一起消失。
+  void dismissStartupSync() {
+    if (pendingStartupSync == null) return;
+    pendingStartupSync = null;
+    notifyListeners();
+  }
+
+  /// 连不上 GitHub：攒一句警告给外壳，同一天只弹一次（Q-6）。
+  ///
+  /// "今天弹过"是**在用户点掉警告时**才记的（见 [ackStartupOfflineWarning]）：
+  /// 没点掉就关掉 App，下次开机还得再说一遍 —— 那句话本来就是提醒人心的。
+  void _offerOfflineWarning(String reason) {
+    if (pendingStartupOfflineWarning != null) return;
+    if (storage.readOfflineWarnedOn() == todayKey()) return;
+    pendingStartupOfflineWarning = reason;
+    notifyListeners();
+  }
+
+  /// 外壳把"连不上 GitHub"的警告弹完了（用户点了「知道了」）：记下今天弹过。
+  void ackStartupOfflineWarning() {
+    if (pendingStartupOfflineWarning == null) return;
+    pendingStartupOfflineWarning = null;
+    storage.writeOfflineWarnedOn(todayKey());
+    notifyListeners();
+  }
+
   /// 把当前数据推到 GitHub（覆盖远程那一份）。
   ///
   /// [overrideRemoteChanges] 是用户在"两边都改过"时明确选了"用本地覆盖远程"。
@@ -1172,12 +1371,21 @@ class AppController extends ChangeNotifier {
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
+      // 提交码是**那一次提交**的码，不是内容 sha —— `RemoteBackup.sha` 答的是
+      // "内容一不一样"，只有提交码答得上来"是不是同一次上传"（ADR-089）。
+      // 空仓库 / 这个分支还没有提交时它是 null（客户端对 404、409 都回 null），
+      // 于是提交码为空、`commitCodeMatches` 判"对不上"，照旧走正常那条路。
+      final remoteCommit =
+          await gitHub.latestCommit(config: cleaned, token: token.trim());
       final local = workspace.buildStoreFile();
       final plan = analyzeSync(
         local: local,
         localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
         remote: remote,
         lastSync: storage.readSyncRecord(),
+        // 与自动同步同一套判定（Q-4：手动页本质是自动推送的手动版）：
+        // 提交码对得上就直接覆盖，不再要第二次确认。
+        remoteCommitSha: remoteCommit?.sha ?? '',
       );
 
       if (plan.action == SyncAction.noChange) {

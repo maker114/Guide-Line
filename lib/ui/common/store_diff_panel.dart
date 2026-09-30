@@ -4,16 +4,21 @@ import '../../core/store/store_diff.dart';
 import 'diff_colors.dart';
 import 'labels.dart';
 
-/// 版本差异面板：**把"两份数据差在哪"摆出来**（红＝上个版本、绿＝下个版本）。
+/// 版本差异面板：**把"两份数据差在哪"摆出来**。
 ///
 /// 为什么要有它：同步 / 拉回 / 导入这几条路都是"整份覆盖"，覆盖前只给一句
 /// "确定吗、条数从 12 变成 15"是不够的 —— 条数一样也可能换掉了一条，
 /// 条数变多也可能顺手删了三条。这一屏回答的是"**具体哪几条**"。
 ///
-/// 口径与 git 一致（2026-09-30 定）：一处改动就是红绿相邻的一对，
-/// 不做字段级 diff，也没有第三种颜色。基准由调用方给：
-/// 看云端时会拿本机当基准（红的是本机将被换掉的），上传前检查时拿云端当基准。
-Future<bool> showStoreDiffSheet(
+/// 三种颜色（2026-09-30 改定，需求③）：**绿＝新增、红＝删除、黄＝修改**。
+/// 一处改动仍然是上下相邻的两行（上一行是旧、下一行是新，前缀 `−` / `+` 指方向），
+/// 但两行**都是黄的** —— 用户撤回了原先"改动也一红一绿"的口径：红绿只留给
+/// 真正动条数的动作，"多了、少了、还是只是改了"才一眼分得开。
+/// 黄色的那两行底下还会补一句**改了什么**（"标题：写指南 → 写一本指南"）。
+///
+/// 基准由调用方给：看云端时会拿本机当基准（红/黄的是本机将被换掉的），
+/// 上传前检查时拿云端当基准。
+Future<DiffSheetResult> showStoreDiffSheet(
   BuildContext context, {
   required StoreDiff diff,
   required String title,
@@ -22,12 +27,16 @@ Future<bool> showStoreDiffSheet(
   String confirmLabel = '知道了',
   String? cancelLabel,
   bool danger = false,
+  bool barrierDismissible = true,
   String? note,
 }) async {
-  final result = await showModalBottomSheet<bool>(
+  final result = await showModalBottomSheet<DiffSheetResult>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
+    // 底部面板这边这个开关叫 `isDismissible`（`barrierDismissible` 是 `showDialog` 的名字）：
+    // 启动比对那扇面板点空白不许关掉，就是靠它。
+    isDismissible: barrierDismissible,
     builder: (sheetContext) => StoreDiffSheet(
       diff: diff,
       title: title,
@@ -39,7 +48,21 @@ Future<bool> showStoreDiffSheet(
       note: note,
     ),
   );
-  return result ?? false;
+  // 没点按钮就关掉 = "我还没想好"，与点了「先不推」不是一回事：
+  // 启动比对（需求⑤）靠这个差别决定要不要把那枚黄胶囊留在右上角。
+  return result ?? DiffSheetResult.dismissed;
+}
+
+/// 用户在差异面板上点出来的结果。
+enum DiffSheetResult {
+  /// 主按钮（[StoreDiffSheet.confirmLabel]）—— 例如「覆盖云端数据」「推上去」。
+  confirm,
+
+  /// 次按钮（[StoreDiffSheet.cancelLabel]）—— 例如「使用云端数据」「先不推」。
+  cancel,
+
+  /// 没点按钮就关掉了（返回键 / 划走 / 点面板外）—— 一个字节都没动。
+  dismissed,
 }
 
 /// 面板本体，独立出来是为了能直接进 widget 测试（不必先弹一遍 sheet）。
@@ -94,16 +117,24 @@ class StoreDiffSheet extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
                   _Legend(
-                    side: DiffSide.previous,
+                    background: colors.backgroundOf(DiffSide.previous),
+                    foreground: colors.foregroundOf(DiffSide.previous),
                     text: baseLabel,
-                    colors: colors,
                   ),
                   const SizedBox(height: 4),
                   _Legend(
-                    side: DiffSide.next,
+                    background: colors.backgroundOf(DiffSide.next),
+                    foreground: colors.foregroundOf(DiffSide.next),
                     text: targetLabel,
-                    colors: colors,
                   ),
+                  if (diff.modified > 0) ...<Widget>[
+                    const SizedBox(height: 4),
+                    _Legend(
+                      background: colors.modifiedBackground,
+                      foreground: colors.modifiedForeground,
+                      text: '修改的那两行是黄的（上一行旧、下一行新）',
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Text(
                     diff.hasChanges ? diff.changeSummary : '两份没有差别',
@@ -145,7 +176,8 @@ class StoreDiffSheet extends StatelessWidget {
                 children: <Widget>[
                   if (cancelLabel != null)
                     TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
+                      onPressed: () =>
+                          Navigator.of(context).pop(DiffSheetResult.cancel),
                       child: Text(cancelLabel!),
                     ),
                   const SizedBox(width: 8),
@@ -154,7 +186,8 @@ class StoreDiffSheet extends StatelessWidget {
                         ? FilledButton.styleFrom(
                             backgroundColor: theme.colorScheme.error)
                         : null,
-                    onPressed: () => Navigator.of(context).pop(true),
+                    onPressed: () =>
+                        Navigator.of(context).pop(DiffSheetResult.confirm),
                     child: Text(confirmLabel),
                   ),
                 ],
@@ -167,13 +200,17 @@ class StoreDiffSheet extends StatelessWidget {
   }
 }
 
-/// 图例：一小块该侧的颜色 + 它代表哪个版本。
+/// 图例：一小块该类的颜色 + 它代表什么。
 class _Legend extends StatelessWidget {
-  const _Legend({required this.side, required this.text, required this.colors});
+  const _Legend({
+    required this.background,
+    required this.foreground,
+    required this.text,
+  });
 
-  final DiffSide side;
+  final Color background;
+  final Color foreground;
   final String text;
-  final DiffColors colors;
 
   @override
   Widget build(BuildContext context) {
@@ -183,8 +220,8 @@ class _Legend extends StatelessWidget {
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: colors.backgroundOf(side),
-            border: Border.all(color: colors.foregroundOf(side)),
+            color: background,
+            border: Border.all(color: foreground),
             borderRadius: BorderRadius.circular(3),
           ),
         ),
@@ -221,7 +258,22 @@ class _CollectionHeader extends StatelessWidget {
   }
 }
 
-/// 一行差异：底色说红绿，前缀说加减，右边是这条记录的名字。
+/// 把字段变动写成一行："标题：写指南 → 写一本指南；等 3 处"。
+///
+/// 只写前两条（Q-3 定的口径）：那行小字是**提示**，不是清单 —— 十几条字段变动
+/// 全铺开会把这一屏最要紧的"哪几条记录变了"挤没。一条都列不出来（变的只是
+/// `updated_at` 这类被排除的噪声键）时如实说"内容有改动"，不编假说明。
+String _changeText(List<FieldChange> changes) {
+  if (changes.isEmpty) return '内容有改动';
+  final shown = changes.take(2).map((change) => change.text).join('；');
+  final rest = changes.length - 2;
+  return rest > 0 ? '$shown；等 $rest 处' : shown;
+}
+
+/// 一行差异：底色说**是哪一类**（绿新增 / 红删除 / 黄修改），前缀说方向
+/// （`−` 是上个版本那一行、`+` 是下个版本那一行），右边是这条记录的名字。
+///
+/// 修改的两行是同一件事的两面，所以"改了什么"只在**下面那一行**（新）底下写一次。
 class _DiffRow extends StatelessWidget {
   const _DiffRow({required this.entry, required this.colors});
 
@@ -230,12 +282,14 @@ class _DiffRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = colors.foregroundOf(entry.side);
+    final foreground = colors.foregroundOfKind(entry.kind);
+    final showChanges =
+        entry.kind == DiffKind.modified && entry.side == DiffSide.next;
     return Container(
       margin: const EdgeInsets.only(bottom: 2),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: colors.backgroundOf(entry.side),
+        color: colors.backgroundOfKind(entry.kind),
         borderRadius: BorderRadius.circular(6),
       ),
       child: Row(
@@ -249,11 +303,24 @@ class _DiffRow extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(
-              entry.label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: foreground, fontSize: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  entry.label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: foreground, fontSize: 14),
+                ),
+                if (showChanges)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Text(
+                      _changeText(entry.changes),
+                      style: TextStyle(color: foreground, fontSize: 12),
+                    ),
+                  ),
+              ],
             ),
           ),
         ],

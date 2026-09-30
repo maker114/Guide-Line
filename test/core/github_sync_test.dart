@@ -404,4 +404,160 @@ void main() {
       expect(message, contains('3 条记录'));
     });
   });
+
+  group('需求④：云端提交码对得上就直接覆盖（ADR-093）', () {
+    test('对得上：推，并挂上 trustedOverwrite（自动与手动都不再追问）', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+        remoteCommitSha: 'commit-same',
+      );
+
+      expect(plan.action, SyncAction.push);
+      expect(
+        plan.trustedOverwrite,
+        isTrue,
+        reason: '这中间没人动过云端，本机直接覆盖上去（需求④）',
+      );
+      expect(plan.message, contains('云端还是上次同步过的那一次提交'));
+      expect(plan.message, contains('没有第三方改过'));
+    });
+
+    test('对不上：还是普通推，要不要摆面板由上层按老规矩来', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+        remoteCommitSha: 'commit-other',
+      );
+
+      expect(plan.action, SyncAction.push, reason: '本地确实比远程新，但先让人看一眼');
+      expect(plan.trustedOverwrite, isFalse);
+      expect(plan.message, contains('本地比远程新'));
+    });
+
+    test('两边时间戳一样时不推：同一份内容不为"覆盖"再提交一次（ADR-091）', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t1),
+        localSavedAt: t1,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          // 记账更早，让"提交码对得上"那条路真的有机会被走到。
+          syncedAt: t1 - 999999,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+        remoteCommitSha: 'commit-same',
+      );
+
+      expect(plan.action, SyncAction.noChange);
+      expect(
+        plan.trustedOverwrite,
+        isFalse,
+        reason: '一字不差的提交只是给仓库添噪音',
+      );
+    });
+
+    test('老记账没有提交码：不算对得上，回到老规矩', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(syncedAt: t1, remoteSha: 'sha-1', recordCount: 2),
+        remoteCommitSha: 'commit-same',
+      );
+
+      expect(plan.trustedOverwrite, isFalse, reason: '1.8.5 及以前没记提交码，只能当未知');
+    });
+
+    test('云端提交码读不到（空串）：同样不算对得上', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+        remoteCommitSha: '',
+      );
+
+      expect(plan.trustedOverwrite, isFalse);
+    });
+
+    test('本机 0 条仍然压在最前面：提交码对得上也不拿空的覆盖云端', () {
+      final plan = analyzeSync(
+        local: StoreFile.empty(),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+        remoteCommitSha: 'commit-same',
+      );
+
+      expect(plan.action, SyncAction.localEmpty, reason: '读坏了也会显示成 0 条（Q-1）');
+      expect(plan.trustedOverwrite, isFalse);
+    });
+  });
+
+  group('提交码对得上吗', () {
+    test('两侧都非空、一字相等才算对得上', () {
+      expect(
+        commitCodeMatches(remoteCommitSha: 'abc', lastSyncedCommitSha: 'abc'),
+        isTrue,
+      );
+    });
+
+    test('不一样、缺一边、传 null，都不算', () {
+      expect(
+        commitCodeMatches(remoteCommitSha: 'abc', lastSyncedCommitSha: 'abd'),
+        isFalse,
+      );
+      expect(
+        commitCodeMatches(remoteCommitSha: 'abc', lastSyncedCommitSha: ''),
+        isFalse,
+      );
+      expect(commitCodeMatches(remoteCommitSha: '', lastSyncedCommitSha: 'abc'), isFalse);
+      expect(
+        commitCodeMatches(remoteCommitSha: null, lastSyncedCommitSha: null),
+        isFalse,
+        reason: '"两边都不知道"不能说成"没被改过"',
+      );
+      expect(commitCodeMatches(remoteCommitSha: 'abc', lastSyncedCommitSha: null), isFalse);
+    });
+  });
+
+  group('连不上 GitHub 的原话认不认得出（需求⑤）', () {
+    test('平台层那几句网络原话都算连不上', () {
+      expect(looksOffline('连不上 api.github.com（检查网络或代理设置）'), isTrue);
+      expect(looksOffline('网络请求失败，稍后再试'), isTrue);
+      expect(looksOffline('请求超时（10 秒），稍后再试'), isTrue);
+    });
+
+    test('别的错（Token、权限）不算连不上：那是真失败，右上角要画红的', () {
+      expect(looksOffline('还没填 Token'), isFalse);
+      expect(looksOffline('GitHub 说没有权限（401）'), isFalse);
+      expect(looksOffline(''), isFalse);
+    });
+  });
 }

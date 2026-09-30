@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
+import '../app/auto_sync_state.dart';
 import '../core/rules/archive_zone.dart';
 import '../core/store/store_diff.dart';
 import '../platform/data_directory.dart';
@@ -775,6 +777,10 @@ class _AppShellState extends State<AppShell> {
     // `pendingAutoPushDiff`，外壳看到就来问（理由见 AppController 上的注释）。
     widget.app.addListener(_onAppChanged);
     _bindCaptureShortcut();
+    // 需求⑤：每次进软件先**静默**比对一次 —— 不摆圆环，两边对不上才弹面板，
+    // 连不上就弹一次警告（当天只弹一次）。`unawaited`：这是开机顺手起的一趟，
+    // 界面不等它；结果靠 `_onAppChanged` 回来。
+    unawaited(widget.app.startupSyncCheck());
   }
 
   @override
@@ -790,12 +796,31 @@ class _AppShellState extends State<AppShell> {
   /// 自动同步的差异面板同一时刻只开一张（重复弹两张会把用户按在确认键上）。
   bool _autoPushSheetOpen = false;
 
+  /// 启动静默比对那扇面板同时只开一张（与上面同一口径）。
+  bool _startupSheetOpen = false;
+
+  /// 连不上 GitHub 的警告同时只开一张。
+  bool _offlineWarningOpen = false;
+
   void _onAppChanged() {
+    if (!mounted) return;
+    // 监听回调是在 notifyListeners() 里跑的，那一帧不能开路由 —— 一律挪到帧后。
     final diff = widget.app.pendingAutoPushDiff;
-    if (diff == null || _autoPushSheetOpen || !mounted) return;
-    _autoPushSheetOpen = true;
-    // 监听回调是在 notifyListeners() 里跑的，那一帧不能开路由 —— 挪到帧后。
-    WidgetsBinding.instance.addPostFrameCallback((_) => _askAutoPush(diff));
+    if (diff != null && !_autoPushSheetOpen) {
+      _autoPushSheetOpen = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _askAutoPush(diff));
+    }
+    final startup = widget.app.pendingStartupSync;
+    if (startup != null && !_startupSheetOpen && !_autoPushSheetOpen) {
+      _startupSheetOpen = true;
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _askStartupSync(startup));
+    }
+    final offline = widget.app.pendingStartupOfflineWarning;
+    if (offline != null && !_offlineWarningOpen) {
+      _offlineWarningOpen = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _warnOffline(offline));
+    }
   }
 
   /// 「回到主页自动同步」走到"云端那份会被覆盖"这一步时的问法。
@@ -807,7 +832,7 @@ class _AppShellState extends State<AppShell> {
       _autoPushSheetOpen = false;
       return;
     }
-    final confirmed = await showStoreDiffSheet(
+    final choice = await showStoreDiffSheet(
       context,
       diff: diff,
       title: '这次改动要推上去',
@@ -818,20 +843,93 @@ class _AppShellState extends State<AppShell> {
     );
     _autoPushSheetOpen = false;
     if (!mounted) return;
-    if (confirmed) {
+    // 只有点了「推上去」才传。点了「先不推」，或者点空白/返回键划走，
+    // 在这一屏是同一个意思：这一次不推（不记成失败）。
+    if (choice == DiffSheetResult.confirm) {
       await widget.app.confirmPendingAutoPush();
     } else {
       widget.app.cancelPendingAutoPush();
     }
   }
 
-  /// 同步没完成的原因（点红色胶囊看）—— 原话照摆，不去掉细节。
-  Future<void> _showAutoSyncReason() async {
-    final reason = widget.app.autoSync.reason;
+  /// 每次进软件的静默比对发现"两边对不上"时的那一屏（需求⑤）。
+  ///
+  /// 两个按钮**都真的会改数据**（一个把本机推上去、一个拿云端盖掉本机），
+  /// 所以这扇面板**点空白关不掉**（`barrierDismissible: false`）：
+  /// 要退只有返回键 —— 那等于"我还没想好"，一个字节都不动，右上角留一枚黄胶囊。
+  Future<void> _askStartupSync(StartupSyncRequest request) async {
+    if (!mounted) {
+      _startupSheetOpen = false;
+      return;
+    }
+    final choice = await showStoreDiffSheet(
+      context,
+      diff: request.diff,
+      title: '云端和这台手机对不上',
+      baseLabel: '云端那一份',
+      targetLabel: '这台手机',
+      confirmLabel: '覆盖云端数据',
+      cancelLabel: '使用云端数据',
+      barrierDismissible: false,
+      note: request.message,
+    );
+    _startupSheetOpen = false;
+    if (!mounted) return;
+    switch (choice) {
+      case DiffSheetResult.confirm:
+        await widget.app.acceptStartupPush();
+      case DiffSheetResult.cancel:
+        await widget.app.acceptStartupPull();
+      case DiffSheetResult.dismissed:
+        widget.app.dismissStartupSync();
+    }
+  }
+
+  /// 连不上 GitHub 时的警告（需求⑤）：说清"照常编辑也行，但这段时间跟云端对不上"。
+  ///
+  /// 点掉之后调 `ackStartupOfflineWarning`：当天不再弹，但右上那枚
+  /// 「GitHub 未连接」的黄胶囊**留着**（下一次同步成功才收）。
+  Future<void> _warnOffline(String reason) async {
+    if (!mounted) {
+      _offlineWarningOpen = false;
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('这次没能上传'),
+        title: const Text('连不上 GitHub'),
+        content: Text(
+          '${reason.isEmpty ? '没能连上 api.github.com。' : reason}\n\n'
+          '现在照常编辑没问题，但这段时间的改动跟云端对不上：'
+          '连上之后记得回同步页传一次；这期间别在另一台设备上同时改。',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+    _offlineWarningOpen = false;
+    if (!mounted) return;
+    widget.app.ackStartupOfflineWarning();
+  }
+
+  /// 同步没完成的原因（点右上角那枚黄/红胶囊看）—— 原话照摆，不去掉细节。
+  ///
+  /// 标题按状态走：红的（failed）是"这次真的没传上去"，其余是"这次没传，
+  /// 你看一眼"—— 直接拿它自己的 `label` 当标题（「云端有更新」「两边都改过」
+  /// 「GitHub 未连接」…），比统一写一句"这次没能上传"准确。
+  Future<void> _showAutoSyncReason() async {
+    final state = widget.app.autoSync;
+    final reason = state.reason;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+          state.phase == AutoSyncPhase.failed ? '这次没能上传' : state.label,
+        ),
         content: Text(reason.isEmpty ? '没有拿到原因。' : reason),
         actions: <Widget>[
           TextButton(

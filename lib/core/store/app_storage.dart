@@ -332,6 +332,8 @@ class AppStorage {
     if (_inEditSession) return;
     _inEditSession = true;
     _rotatedInSession = false;
+    // 需求①的基线：这一趟是从盘上哪一版开始编辑的。
+    _sessionStartRevision = _dataRevision;
   }
 
   /// 离开编辑会话：清标记，并把节流基准推到此刻。
@@ -378,6 +380,8 @@ class AppStorage {
     }
 
     AtomicFile(paths.storeFile).writeText(stamped.toCanonicalText());
+    // 盘上的数据变了一版 —— 自动同步靠这个数判断"这次编辑真的改过东西"（需求①）。
+    _dataRevision += 1;
     _lastSaveAt = now;
   }
 
@@ -388,6 +392,23 @@ class AppStorage {
   /// 上层记住"这份缓存对应哪个修订号"，只有变了才重新算。
   int get backupsRevision => _backupsRevision;
   int _backupsRevision = 0;
+
+  /// 数据修订号：**主数据文件真的落盘一版**就 +1（需求①的触发依据）。
+  ///
+  /// 与 [backupsRevision] 不是一回事：那个数"备份文件的集合"变没变，这个数
+  /// "盘上的活数据改过几版" —— 自动同步靠它回答"这一段编辑会话里到底改没改过东西"。
+  /// 被更新版本的 App 锁住而没写盘的那一次**不算**：盘上什么都没变。
+  int get dataRevision => _dataRevision;
+  int _dataRevision = 0;
+
+  /// 本段编辑会话开始那一刻的修订号（[beginEditSession] 取的快照）。
+  int _sessionStartRevision = 0;
+
+  /// 这一段编辑会话里有没有真的写过盘。
+  ///
+  /// 上层在 `endEditSession()` **之后**才问它，所以 `endEditSession` 刻意不重置基线
+  /// （一重置就永远回答"没改过"）。下一次 [beginEditSession] 会重新取快照。
+  bool get editedSinceSessionStart => _dataRevision != _sessionStartRevision;
 
   /// 非会话期间该不该轮转：从没轮转过，或距上次已超过最小间隔。
   ///
@@ -861,6 +882,47 @@ class AppStorage {
       file.deleteSync();
     } catch (_) {
       // 删不掉也不影响：下次同步会整份覆盖
+    }
+  }
+
+  /// 「GitHub 未连接」那句警告最近是哪一天弹过的（需求⑤ / Q-6：**当天只弹一次**）。
+  ///
+  /// 与同步记账**共用一份文件**，但只认 `offlineWarnedOn` 这一个键：
+  /// 它和记账一样"丢了也不影响任何一条真实记录"，最坏是当天多弹一次警告。
+  /// 存日期字符串而不是时间戳，是因为口径是"当天"而不是"24 小时以内" ——
+  /// 跨过零点之后第一次开机，就该重新提醒一次。
+  String readOfflineWarnedOn() {
+    final file = _githubSyncFile;
+    if (!file.existsSync()) return '';
+    try {
+      final decoded = jsonDecode(file.readAsStringSync(encoding: utf8));
+      if (decoded is! Map) return '';
+      final day = decoded['offlineWarnedOn'];
+      return day is String ? day : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 记下"[day] 这一天已经提醒过连不上了"。
+  ///
+  /// 写的是**整份 JSON**，所以先把盘上现有的键读回来再补一个 —— 不能拿一个
+  /// 空的 `SyncRecord` 去写：伪造出来的 `syncedAt` 会让冲突判定拿着错基线，
+  /// 把"只有一边改过"判成"两边都改过"。
+  void writeOfflineWarnedOn(String day) {
+    if (day.isEmpty) return;
+    try {
+      paths.ensureDirectories();
+      var current = <String, dynamic>{};
+      final file = _githubSyncFile;
+      if (file.existsSync()) {
+        final decoded = jsonDecode(file.readAsStringSync(encoding: utf8));
+        if (decoded is Map) current = Map<String, dynamic>.from(decoded);
+      }
+      current['offlineWarnedOn'] = day;
+      AtomicFile(_githubSyncFile).writeText(Canonical.documentText(current));
+    } catch (_) {
+      // 与 writeSyncRecord 同一口径：写不进去只当没记上。
     }
   }
 

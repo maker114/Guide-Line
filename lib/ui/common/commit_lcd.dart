@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// 提交号的 **LCD 点阵屏**（7 格，每格 7×10 点）。
+/// 提交号的 **LCD 点阵屏**（7 格，每格 7×9 点）。
 ///
 /// 为什么用点阵而不是普通文字：这一格回答的是"我现在跟着的是哪一次上传"，
 /// 七位十六进制码本来就没有语义、只能逐位比 —— 点阵比字体更像"设备上读出来的号"，
@@ -10,7 +10,7 @@ import 'package:flutter/material.dart';
 ///   · **没有提交号就全暗**，不写"未知"之类的字 —— 一块熄着的屏，比一行假文字诚实；
 ///   · 亮/暗是同一种色的**深浅两档**（不是黑底绿字的自定义配色），
 ///     所以它跟着主题走，浅色深色都不会出现"看不见的点"；
-///   · 每格 **7×10** 点（8×16 摆在真机上太高，一路收到 7×12、再收两行到 7×10）；
+///   · 每格 **7×9** 点（8×16 摆在真机上太高，一路收到 7×12、再收三行到 7×9）；
 ///     字形 5×7 一点没动，减掉的全是四周的留白；
 ///   · 外壳就是一张**普通卡片**（`AppShapes.card` 的圆角 + `elevation: 1`，与灵感页那张
 ///     速记卡片同一档），不另配色。原来那版是"浅灰底 + 细描边 + 圆角 10"，
@@ -28,7 +28,7 @@ class CommitLcd extends StatelessWidget {
   static const int cellWidth = 7;
 
   /// 每格的行数（高）。
-  static const int cellHeight = 10;
+  static const int cellHeight = 9;
 
   /// 格与格之间空一列，点才不会连成一片。
   static const int cellGap = 1;
@@ -148,7 +148,7 @@ abstract final class CommitLcdGlyphs {
   /// 5 宽的图形放进 7 宽的格子里，左右各留 1 列。
   static const int offsetX = 1;
 
-  /// 7 行放进 10 行里：上面留 1 行、下面留 2 行（居中取整时向上偏一行）。
+  /// 7 行放进 9 行里：上下各留 1 行（再少一行就要削字形了）。
   static const int offsetY = 1;
 
   static List<int>? of(String char) => _glyphs[char.toLowerCase()];

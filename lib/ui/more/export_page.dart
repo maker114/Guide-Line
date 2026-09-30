@@ -215,7 +215,7 @@ class _ExportPageState extends State<ExportPage> {
     // 整体替换会把现有数据整份换掉：只给条数不够 —— 条数一样也可能换掉了一条、
     // 条数变多也可能顺手删了三条。所以能比就**逐条摆出来**（第 3 条反馈）。
     final ok = diff.hasChanges
-        ? await showStoreDiffSheet(
+        ? (await showStoreDiffSheet(
             context,
             diff: diff,
             title: '导入并替换全部数据',
@@ -225,7 +225,8 @@ class _ExportPageState extends State<ExportPage> {
             cancelLabel: '取消',
             danger: true,
             note: message,
-          )
+          )) ==
+              DiffSheetResult.confirm
         : await confirmAction(
             context,
             title: '导入并替换全部数据',
@@ -276,7 +277,7 @@ class _ExportPageState extends State<ExportPage> {
     // 面板说的是"具体多了哪几条、哪几条被顶掉"——后者才是"我敢不敢按下去"的依据。
     final diff = diffStores(base: local, target: outcome.store);
     final ok = diff.hasChanges
-        ? await showStoreDiffSheet(
+        ? (await showStoreDiffSheet(
             context,
             diff: diff,
             title: '合并导入：两份并成一份',
@@ -286,7 +287,8 @@ class _ExportPageState extends State<ExportPage> {
             cancelLabel: '取消',
             danger: true,
             note: preview,
-          )
+          )) ==
+              DiffSheetResult.confirm
         : await confirmAction(
             context,
             title: '合并导入：两份并成一份',

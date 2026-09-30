@@ -133,7 +133,7 @@ class BackupsPage extends StatelessWidget {
       showToast(context, '「${entry.label}」和现在的数据一模一样');
       return;
     }
-    final ok = await showStoreDiffSheet(
+    final choice = await showStoreDiffSheet(
       context,
       diff: diff,
       title: '「${entry.label}」与现在的差别',
@@ -144,7 +144,7 @@ class BackupsPage extends StatelessWidget {
       danger: true,
       note: '恢复之前，当前数据会先整体轮转进备份 —— 这一步可以再恢复回来。',
     );
-    if (!ok || !context.mounted) return;
+    if (choice != DiffSheetResult.confirm || !context.mounted) return;
     _applyRestore(context, entry);
   }
 

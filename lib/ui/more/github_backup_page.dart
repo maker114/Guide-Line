@@ -245,7 +245,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     // 拉回也是整份覆盖：把"会被换掉的哪些、换回来的哪些"逐条摆出来（第 3 条反馈）
     final diff = diffStores(base: local, target: remote.payload!.store);
     final ok = diff.hasChanges
-        ? await showStoreDiffSheet(
+        ? (await showStoreDiffSheet(
             context,
             diff: diff,
             title: '用远程那份覆盖这台手机',
@@ -256,7 +256,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
             danger: true,
             note: '${_remoteCommitText(preview.commit)}\n\n'
                 '覆盖之前，当前数据会先整体轮转进备份（滚动只留 10 份，想退回要尽快）。',
-          )
+          )) ==
+              DiffSheetResult.confirm
         : await confirmAction(
             context,
             title: '用远程那份覆盖这台手机',
@@ -303,7 +304,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         danger: danger,
       );
     }
-    return showStoreDiffSheet(
+    final choice = await showStoreDiffSheet(
       context,
       diff: diff,
       title: title,
@@ -314,6 +315,9 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       danger: danger,
       note: message,
     );
+    // 「取消」与"划掉面板走人"在这里是同一件事：都没推。这一层不负责摆胶囊
+    // （那是自动同步那条路的事）。
+    return choice == DiffSheetResult.confirm;
   }
 
   static String _countsText(Map<DocName, int> counts) => DocName.values

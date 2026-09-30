@@ -9,7 +9,7 @@ import 'package:guideline/ui/theme/shape_tokens.dart';
 ///
 /// 三条口径要守住：
 ///   · 提交号是**点阵画出来的**，不是普通文字 —— 屏幕上不该出现那串字符本身；
-///   · 位数与短码一致（7 位），格子的宽高比 7×10；
+///   · 位数与短码一致（7 位），格子的宽高比 7×9（2026-09-30 用户要求"点阵屏减少一行"）；
 ///   · **没有提交号时全暗、一个字都不写**（不许出现"未知"这类假文字）。
 void main() {
   Future<void> pumpLcd(WidgetTester tester, String? sha, {int cellCount = 7}) async {
@@ -28,9 +28,9 @@ void main() {
     await tester.pump();
   }
 
-  test('位数与短码对齐：7 位、每格 7×10、格间留 1', () {
+  test('位数与短码对齐：7 位、每格 7×9、格间留 1', () {
     expect(CommitLcd.cellWidth, 7);
-    expect(CommitLcd.cellHeight, 10);
+    expect(CommitLcd.cellHeight, 9);
     expect(CommitLcd.cellGap, 1);
     expect(CommitLcd.columnsFor(7), 55, reason: '7*7 + 6*1');
     expect(CommitLcd.columnsFor(1), 7, reason: '单格不该多算一个间隙');
