@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
-/// 提交号的 **LCD 点阵屏**（7 格，每格 8×16 点）。
+/// 提交号的 **LCD 点阵屏**（7 格，每格 7×12 点）。
 ///
 /// 为什么用点阵而不是普通文字：这一格回答的是"我现在跟着的是哪一次上传"，
 /// 七位十六进制码本来就没有语义、只能逐位比 —— 点阵比字体更像"设备上读出来的号"，
 /// 一眼扫过去就能和 GitHub 页面上那串对上，不用逐字辨认字体形状。
 ///
-/// 两条口径（2026-09-30 定）：
+/// 三条口径（2026-09-30 定）：
 ///   · **没有提交号就全暗**，不写"未知"之类的字 —— 一块熄着的屏，比一行假文字诚实；
 ///   · 亮/暗是同一种色的**深浅两档**（不是黑底绿字的自定义配色），
-///     所以它跟着主题走，浅色深色都不会出现"看不见的点"。
+///     所以它跟着主题走，浅色深色都不会出现"看不见的点"；
+///   · 每格 **7×12** 点（原先 8×16 摆在真机上太高，一块屏占掉半屏）：少一列、少四行，
+///     字形 5×7 一点没动，收的全是四周的留白。
 class CommitLcd extends StatelessWidget {
   const CommitLcd({super.key, required this.commitSha, this.cellCount = 7});
 
@@ -20,10 +22,10 @@ class CommitLcd extends StatelessWidget {
   final int cellCount;
 
   /// 每格的列数（宽）。
-  static const int cellWidth = 8;
+  static const int cellWidth = 7;
 
   /// 每格的行数（高）。
-  static const int cellHeight = 16;
+  static const int cellHeight = 12;
 
   /// 格与格之间空一列，点才不会连成一片。
   static const int cellGap = 1;
@@ -73,7 +75,7 @@ class CommitLcd extends StatelessWidget {
   }
 }
 
-/// 点阵的画家：把每个字符按 [CommitLcdGlyphs] 里的 5×7 点阵铺进 8×16 的格子里。
+/// 点阵的画家：把每个字符按 [CommitLcdGlyphs] 里的 5×7 点阵铺进 7×12 的格子里。
 class CommitLcdPainter extends CustomPainter {
   const CommitLcdPainter({
     required this.chars,
@@ -110,7 +112,7 @@ class CommitLcdPainter extends CustomPainter {
     }
   }
 
-  /// 这一格点不点亮：把字符的点阵贴进格子的正中（8×16 里放 5×7 → 左右各留、
+  /// 这一格点不点亮：把字符的点阵贴进格子的正中（7×12 里放 5×7 → 左右各留一列、
   /// 上下留白），贴不上的位置一律是暗点 —— 于是"没有号"就是一块整屏的暗点。
   static bool _isLit(List<int>? rows, int row, int col) {
     if (rows == null) return false;
@@ -142,11 +144,11 @@ abstract final class CommitLcdGlyphs {
   static const int glyphWidth = 5;
   static const int glyphHeight = 7;
 
-  /// 5 宽的图形放进 8 宽的格子里，左边留 1 列（右边自然多留一点）。
+  /// 5 宽的图形放进 7 宽的格子里，左右各留 1 列。
   static const int offsetX = 1;
 
-  /// 7 行放进 16 行里：上下各留 4 行，竖直居中。
-  static const int offsetY = 4;
+  /// 7 行放进 12 行里：上面留 2 行、下面留 3 行（居中取整时向上偏一行）。
+  static const int offsetY = 2;
 
   static List<int>? of(String char) => _glyphs[char.toLowerCase()];
 

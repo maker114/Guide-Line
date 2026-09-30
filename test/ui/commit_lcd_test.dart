@@ -6,7 +6,7 @@ import 'package:guideline/ui/common/commit_lcd.dart';
 ///
 /// 三条口径要守住：
 ///   · 提交号是**点阵画出来的**，不是普通文字 —— 屏幕上不该出现那串字符本身；
-///   · 位数与短码一致（7 位），格子的宽高比 8×16；
+///   · 位数与短码一致（7 位），格子的宽高比 7×12；
 ///   · **没有提交号时全暗、一个字都不写**（不许出现"未知"这类假文字）。
 void main() {
   Future<void> pumpLcd(WidgetTester tester, String? sha, {int cellCount = 7}) async {
@@ -22,12 +22,12 @@ void main() {
     await tester.pump();
   }
 
-  test('位数与短码对齐：7 位、每格 8×16、格间留 1', () {
-    expect(CommitLcd.cellWidth, 8);
-    expect(CommitLcd.cellHeight, 16);
+  test('位数与短码对齐：7 位、每格 7×12、格间留 1', () {
+    expect(CommitLcd.cellWidth, 7);
+    expect(CommitLcd.cellHeight, 12);
     expect(CommitLcd.cellGap, 1);
-    expect(CommitLcd.columnsFor(7), 62, reason: '7*8 + 6*1');
-    expect(CommitLcd.columnsFor(1), 8, reason: '单格不该多算一个间隙');
+    expect(CommitLcd.columnsFor(7), 55, reason: '7*7 + 6*1');
+    expect(CommitLcd.columnsFor(1), 7, reason: '单格不该多算一个间隙');
   });
 
   testWidgets('有提交号：点阵画出来，屏上不出现那串字符本身', (tester) async {
