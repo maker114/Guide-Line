@@ -14,6 +14,7 @@ import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/keyboard_dismiss_guard.dart';
+import '../common/selection.dart';
 import '../common/status_selector.dart';
 import '../inspiration/inspiration_selection.dart';
 import '../inspiration/merge_editor_page.dart';
@@ -1562,15 +1563,21 @@ class _InspirationsFieldState extends State<_InspirationsField> {
     });
   }
 
+  /// 全选 / 取消全选（只作用于当前可见的那些）。
+  ///
+  /// 判断抽在 `selection.dart` 的 `selectionAfterToggleAll` 里（四处多选共用同一份）——
+  /// 这里原来用 `widget.inspirations`（父页传下来的可见列表）当基准，
+  /// 与另三处的 `_visibleIds` **语义相同**，现在四处走同一个函数。
   void _toggleSelectAll() {
+    final visibleIds = widget.inspirations.map((each) => each.id).toSet();
+    final next = selectionAfterToggleAll(
+      visibleIds: visibleIds,
+      selectedIds: _selectedIds,
+    );
     setState(() {
-      if (_selectedIds.length == widget.inspirations.length) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds
-          ..clear()
-          ..addAll(widget.inspirations.map((each) => each.id));
-      }
+      _selectedIds
+        ..clear()
+        ..addAll(next);
     });
   }
 
@@ -1579,7 +1586,17 @@ class _InspirationsFieldState extends State<_InspirationsField> {
     final theme = Theme.of(context);
     final inspirations = widget.inspirations;
     // 选中项可能在别处被改掉了（例如在灵感页合并走），每次构建清一遍幽灵选中
-    _selectedIds.removeWhere((id) => !inspirations.any((each) => each.id == id));
+    //
+    // **基准就是 `widget.inspirations`，与另外三处的 `_visibleIds` 语义等价**：
+    // 那个列表是父页在本次 build 里现算好传下来的（同一次重建里的同一份数据），
+    // 而另外三处（灵感页 / 全部任务 / 搜索）是自己在这一页里算出"可见项"再存下来。
+    // 名字不同、来源不同，**"可见项"的定义是同一个**。
+    //
+    // 记这一笔是因为它被当成过"口径已漂"：这里原来是 `any(...)`（线性查），
+    // 另外三处是 `Set.contains`。那是常数差异、不是语义分叉 ——
+    // 现在一并统一成 Set（顺手去掉 O(n×m)），四处机制一致。
+    final visibleIds = inspirations.map((each) => each.id).toSet();
+    _selectedIds.removeWhere((id) => !visibleIds.contains(id));
 
     final actions = InspirationBatchActions(
       app: app,

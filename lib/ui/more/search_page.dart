@@ -9,6 +9,7 @@ import '../common/dialogs.dart';
 import '../common/empty_state.dart';
 import '../common/keyboard_dismiss_guard.dart';
 import '../common/labels.dart';
+import '../common/selection.dart';
 import '../events/event_detail_page.dart';
 import '../events/task_actions.dart';
 import '../projects/project_detail_page.dart';
@@ -83,15 +84,17 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   /// 全选 / 取消全选（只作用于当前可见的那些任务命中）。
+  ///
+  /// 判断抽在 `selection.dart` 的 `selectionAfterToggleAll` 里（四处多选共用同一份）。
   void _toggleSelectAll() {
+    final next = selectionAfterToggleAll(
+      visibleIds: _visibleIds,
+      selectedIds: _selectedIds,
+    );
     setState(() {
-      if (_selectedIds.length == _visibleIds.length) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds
-          ..clear()
-          ..addAll(_visibleIds);
-      }
+      _selectedIds
+        ..clear()
+        ..addAll(next);
     });
   }
 

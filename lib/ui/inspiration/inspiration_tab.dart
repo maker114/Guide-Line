@@ -13,6 +13,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/keyboard_dismiss_guard.dart';
 import '../common/project_picker.dart';
+import '../common/selection.dart';
 import '../theme/shape_tokens.dart';
 import 'empty_box_lines.dart';
 import 'inspiration_selection.dart';
@@ -106,15 +107,18 @@ class InspirationTabState extends State<InspirationTab> {
   }
 
   /// 全选 / 取消全选（只作用于当前可见的那些）。
+  ///
+  /// 判断本身抽在 `selection.dart` 的 `selectionAfterToggleAll` 里 ——
+  /// 四个页面各有一份多选，而这一格是唯一容易各写各的（见那个函数的文档）。
   void _toggleSelectAll() {
+    final next = selectionAfterToggleAll(
+      visibleIds: _visibleIds,
+      selectedIds: _selectedIds,
+    );
     setState(() {
-      if (_selectedIds.length == _visibleIds.length) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds
-          ..clear()
-          ..addAll(_visibleIds);
-      }
+      _selectedIds
+        ..clear()
+        ..addAll(next);
     });
   }
 
