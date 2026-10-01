@@ -143,7 +143,6 @@ class CommitLcdPainter extends CustomPainter {
 /// 与其为不可能出现的字符编一套字形，不如让它"亮不起来"，一眼能看出不对。
 abstract final class CommitLcdGlyphs {
   static const int glyphWidth = 5;
-  static const int glyphHeight = 7;
 
   /// 5 宽的图形放进 7 宽的格子里，左右各留 1 列。
   static const int offsetX = 1;

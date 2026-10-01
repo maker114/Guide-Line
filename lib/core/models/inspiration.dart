@@ -61,8 +61,6 @@ class Inspiration implements Entity {
 
   bool get isMerged => status == InspirationStatus.merged;
 
-  bool get isDiscarded => status == InspirationStatus.discarded;
-
   /// 跨字段一致性（《数据契约》§4.3）。
   bool get isConsistent {
     if (status == InspirationStatus.merged) {

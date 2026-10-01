@@ -109,8 +109,6 @@ class DiffEntry {
 
   bool get isAdded => side == DiffSide.next;
 
-  bool get isRemoved => side == DiffSide.previous;
-
   /// 这一处说不说得出"改了什么"。
   ///
   /// 为空只有一种情形：两边规范文本不同、但**每一个键都比得出来且一样**
