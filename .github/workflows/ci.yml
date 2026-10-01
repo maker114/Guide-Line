@@ -88,7 +88,7 @@ jobs:
           retention-days: 7
 
   # 电脑端："能不能在这台干净机器上构建出 exe"也要机器来说，不能只靠本机实测。
-  # 为什么必须有这一步：Windows 构建在**本机**成功过（见 docs/构建与发布.md §11），
+  # 为什么必须有这一步：Windows 构建在**本机**成功过（见 docs/构建与发布.md §10.7），
   # 但本机是「装了两年、动过各种配置」的开发机；干净 CI 机器上是第一次验证。
   # 具体要盯的是插件符号链接：Flutter 把每个插件链进
   # windows/flutter/ephemeral/.plugin_symlinks/，某些 Windows 配置下建链接会失败。

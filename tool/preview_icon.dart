@@ -1,4 +1,4 @@
-// 一次性校验脚本（tool/ 不入库）：把生成的 PNG 解回来，用字符画确认图案。
+// 一次性校验脚本（**已入库**：`tool/` 是仓库路径，被 gitignore 的是 `.tools/`）：把生成的 PNG 解回来，用字符画确认图案。
 import 'dart:io';
 import 'dart:typed_data';
 

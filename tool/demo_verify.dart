@@ -1,4 +1,4 @@
-// 演示数据自检（本地工具，`tool/` 不入库）。
+// 演示数据自检（本地工具，但**已入库**：`tool/` 是仓库路径，被 gitignore 的是 `.tools/`）。
 //
 // 走**和手机上完全一样的路径**：ExportCodec.decode（导入用的解码器）
 // → AppStorage.save（导入就是整体替换+轮转备份）→ AppStorage.load

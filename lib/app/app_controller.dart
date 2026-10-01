@@ -220,9 +220,12 @@ class AppController extends ChangeNotifier {
   /// 用的就是它，入口副标题与页内数字必须是同一个数（Q20）。
   int get taskCount => workspace.liveTasks.where((t) => !t.archived).length;
 
-  /// 归档区总数：**含第五个页签「被隐藏」**（Q20）。
-  /// `ArchiveZone.totalCount` 只数前四个分区，页签上却摆了五个，入口写着
-  /// "已归档 / 已丢弃 / 已合并 / 回收站 共 N 条"就对不上「被隐藏」那一档。
+  /// 归档区总数（Q20）。归档区现在是**三档**：已归档 / 已处理的灵感 / 回收站，
+  /// 「更多」页入口副标题写的就是这三档的名字，所以这个数必须等于**点进去能看到的条数之和**。
+  ///
+  /// 为什么还要加 `inspirationsHiddenByArchivedProjects`：`ArchiveZone.totalCount`
+  /// 数的是「已归档 + 已丢弃 + 已合并 + 回收站」四路，而「因所属项目归档而看不见」的那些
+  /// 待处理灵感属于「已处理的灵感」那一档、却不在前面四路里 —— 不加它就少算一档。
   int get archiveCount =>
       workspace.archiveZone.totalCount + workspace.inspirationsHiddenByArchivedProjects;
 

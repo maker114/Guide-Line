@@ -138,4 +138,5 @@
   登记进 `docs/决策索引.md`。
 - **验收线**：`flutter analyze` 必须 0 问题，`flutter test` 必须全绿。
 - **环境坑**（Gradle 镜像、`kotlin.incremental=false`、AVD 位置、HyperOS 侧载与
-  adb 注入限制）：见 `docs/构建与发布.md`。
+  adb 注入限制）：构建与真机那几条见 `docs/构建与发布.md`（AVD 位置与 HyperOS 侧载
+  在 §12，两端共用的 CI 在 §11）；**怎么选验证手段、怎么排一轮的节奏**见 `docs/开发节奏.md`。

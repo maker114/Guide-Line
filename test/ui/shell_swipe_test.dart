@@ -164,7 +164,8 @@ void main() {
     await swipe(tester, 3);
 
     expect(find.text('主题与背景'), findsOneWidget, reason: '更多页的内容出现了');
-    expect(find.text('关于'), findsOneWidget, reason: '标题栏右侧只在更多页出现');
+    expect(inTitle(find.text('关于')), findsOneWidget,
+        reason: '「关于」只在标题栏右侧出现（更多页正文里也有同名的小节标题，所以必须限定在标题栏子树里找）');
     expect(find.text('速记'), findsOneWidget, reason: '非灵感页才有速记按钮');
   });
 

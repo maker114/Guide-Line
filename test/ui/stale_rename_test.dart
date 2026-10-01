@@ -11,13 +11,15 @@ import 'package:guideline/ui/app_shell.dart';
 /// 现象：正在改名的那一行**被折叠收走**之后再展开，输入框与键盘会**自己**
 /// 又弹出来 —— 用户那边看到的就是"我只是收了个下级，怎么自己跳出输入框"。
 ///
-/// 机制（`lib/ui/common/inline_editor.dart`）：`InlineTextField` 的编辑态由
-/// 父级记着（这里是 `EventDetailPage._renamingTaskId`），而结束编辑只有
-/// `_commit` / `_cancel` 两条路会回调 `onEditClosed`；**`dispose()` 不回调**。
-/// 于是"编辑中的行被移出树"会留下父级的改名 id 非空，行再出现时
+/// 当时的机制（`lib/ui/common/inline_editor.dart`）：`InlineTextField` 的编辑态由
+/// 父级记着（这里是 `EventDetailPage._renamingTaskId`），而结束编辑**只有
+/// `_commit` / `_cancel` 两条路**会回调 `onEditClosed`；编辑中的行被移出树
+/// （`dispose()`）时**不回调**。于是会留下父级的改名 id 非空，行再出现时
 /// `autofocus: true` 直接把它重新推进编辑态。
 ///
-/// 这条用例钉的就是"折叠往返之后不该有任何输入框"。
+/// **现状（已修）**：`dispose()` 里也补上了 `onEditClosed`（推到下一帧、**不写盘**，
+/// 口径与 `_cancel` 一致），所以下面这条用例现在靠的正是那条回调。
+/// 它钉的口径没变：**折叠往返之后不该有任何输入框**。
 void main() {
   late Directory tempDir;
 
