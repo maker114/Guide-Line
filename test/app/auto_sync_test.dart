@@ -581,6 +581,48 @@ void main() {
 
   // ── 需求⑤：开机静默比对（ADR-093） ────────────────────────────────────
   group('需求⑤：开机静默比对', () {
+    test('同步记账与"今天已警告过"共用一份文件：写一边不能抹掉另一边', () async {
+      // 独立核验查出：`writeSyncRecord` 是**整份覆盖** `github_sync.json`，
+      // 而两个调用点都新建 `SyncRecord`、不带 `offlineWarnedOn` ——
+      // 于是每同步成功一次就把"今天已经警告过连不上"抹掉，当天再断网会**重复弹**。
+      // 反方向（`writeOfflineWarnedOn`）是**读回旧键再补一个**，两侧口径不对称。
+      //
+      // 这条用例只测"两个方向各改自己的键"，不牵扯任何网络。
+      final app = await bootWith(
+        gateway: _FakeGateway(),
+        local: storeWith(savedAt: now - 60000, projects: 1),
+        record: null,
+      );
+
+      app.storage.writeOfflineWarnedOn('2026-10-01');
+      expect(app.storage.readOfflineWarnedOn(), '2026-10-01', reason: '前置：先记上一天');
+
+      // 一次成功的同步只该改"同步记账"那几个键
+      app.storage.writeSyncRecord(
+        SyncRecord(
+          syncedAt: now,
+          remoteSha: 'sha-new',
+          recordCount: 1,
+          commitSha: 'commit-new',
+        ),
+      );
+
+      expect(
+        app.storage.readOfflineWarnedOn(),
+        '2026-10-01',
+        reason: '**不许把"今天已警告过"抹掉** —— 抹掉的话当天再断网会重复弹警告',
+      );
+
+      // 反方向也要成立：写同步记账之后，再记警告不能把记账抹掉
+      app.storage.writeOfflineWarnedOn('2026-10-02');
+      expect(
+        app.storage.readSyncRecord()?.commitSha,
+        'commit-new',
+        reason: '反方向同样只改自己那个键（这一侧本来就是读回旧键再补，钉住它别退化）',
+      );
+      expect(app.storage.readOfflineWarnedOn(), '2026-10-02');
+    });
+
     test('两边一模一样：静默收场，圆环都不出现', () async {
       final same = storeWith(savedAt: now, projects: 2);
       final gateway = _FakeGateway(

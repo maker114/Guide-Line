@@ -6,6 +6,7 @@ import '../../core/json/store_file.dart';
 import '../../core/models/entity.dart';
 import '../../core/models/enums.dart';
 import '../../core/store/export_codec.dart';
+import '../../core/store/github_sync.dart';
 import '../../core/store/merge.dart';
 import '../../core/store/store_diff.dart';
 import '../../platform/data_transfer_platform.dart';
@@ -310,7 +311,14 @@ class _ExportPageState extends State<ExportPage> {
     );
   }
 
-  /// 当前库的活记录数：直接问 `Workspace.live*`（"活记录"口径的唯一出处）。
+  /// 当前库的活记录数：四类都取 `Workspace.live*`（未删除的那些）。
+  ///
+  /// ⚠️ **这不等于 `AppController.projectCount` / `taskCount` 那一套**（2026-10-01 改准）：
+  /// 这里**含已归档**，而 `taskCount` 排除已归档（它对齐的是「全部任务」页头那个数）。
+  /// 两者都对，因为问的不是同一件事 —— 导出是把**盘上活记录**备走，已归档的也要备走；
+  /// 页头那个数说的是"你没归档的任务有几条"。这里原来自称是"'活记录'口径的**唯一出处**"，
+  /// 那句话是错的（它只回答"排不排除墓碑"，没回答"排不排除已归档"）。
+  /// 口径对照表在 `app_controller.dart` 的 `taskCount` 文档里。
   _LiveCounts get _currentCounts => (
         projects: widget.app.ws.liveProjects.length,
         inspirations: widget.app.ws.liveInspirations.length,
@@ -330,15 +338,22 @@ typedef _LiveCounts = ({int projects, int inspirations, int events, int tasks});
 _LiveCounts _liveCountsOf(ExportPayload payload) => _liveCountsOfStore(payload.store);
 
 /// 任意一份 store 的活记录数（差异面板里"这一版是多少"用它）。
-_LiveCounts _liveCountsOfStore(StoreFile store) => (
-      projects: _liveItemCountIn(store, DocName.projects),
-      inspirations: _liveItemCountIn(store, DocName.inspirations),
-      events: _liveItemCountIn(store, DocName.events),
-      tasks: _liveItemCountIn(store, DocName.tasks),
-    );
-
-int _liveItemCountIn(StoreFile store, DocName name) =>
-    store.documentOf(name).items.where((item) => !item.deleted).length;
+_LiveCounts _liveCountsOfStore(StoreFile store) {
+  // **走 core 的 `liveCountsOf`，不再自己过滤一遍**（2026-10-01 合并）。
+  //
+  // 这里原来是 `_liveItemCountIn(store, name) => items.where((item) => !item.deleted).length`
+  // —— 与 `github_sync.dart` 的 `liveCountsOf` **逐字同一件事**（同一个
+  // `!item.deleted` 过滤），只是返回形态不同（具名元组 vs Map）。
+  // 同一个口径在 core 与 ui 各写一份，就是"改一处忘一处"的经典形状：
+  // 哪天墓碑（软删除）的语义变了，两份必须同时改，而没有任何东西会提醒你。
+  final byDoc = liveCountsOf(store);
+  return (
+    projects: byDoc[DocName.projects] ?? 0,
+    inspirations: byDoc[DocName.inspirations] ?? 0,
+    events: byDoc[DocName.events] ?? 0,
+    tasks: byDoc[DocName.tasks] ?? 0,
+  );
+}
 
 int _totalOf(_LiveCounts counts) =>
     counts.projects + counts.inspirations + counts.events + counts.tasks;
