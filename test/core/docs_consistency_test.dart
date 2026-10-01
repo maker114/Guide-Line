@@ -53,21 +53,39 @@ void main() {
     );
   });
 
-  test('README 顶上的「当前例数」与实际用例数一致', () {
-    // 为什么钉它：版本号有四个落点、由测试守着，所以从来没写错过；而"现在有多少例"
-    // 这个数字同样抄在 README 与《构建与发布》《开发节奏》里，**此前没有任何守卫** ——
-    // 2026-10-01 实测发现 README 写着 810，实际早已不是（同一天刚从 807 涨到 811）。
-    // 同一个仓库，同样抄四份，一个有守卫一个没有，差别就出在这里。
+  test('README 里那个「例数」不许伪装成精确值', () {
+    // ## 这道闸为什么是现在这个样子（它换过一次形状）
+    //
+    // 第一版钉的是"README 写的数 == `test/` 下声明的条数"。**那个口径是错的**，
+    // 而且错得很隐蔽：声明条数 ≠ `flutter test` 跑出来的数，因为有用例是在
+    // `for` 循环里生成的（`json_contract_test.dart` 按集合名、
+    // `source_chip_tone_test.dart` 按主题×明暗、`theme_test.dart`、`contract_evolution_test.dart`
+    // 都这么写）。2026-10-01 实测：**声明 832 条，跑出来 +850**。
+    //
+    // 第一版把 832 写进了 README，而用户照着 README 那一行敲 `flutter test`，
+    // 屏幕上会是 `+850` —— 门面当场对不上自己的命令。它第一次真正触发，
+    // 也正是这种误伤：另一批用例加进来时它红了，而它红的原因与被测行为毫无关系。
+    //
+    // 所以现在**不再钉精确数**，只钉一条诚实的下限：README 说的数不许比
+    // 文件里能数出来的声明还少（少说 = 把测试规模说小了）。精确值以命令输出为准，
+    // README 用「约」字兜住。
     final readme = File('README.md').readAsStringSync();
-    // 只认 `# 必须全绿（当前 811 例）` 那一处：README 别处可能提到别的数字
-    final declared = RegExp(r'当前 (\d+) 例').firstMatch(readme)?.group(1);
-    expect(declared, isNotNull, reason: 'README 里找不到形如「当前 811 例」的那一处');
+    final declared = RegExp(r'当前约 (\d+) 例').firstMatch(readme)?.group(1);
     expect(
       declared,
-      '${_countTestDeclarations()}',
-      reason: 'README 写的例数与 `test/` 下实际声明的用例数不一致。'
-          '加/删了用例就顺手改 README 那一行 —— 这个数字是给人看工期的，'
-          '写错会让人以为测试变慢或变快了。',
+      isNotNull,
+      reason: 'README 里找不到形如「当前约 850 例」的那一处 —— '
+          '**带「约」字是有意的**：精确条数以 `flutter test` 的输出为准，'
+          '静态数出来的声明条数与之不等（循环里会生成用例）。',
+    );
+
+    final declaredCount = int.parse(declared!);
+    final floor = _countTestDeclarations();
+    expect(
+      declaredCount,
+      greaterThanOrEqualTo(floor),
+      reason: 'README 说"约 $declaredCount 例"，而仅静态声明就有 $floor 条 —— '
+          '把测试规模说小了。往大改（并带上「约」字），别去掉「约」。',
     );
   });
 
@@ -166,13 +184,21 @@ String _readPubspecVersion() {
   return lines.first.substring('version:'.length).trim();
 }
 
-/// `test/` 下声明的用例数：数行首（允许缩进）的 `test(` 与 `testWidgets(`。
+/// `test/` 下**静态声明**的用例数：数行首（允许缩进）的 `test(` 与 `testWidgets(`。
 ///
-/// 口径说明，免得下一个人以为它数错了：
-///   · 这是**声明条数**，不是 `flutter test` 跑完打印的 `+N`。后者在
-///     `setUpAll` 里批量生成用例时会大于本数，而本仓库没有那种写法；
-///   · `group(` 不是用例，不数；`test/` 之外的 `.dart`（如 `test/support/` 的助手）
-///     一并扫描 —— 那里本来就不该出现用例声明，出现了也该算进总数。
+/// **这是一个下限，不是 `flutter test` 跑出来的那个数。** 两者的差是真实的：
+/// 有用例写在 `for` 循环里，一行声明会跑出好几条 ——
+/// `json_contract_test.dart`（按集合名）、`source_chip_tone_test.dart`（主题×明暗）、
+/// `theme_test.dart`、`contract_evolution_test.dart` 都这么写。
+/// 2026-10-01 实测：本函数数到 **832**，`flutter test` 打印 **+850**。
+///
+/// 所以调用方（"README 的例数不许伪装成精确值"那条）只拿它当前**下限**用：
+/// README 说的数不许比它小。**别拿它去和 `+N` 比相等** —— 那正是这道闸
+/// 第一版犯过的错。
+///
+/// 另一处已知的少计：声明与 `group(` 写在同一行时数不到
+/// （`contract_evolution_test.dart` 里有一处）。对"下限"这个用途无影响，
+/// 所以有意不修 —— 修了会把它伪装得更像精确值。
 int _countTestDeclarations() {
   final pattern = RegExp(r'^\s*(?:test|testWidgets)\(');
   final root = Directory('test');

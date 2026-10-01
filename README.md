@@ -165,12 +165,12 @@ Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。运行�
 
 ```powershell
 flutter analyze --no-pub    # 必须 0 问题
-flutter test --no-pub       # 必须全绿（当前 812 例）
+flutter test --no-pub       # 必须全绿（当前约 850 例，精确条数以命令输出为准）
 flutter build apk --release     # 手机端产物 build/app/outputs/flutter-apk/app-release.apk
 flutter build windows --release # 电脑端产物 build/windows/x64/runner/Release/guideline.exe
 ```
 
-- **跑测试很快**：全量 812 例约 **32 秒**，`analyze` 约 **6 秒**。
+- **跑测试很快**：全量约 850 例约 **34 秒**，`analyze` 约 **6 秒**。
   所以"少跑点测试"省不下什么，别往那个方向优化
 - **构建时显式给版本号**：`android/local.properties` 会缓存
   `flutter.versionName` / `flutter.versionCode`，不显式指定就会打出一个与界面显示
