@@ -27,6 +27,40 @@ class Ids {
     final day = d.day.toString().padLeft(2, '0');
     return '${d.year}-$month-$day';
   }
+
+  /// 严格解析 `"YYYY-MM-DD"`：**形态与日历都要对**，否则返回 `null`。
+  ///
+  /// **落盘入口的唯一判据**（《数据契约》§1 的"日期"一行）——
+  /// `Canonical.readDate` 就是拿它当关卡。为什么要卡日历而不只卡形态：
+  /// `DateTime.tryParse('2026-02-31')` 不会失败，它把越界日期**规范化**成
+  /// `2026-03-03` —— 于是同一个值在不同地方算出不同结论。
+  /// 2026-10-01 实测到的分叉：三处"逾期"判定里，`isOverdue`（严格）与
+  /// `overdueTasks()`（字符串比较）都说**不逾期**，而 `urgencyOf`（当年用
+  /// `tryParse`）把 `2026-02-31` 算成 3 月 3 日、于是在 2 月 28 日判成**已逾期并标红**。
+  /// 现在 `urgencyOf` 也走这里（见 `lib/ui/common/urgency.dart`）。
+  ///
+  /// 实现上用"格式化回去必须一模一样"来卡：不合法日期、多一位少一位、
+  /// 前后带空白，全都会被这一步挡下。
+  ///
+  /// ⚠️ **两处细节是刻意的，改它们会静默改变行为**（2026-10-01 一次核验揪出来的）：
+  ///
+  /// 1. **不做 `trim`**。我第一版写了 `value.trim()`，那让 `' 2026-09-23'`
+  ///    从"拒绝"变成"接受" —— 与它替换掉的旧实现（`format.parseIsoDate`，
+  ///    直接 `tryParse(date)` 且拿**原串**比对）不一致。这次改动是**收紧**，
+  ///    不该悄悄混进一处放宽。要容错空白就单独提一个明确的口径。
+  /// 2. **年份要补足 4 位**（`padLeft(4, '0')`）。少了它，`'0999-01-01'`
+  ///    回格式化成 `'999-01-01'` ≠ 原文 → 判 `null` → `readDate` 会**拒掉一个
+  ///    形态合法、日历上真实存在的日期**，还错报"日历上不存在"。
+  ///    旧实现有这一步，我搬代码时漏了。
+  static DateTime? parseIsoDate(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final parsed = DateTime.tryParse(value);
+    if (parsed == null) return null;
+    final year = parsed.year.toString().padLeft(4, '0');
+    final month = parsed.month.toString().padLeft(2, '0');
+    final day = parsed.day.toString().padLeft(2, '0');
+    return '$year-$month-$day' == value ? parsed : null;
+  }
 }
 
 /// 同一父节点下兄弟排序的间隔（《数据契约》§1）。

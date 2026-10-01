@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../ids.dart';
 import '../models/entity.dart';
 
 /// 规范化 JSON（《数据契约》§2 / §8）。
@@ -64,13 +65,30 @@ class Canonical {
     return null;
   }
 
-  /// 日期字段：必须是 `"YYYY-MM-DD"`，否则置空并记录。
+  /// 日期字段：必须是 `"YYYY-MM-DD"` **且日历上真实存在**，否则置空并记录。
+  ///
+  /// **不只看形态**（2026-10-01 收紧，《数据契约》§1）：正则只挡得住
+  /// "看起来像日期"的值，`"2026-02-31"` 照样过。放它进来会让同一个值在不同
+  /// 解析器下算出不同结论 —— 实测到的分叉是：`isOverdue`（严格）与
+  /// `overdueTasks()`（字符串比较）都说"不逾期"，而 `urgencyOf`（用
+  /// `DateTime.tryParse`，会把 2 月 31 日规范化成 3 月 3 日）判成"已逾期并标红"。
+  /// 现在统一走 [Ids.parseIsoDate]：**要么是真实存在的一天，要么置空**。
   static String? readDate(Object? value, String field, DecodeIssues issues) {
     if (value == null) return null;
-    if (value is String && _datePattern.hasMatch(value)) return value;
-    issues.error('$field 不是 "YYYY-MM-DD" 形态：$value，已置为 null');
+    if (isValidDate(value)) return value as String;
+    issues.error('$field 不是 "YYYY-MM-DD" 且日历上真实存在的日期：$value，已置为 null');
     return null;
   }
+
+  /// [readDate] 用的那把尺子：**这个值算不算一个合法日期**。
+  ///
+  /// 抽出来是为了让**写入侧**能用同一把尺子（2026-10-01）——
+  /// 在此之前只有读取侧卡：`updateTask(dueAt: '不是日期')` 会被拒，
+  /// 而 `updateTask(dueAt: '2026-02-31')` **能存进去**，下次启动才被
+  /// [readDate] 悄悄置空。同一个参数的两种坏值、两种命运，说不通；
+  /// 而且那种"先落盘、重启才被清掉"是典型的静默数据损坏。
+  static bool isValidDate(Object? value) =>
+      value is String && _datePattern.hasMatch(value) && Ids.parseIsoDate(value) != null;
 
   static Map<String, dynamic>? readObject(Object? value, String field, DecodeIssues issues) {
     if (value == null) return null;

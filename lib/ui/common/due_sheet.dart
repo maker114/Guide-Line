@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/ids.dart';
 import 'format.dart';
 
 /// 选日期时点「清除」交回来的值。
@@ -44,8 +45,12 @@ Future<String?> pickDateSheet(
   DateTime? lastDate,
 }) async {
   final now = DateTime.now();
+  // 归口 `Ids.parseIsoDate`（2026-10-01）：这里原来用 `DateTime.tryParse`。
+  // 它只影响"日历打开时先落在哪一天"，而 `current` 是 `task.dueAt` 这类
+  // 落盘过的领域值（已由 `Canonical.readDate` 卡过日历合法性），所以**行为不变** ——
+  // 归口是为了让"日期算不算数"全应用只剩一处判据，而不是因为这里出过问题。
   final initial = initialDate ??
-      (current == null ? now : (DateTime.tryParse(current) ?? now));
+      (current == null ? now : (Ids.parseIsoDate(current) ?? now));
   // 日历**不接受首尾之外的那一天**（`CalendarDatePicker` 会直接断言失败）。
   // 当前值本来就可能落在默认区间之外 —— 老数据里的远期日期、或用户上次选到
   // 边界那一年 —— 所以以它为准把区间撑开，而不是让这一页崩掉。

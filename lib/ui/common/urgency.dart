@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/ids.dart';
+
 /// 紧迫度：按到期日与今天的距离分档。
 ///
 /// **没有到期日单独算一档**（`none`），因为"没排期"和"还早"是两件不同的事，
@@ -18,9 +20,16 @@ enum Urgency {
 }
 
 /// 分档阈值：逾期 / 今天 / 3 天内 / 5 天内 / 7 天内 / 7 天后 / 没有到期日。
+///
+/// **解析走 `Ids.parseIsoDate`，不再用 `DateTime.tryParse`**（2026-10-01 归口）。
+/// 这一处正是当初"三处逾期判定分叉"的源头：`tryParse` 会把 `'2026-02-31'`
+/// **规范化**成 3 月 3 日，于是在 2 月 28 日把它判成"已逾期"并标红，
+/// 而同屏的 `isOverdue`、`Workspace.overdueTasks()` 都说它不逾期。
+/// 落盘入口（`Canonical.readDate`）现在会拒掉这种值，所以当前触发不到；
+/// 但归口之后**即使有脏值从别的路径进来，三处的结论也不会再分叉**。
 Urgency urgencyOf(String? dueAt, {DateTime? now}) {
   if (dueAt == null || dueAt.isEmpty) return Urgency.none;
-  final parsed = DateTime.tryParse(dueAt);
+  final parsed = Ids.parseIsoDate(dueAt);
   if (parsed == null) return Urgency.none;
 
   final days = _daysBetween(parsed, now ?? DateTime.now());

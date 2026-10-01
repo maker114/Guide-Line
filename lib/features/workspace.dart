@@ -24,7 +24,7 @@ import 'workspace_state.dart';
 // `AppStorage` / `UiPrefs` / `RuleViolation` 以前都能从本文件借出去，
 // 关掉就会让一批只 `import 'workspace.dart'` 的调用方与测试突然编不过
 // （`RuleViolation` 全仓有 89 处引用）。这不是新暴露的 API，是**保持原有的可见性**。
-export '../core/store/app_storage.dart' show AppStorage, LoadReport;
+export '../core/store/app_storage.dart' show AppStorage, LoadReport, StoreLockedByNewerSchema;
 export '../core/store/ui_prefs.dart' show UiPrefs;
 export 'workspace_checklist.dart' show WorkspaceChecklist;
 export 'workspace_state.dart' show RuleViolation, WorkspaceState;
@@ -518,6 +518,7 @@ class Workspace {
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('项目名不能为空');
+    _requireValidDate(date, '日期');
     if (parentId != null) {
       final parent = findProject(parentId);
       if (parent == null || parent.deleted) throw const RuleViolation('父项目不存在');
@@ -563,6 +564,8 @@ class Workspace {
     final project = findProject(id);
     if (project == null) throw const RuleViolation('项目不存在');
     if (title != null && title.trim().isEmpty) throw const RuleViolation('项目名不能为空');
+    // `_unset` 哨兵表示"这次不改日期"，别把它当成一个值去校验
+    if (!identical(date, _unset)) _requireValidDate(date as String?, '日期');
 
     if (parentId != _unset) {
       final target = parentId as String?;
@@ -1553,6 +1556,7 @@ class Workspace {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('任务名不能为空');
     if (type == TaskType.parallel) throw const RuleViolation(_parallelGone);
+    _requireValidDate(dueAt, '到期日');
     final event = findEvent(eventId);
     if (event == null || event.deleted) throw const RuleViolation('所属事件不存在');
 
@@ -1655,6 +1659,8 @@ class Workspace {
     if (task == null) throw const RuleViolation('任务不存在');
     if (title != null && title.trim().isEmpty) throw const RuleViolation('任务名不能为空');
     if (taskType == TaskType.parallel) throw const RuleViolation(_parallelGone);
+    // `_unset` 哨兵表示"这次不改日期"，别把它当成一个值去校验
+    if (!identical(dueAt, _unset)) _requireValidDate(dueAt as String?, '到期日');
     if (taskType != null && taskType != task.taskType) {
       final parent = task.parentId == null ? null : findTask(task.parentId!);
       if (parent == null && taskType != TaskType.standard) {
@@ -1757,6 +1763,24 @@ class Workspace {
     return out;
   }
 
+  /// 写入侧的日期把关：**与 [Canonical.readDate] 同一把尺子**。
+  ///
+  /// 为什么读取侧有、写入侧也要有（2026-10-01 补）：在此之前只有读取侧卡，
+  /// 于是 `updateTask(dueAt: '不是日期')` 会被拒，而 `updateTask(dueAt: '2026-02-31')`
+  /// **能存进去**，下次启动才被 `readDate` 悄悄置空 —— 同一个参数的两种坏值、
+  /// 两种命运，而且"先落盘、重启才被清掉"是典型的静默数据损坏。
+  /// 现在两种都在**写入那一刻**抛出 [RuleViolation]，由 `AppController.run`
+  /// 翻成一句用户能看懂的话（它本来就接 `RuleViolation`）。
+  ///
+  /// 当前 UI 到不了这里（日期唯一来源是系统日期选择器，只能产出合法日期），
+  /// 所以这是**防未来**：哪天加个"从文本解析日期"的入口，坏数据会在门口被挡住，
+  /// 而不是先落盘、下次启动才消失。
+  void _requireValidDate(String? value, String label) {
+    if (value == null) return;
+    if (Canonical.isValidDate(value)) return;
+    throw RuleViolation('$label不是有效日期（要 YYYY-MM-DD，且那一天真实存在）：$value');
+  }
+
   /// 批量设 / 清到期日。
   ///
   /// 与 [assignInspirations] 同一套做法：**先整体校验再落盘** —— 一条不合法就
@@ -1767,6 +1791,7 @@ class Workspace {
   /// （`overdueTasks()` 本来就排除已归档）—— 给一条不看的任务排期是空动作，
   /// 与其静默生效，不如说清"先取消归档"。
   void setTasksDue(Iterable<String> ids, String? dueAt) {
+    _requireValidDate(dueAt, '到期日');
     final targets = _requireTasks(ids);
     if (targets.isEmpty) return;
     for (final task in targets) {
@@ -2090,9 +2115,6 @@ class Workspace {
   }
 
   int? get lastExportedAt => _prefs.lastExportedAt;
-
-  /// 数据目录（供设置页展示）
-  String get dataDirectoryPath => _state.storage.paths.describe();
 
   /// 当前的完整数据快照（导出用）。
   ///

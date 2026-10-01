@@ -180,6 +180,39 @@ void main() {
   });
 
   group('§2.2 v1 四文档信封：读到即忽略（不写回）', () {
+    test('日历上不存在的日期一律置空并记错（不只是看形态）', () {
+      // 《数据契约》§1 的"日期"一行：`"YYYY-MM-DD"` **且日历上真实存在**。
+      // 2026-10-01 收紧之前的实测分叉：`readDate` 只卡正则，于是 `"2026-02-31"`
+      // 被原样收下、写回盘；而三处"逾期"判定各用不同解析器 ——
+      // `isOverdue`（严格）与 `overdueTasks()`（字符串比较）都说**不逾期**，
+      // `urgencyOf`（`DateTime.tryParse` 会把 2 月 31 日规范化成 3 月 3 日）
+      // 却在 2 月 28 日判成**已逾期并标红**。同一条任务，一屏一个说法。
+      for (final bad in <String>['2026-02-31', '2026-13-01', '2026-04-31', '2026-02-30']) {
+        final issues = DecodeIssues();
+        final p = Project.fromJson(
+          <String, dynamic>{...projectJson, 'date': bad},
+          issues,
+        );
+        expect(p.date, isNull, reason: '$bad 形态合法但日历上不存在，必须置空');
+        expect(
+          issues.errors,
+          isNotEmpty,
+          reason: '$bad 被降级时必须记一条 error（契约 §8：降级不能静默）',
+        );
+      }
+
+      // 真实存在的日期照旧收下（别把闸门收过头）
+      for (final good in <String>['2026-02-28', '2024-02-29', '2026-12-31']) {
+        final issues = DecodeIssues();
+        final p = Project.fromJson(
+          <String, dynamic>{...projectJson, 'date': good},
+          issues,
+        );
+        expect(p.date, good, reason: '$good 是真实存在的一天，不该被拒');
+        expect(issues.errors, isEmpty);
+      }
+    });
+
     test('v1 信封里的 version / last_tx_id 不会被写进新形态', () {
       final v1 = jsonEncode(<String, dynamic>{
         'projects.json': <String, dynamic>{

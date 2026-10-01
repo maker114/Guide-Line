@@ -73,6 +73,30 @@ void main() {
       expect(parseIsoDate('2026-1-5'), isNull, reason: '要写成 2026-01-05');
       expect(parseIsoDate('2026-09-23T10:00'), isNull, reason: '只接受日期，不接受时间');
     });
+
+    test('**不做 trim**：前后带空白一律拒绝（别把它悄悄放宽）', () {
+      // 2026-10-01：把实现搬进 `Ids.parseIsoDate` 时我顺手加了 `value.trim()`，
+      // 于是 `' 2026-09-23'` 从"拒绝"变成"接受"。这次改动是**收紧**，不该混进放宽。
+      // 独立核验把这个偏差揪了出来，这条用例就是那次发现的落点。
+      for (final padded in <String>[' 2026-09-23', '2026-09-23 ', '  2026-09-23  ', '\t2026-09-23']) {
+        expect(
+          parseIsoDate(padded),
+          isNull,
+          reason: '「$padded」带空白：旧实现拒绝，就不要让它变成接受',
+        );
+      }
+      expect(parseIsoDate('2026-09-23'), DateTime(2026, 9, 23), reason: '干净的原串照收');
+    });
+
+    test('**年份补足 4 位**：0000~0999 的日期不能被误判成"不存在"', () {
+      // 2026-10-01 的回归：旧实现有 `parsed.year.toString().padLeft(4, '0')`，
+      // 我搬代码时漏了。少了它，`'0999-01-01'` 回格式化成 `'999-01-01'` ≠ 原文
+      // → 判 null → `Canonical.readDate` 会**拒掉一个形态合法、日历上真实存在的日期**，
+      // 还错报"日历上不存在"。核验指出这个方向是**单向**的（只有 0000~0999 受影响）。
+      expect(parseIsoDate('0999-01-01'), DateTime(999, 1, 1), reason: '它是真实存在的一天');
+      expect(parseIsoDate('0001-02-03'), DateTime(1, 2, 3));
+      expect(parseIsoDate('9999-12-31'), DateTime(9999, 12, 31), reason: '上界也要能过');
+    });
   });
 
   group('isOverdue 与 dateOffset', () {

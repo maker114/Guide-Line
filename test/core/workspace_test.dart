@@ -1801,6 +1801,111 @@ void main() {
   });
 
   group('归档区 / 搜索 / 到期 / 彻底删除', () {
+    group('写入侧的日期把关（与读取侧同一把尺子）', () {
+      // 2026-10-01 补。在此之前只有读取侧卡：`updateTask(dueAt: '不是日期')`
+      // 会被拒，而 `updateTask(dueAt: '2026-02-31')` **能存进去**，
+      // 下次启动才被 `Canonical.readDate` 悄悄置空 —— 同一个参数的两种坏值、
+      // 两种命运，而且"先落盘、重启才被清掉"是典型的静默数据损坏。
+      final bad = <String>[
+        '不是日期',
+        '2026-13-01',
+        '2026-02-31',
+        '2026-04-31',
+        '2026-1-5',
+        '2026-09-23T10:00',
+        ' 2026-09-23',
+      ];
+
+      test('建任务 / 改任务 / 批量排期：坏日期一律拒，且报的是能读懂的话', () {
+        final event = ws.createEvent(name: '一件事');
+        for (final value in bad) {
+          expect(
+            () => ws.createTask(eventId: event.id, title: 't', dueAt: value),
+            throwsA(isA<RuleViolation>()),
+            reason: 'createTask 的 dueAt="$value" 该被拒',
+          );
+        }
+
+        final task = ws.createTask(eventId: event.id, title: '好任务');
+        for (final value in bad) {
+          expect(
+            () => ws.updateTask(task.id, dueAt: value),
+            throwsA(isA<RuleViolation>()),
+            reason: 'updateTask 的 dueAt="$value" 该被拒',
+          );
+          expect(
+            () => ws.setTasksDue(<String>[task.id], value),
+            throwsA(isA<RuleViolation>()),
+            reason: 'setTasksDue 的 dueAt="$value" 该被拒',
+          );
+        }
+
+        // 报错里要带上那个值，用户才知道是哪一处不对
+        try {
+          ws.updateTask(task.id, dueAt: '2026-02-31');
+          fail('上面那句该抛');
+        } on RuleViolation catch (e) {
+          expect(e.message, contains('2026-02-31'));
+          expect(e.message, contains('到期日'), reason: '说清是哪个字段');
+        }
+      });
+
+      test('合法日期照收，`null` 表示"清掉日期"，`_unset` 表示"这次不改"', () {
+        final event = ws.createEvent(name: '一件事');
+        final task = ws.createTask(
+          eventId: event.id,
+          title: '好任务',
+          dueAt: '2026-09-23',
+        );
+        expect(task.dueAt, '2026-09-23');
+        expect(ws.findTask(task.id)!.dueAt, '2026-09-23', reason: '真的存进去了');
+
+        // 闰日这种"合法但少见"的不能被误伤
+        ws.updateTask(task.id, dueAt: '2024-02-29');
+        expect(ws.findTask(task.id)!.dueAt, '2024-02-29');
+
+        // null = 明确清除
+        ws.updateTask(task.id, dueAt: null);
+        expect(ws.findTask(task.id)!.dueAt, isNull);
+
+        // **不传 dueAt = 这次不改日期** —— 内部用 `_unset` 哨兵表达，
+        // 别让校验把它当成一个值去卡（那会让"只改标题"也被拒）
+        ws.updateTask(task.id, dueAt: '2026-09-30');
+        ws.updateTask(task.id, title: '只改标题');
+        expect(
+          ws.findTask(task.id)!.dueAt,
+          '2026-09-30',
+          reason: '只改标题不该动日期，也不该被日期校验拦下',
+        );
+        expect(ws.findTask(task.id)!.title, '只改标题');
+      });
+
+      test('建项目 / 改项目：同一个把关', () {
+        for (final value in bad) {
+          expect(
+            () => ws.createProject(title: 'p', date: value),
+            throwsA(isA<RuleViolation>()),
+            reason: 'createProject 的 date="$value" 该被拒',
+          );
+        }
+
+        final project = ws.createProject(title: '好项目', date: '2026-09-23');
+        for (final value in bad) {
+          expect(
+            () => ws.updateProject(project.id, date: value),
+            throwsA(isA<RuleViolation>()),
+            reason: 'updateProject 的 date="$value" 该被拒',
+          );
+        }
+        ws.updateProject(project.id, purpose: '只改说明');
+        expect(
+          ws.findProject(project.id)!.date,
+          '2026-09-23',
+          reason: '只改说明不该动日期，也不该被日期校验拦下',
+        );
+      });
+    });
+
     test('已归档只列归档根，回收站只列级联根', () {
       final root = ws.createProject(title: '根');
       ws.createProject(title: '子', parentId: root.id);

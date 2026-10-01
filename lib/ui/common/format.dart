@@ -45,21 +45,19 @@ String describeDate(String? date, {DateTime? now}) {
   return '$diff 天后';
 }
 
-/// 严格解析 `YYYY-MM-DD`；不是这个形状就返回 null。
+/// 严格解析 `YYYY-MM-DD`；不是这个形状、或日历上不存在，就返回 null。
 ///
-/// **不能直接用 `DateTime.tryParse`**：它把 `2026-13-99` 这类越界日期
-/// 规范化成别的日期（13 月 → 次年 1 月），于是"看起来像日期"的脏值
-/// 会静默变成另一个日子。这里用"格式化回去必须一模一样"来卡死，
-/// 顺带要求月日补零，避免同一个日期出现两种写法。
-DateTime? parseIsoDate(String? date) {
-  if (date == null || date.isEmpty) return null;
-  final parsed = DateTime.tryParse(date);
-  if (parsed == null) return null;
-  final y = parsed.year.toString().padLeft(4, '0');
-  final m = parsed.month.toString().padLeft(2, '0');
-  final d = parsed.day.toString().padLeft(2, '0');
-  return '$y-$m-$d' == date ? parsed : null;
-}
+/// **不能直接用 `DateTime.tryParse`**：它把 `2026-13-99` / `2026-02-31` 这类越界日期
+/// **规范化**成别的日子（13 月 → 次年 1 月、2 月 31 日 → 3 月 3 日），于是
+/// "看起来像日期"的脏值会静默变成另一个日期；同一个值在不同解析器下还会算出
+/// **不同结论**（2026-10-01 实测：`urgencyOf` 把 `2026-02-31` 判成已逾期并标红，
+/// 而 `isOverdue` 与 `overdueTasks()` 都说它不逾期）。
+///
+/// 现在是**薄壳**：实现搬到了 `lib/core/ids.dart` 的 `Ids.parseIsoDate`，
+/// 让"日期算不算数"这件事全应用只有一处说了算（`lib/core` 不能 import `lib/ui`，
+/// 所以权威那一份必须在 core）。它同时是 `Canonical.readDate` 用的那个判据 ——
+/// 于是**落盘的日期**与**界面算出来的结论**从同一把尺子来。
+DateTime? parseIsoDate(String? date) => Ids.parseIsoDate(date);
 
 /// 「绝对日期 + 剩余天数」一起显示，例如 `2026-09-30（3 天后）`。
 ///
