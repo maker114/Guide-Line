@@ -11,6 +11,7 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
 import 'package:guideline/core/store/app_storage.dart';
+import 'package:guideline/core/store/atomic_file.dart';
 import 'package:guideline/core/store/ui_prefs.dart';
 
 /// 单机形态的存储层测试：**原子替换 + 备份轮转 + 损坏隔离/恢复**。
@@ -150,14 +151,127 @@ void main() {
         );
       }
       // ④ 用户必须被告知（否则界面上只是一个空库）
+      //
+      // 断言"至少有一条 error"，**不再断言文案里有某个词**。
+      // 原来这里写的是 `contains('高于')` —— 它把测试钉在了提示语的措辞上：
+      // 重排、改个说法（"比当前应用新"）就会红，而那只是文案调整、行为没变。
+      // 而"必须有告警"这件事照样被钉住了。
       expect(
-        report.issues.errors.any((e) => e.contains('高于')),
-        isTrue,
+        report.issues.errors,
+        isNotEmpty,
         reason: '要有一条能直接显示给用户的告警',
+      );
+      // ④″ 但"是哪一类问题"这件事**必须还有断言**。
+      //
+      // 上面那条改成只看"有没有 error"之后，load 层就不再有任何断言说清
+      // **这是"版本过高"而不是"文件损坏"**了 —— 而这两条路的处置完全相反：
+      // 前者原地不动、后者隔离 + 用备份覆盖。第三轮独立审查点出了这个削弱，
+      // 这里用**状态**而不是文案把它补回来（结构化的判据不怕改文案）。
+      // `report.storeLockedByNewerSchema` 是 load 给界面看的那个标记，
+      // 而它的来源正是 `StoreParseStatus.tooNew`。
+      expect(
+        report.storeLockedByNewerSchema,
+        isTrue,
+        reason: 'load 必须把这件事**归类成"版本过高"**，而不是当损坏处理 —— '
+            '后者会隔离文件并用旧备份写回，把用户在新版里的数据换掉',
+      );
+      expect(
+        report.recoveredFromBackup,
+        isNull,
+        reason: '它不是损坏，所以**绝不能**去拿备份恢复',
+      );
+      expect(
+        report.quarantinedPaths,
+        isEmpty,
+        reason: '也不能隔离它 —— 那份文件是好的，只是这边看不懂',
+      );
+
+      // ④′ **判断不是靠这条文案做出来的**（2026-10-01 修的一处会丢数据的缺陷）。
+      //
+      // 修之前：`AppStorage` 用 `issues.errors.any(contains('高于本应用支持的'))`
+      // 去认"版本过高"。那句话同时是给用户看的提示语 —— 改它一个字的措辞、
+      // 或者在那一支之前插进任何一条 error，`_isNewerSchema` 就会返回 false，
+      // 于是这份文件被当成**损坏**：隔离改名 → 用旧备份盖回 → 用户在新版里的
+      // 数据被静默换掉，不可逆。
+      //
+      // 现在这件事由 `StoreFile.parseDetailed` 的**状态**答。这里把三种结果
+      // 逐一对上号，并确认 `tooNew` **不是**一份空文件（"空"正是它与"损坏"
+      // 混起来的那个样子）。
+      final futureText = Canonical.documentText(future);
+      expect(
+        StoreFile.parseDetailed(futureText, DecodeIssues()).status,
+        StoreParseStatus.tooNew,
+        reason: '版本高于本应用 = tooNew，这是一条**类型**判断，与任何文案无关',
+      );
+      expect(
+        StoreFile.parseDetailed(futureText, DecodeIssues()).store,
+        isNull,
+        reason: 'tooNew 不该给出一份空文件 —— "空"正是它与"损坏"混起来的那个样子',
+      );
+      expect(
+        StoreFile.parseDetailed('{"schemaVersion": 3,', DecodeIssues()).status,
+        StoreParseStatus.broken,
+        reason: '读不出来的才是 broken',
+      );
+      expect(
+        StoreFile.parseDetailed(storeWith('好数据').toCanonicalText(), DecodeIssues()).status,
+        StoreParseStatus.ok,
+      );
+      // 上面三条各自把一种输入对上了一个状态 —— 但**没有一条**保证
+      // "枚举里所有的状态都被覆盖到了"。这里补上那一条。
+      //
+      // 原来这里是 `expect(<写死的三个枚举>.toSet().length, 3)` —— **恒真**：
+      // 手写三个不同的枚举值放进 Set 永远是 3，它证明不了任何事
+      // （把 tooNew 与 broken 合并成一个值，它照样绿）。
+      // 2026-10-01 独立核验指出我只改了一半：真正有内容的是"每个枚举值
+      // 都有输入能让它出现"，而那是**行为**判据，不是对字面量做集合运算。
+      // 要做到后者得把三种输入的期望写全 —— 就是上面①②③那三条，
+      // 而它们的数量必须与枚举值数量对齐，所以这里钉住枚举只有三个值：
+      expect(
+        StoreParseStatus.values.length,
+        3,
+        reason: '解析结果只有 ok / tooNew / broken 三种。'
+            '新增第四种时，上面的"逐条对上号"必须跟着补一条 —— '
+            '不能悄悄多出一种"解析结果"而没人处理它',
+      );
+      // 而"每个枚举值都真的能被某种输入触发"这条要**看行为**：
+      // 把三种输入各解析一遍，收集到的状态集合必须等于**全部**枚举值。
+      // 这条不是恒真 —— 少一条输入、或某两种输入落到同一个状态上，它就会红。
+      final reached = <StoreParseStatus>{
+        StoreFile.parseDetailed(futureText, DecodeIssues()).status,
+        StoreFile.parseDetailed('{"schemaVersion": 3,', DecodeIssues()).status,
+        StoreFile.parseDetailed(storeWith('好数据').toCanonicalText(), DecodeIssues()).status,
+      };
+      expect(
+        reached,
+        StoreParseStatus.values.toSet(),
+        reason: '这三种输入必须**覆盖到每一种**解析结果：'
+            '少一种就说明有状态不可达（枚举里躺着个死的），'
+            '而两种输入落到同一个状态就说明它们被合并了（正是原缺陷的形状）',
+      );
+      expect(
+        StoreFile.parseDetailed(storeWith('好数据').toCanonicalText(), DecodeIssues()).store,
+        isNotNull,
+        reason: 'ok 必须带一份**非空**的 store —— '
+            '这正是"版本过高"与"损坏"混起来时的那个破口：当时两者都交出一份空文件',
       );
 
       // ⑤ 用户接着做任何动作都会触发保存 —— 那时也绝不能覆盖（写盘守卫）
-      storage.save(report.store, nowMillis: day + step * 2);
+      //
+      // **必须抛 `StoreLockedByNewerSchema`**（2026-10-01 第二次修）。
+      // 这里原先是 `storage.save(...)` 一句、然后断言盘上没变 —— 那个断言
+      // **区分不出"拒绝了"和"悄悄什么都没做"**。而后者正是全仓最后一条
+      // "假装成功"：`save()` 静默 return 时，`restoreFromBackup` 照样
+      // `return parsed.store!`、`applyImport` / `applyMergedStore` 照样报成功，
+      // 用户以为恢复了/导入了，重启才发现盘上一个字节没动。
+      // 把守卫搬进 `AppStorage.save` 之后，"写不成"这件事在最会写盘的
+      // 那一层就说出来，四个入口全都当场知道。
+      expect(
+        () => storage.save(report.store, nowMillis: day + step * 2),
+        throwsA(isA<StoreLockedByNewerSchema>()),
+        reason: '被锁住时**必须报错**，不能静默不写 —— '
+            '静默那条路会让 restore / import / 合并导入全部假装成功',
+      );
       expect(
         storage.paths.storeFile.readAsStringSync(),
         contains('未来的数据'),
@@ -170,13 +284,95 @@ void main() {
       expect(
         backupsAfter,
         backupsBefore,
-        reason: '被锁住时保存直接返回，连备份轮转都不该发生',
+        reason: '被锁住时在轮转之前就抛了，连备份轮转都不该发生',
       );
     });
 
     test('保存后不留 .tmp 残留（原子替换）', () {
       storage.save(storeWith('项目'), nowMillis: day);
       expect(File('${storage.paths.storeFile.path}.tmp').existsSync(), isFalse);
+    });
+
+    test('启动清理覆盖到**所有原子写的文件**，不只是三个数据文件（2026-10-01 修）', () {
+      // 独立核验查出：`cleanupTmp` 原来只作用于 `paths.managedFiles`（主文件 /
+      // 偏好 / 背景图），而**日快照、实现计划正文、重置快照、同步记录**同样是
+      // 原子写的 —— 崩溃时一样会留下 `.tmp`，只是没人清。
+      //
+      // 这条用例造几种残留，然后走一次 `load()`（启动路径上的清理在它里面），
+      // 验证它们都被清掉。
+      storage.save(storeWith('先有数据'), nowMillis: day);
+
+      final daily = storage.paths.dailyBackup('20260906');
+      final leaves = <File>[
+        // 日快照的 .tmp（会被 atomicWrittenFiles 现扫目录扫到）
+        File('${daily.path}.tmp')..writeAsStringSync('半截的日快照'),
+        // 三个私有存档的 .tmp（不在 managedFiles 里，靠第二个清单清）
+        File('${AppPaths(dir).directory.path}${Platform.pathSeparator}'
+            'implementation_history.json.tmp')..writeAsStringSync('半截的历史正文'),
+        File('${AppPaths(dir).directory.path}${Platform.pathSeparator}'
+            'reset_snapshot.json.tmp')..writeAsStringSync('半截的重置快照'),
+        File('${AppPaths(dir).directory.path}${Platform.pathSeparator}'
+            'github_sync.json.tmp')..writeAsStringSync('半截的同步记录'),
+      ];
+      for (final f in leaves) {
+        expect(f.existsSync(), isTrue, reason: '前置：${f.path} 确实存在');
+      }
+
+      storage.load(); // 启动路径：清理 `.tmp` 就在这里
+
+      for (final f in leaves) {
+        expect(
+          f.existsSync(),
+          isFalse,
+          reason: '${f.uri.pathSegments.last} 是原子写留下的 .tmp，启动时该被清掉',
+        );
+      }
+      expect(
+        storage.paths.storeFile.existsSync(),
+        isTrue,
+        reason: '清垃圾不能顺手把真数据删了',
+      );
+    });
+
+    test('`exports/` 子目录里的 .tmp 也要清（独立核验指出这两处一直没人清）', () {
+      // `writeExport` / `writeHandoffExport` 也是**原子写**，但落在 `exports/`
+      // **子目录**里。`cleanupTmp(candidates)` 要调用方先列文件，而这两个落点
+      // 谁也没列到 —— 于是它们的 `.tmp` 一直没人清。
+      // 现在 `load()` 另走 `AtomicFile.cleanupTmpIn(paths.exportsDir)`
+      // （按目录扫、判据是"名字以 .tmp 结尾"），新增写入点不必回来登记。
+      storage.load(); // 建目录
+
+      final exportsDir = storage.paths.exportsDir;
+      exportsDir.createSync(recursive: true);
+      // 造两种：导出（.zip 之类）与交接说明（.md）留下的 .tmp
+      final a = File('${exportsDir.path}${Platform.pathSeparator}guideline-20261001.zip.tmp')
+        ..writeAsStringSync('半截导出');
+      final b = File('${exportsDir.path}${Platform.pathSeparator}handoff-项目-20261001.md.tmp')
+        ..writeAsStringSync('半截交接说明');
+      // 顺带造一层子目录，验证是**递归**扫的（不赌 exports/ 永远只有一层）
+      final nested = Directory('${exportsDir.path}${Platform.pathSeparator}old')
+        ..createSync(recursive: true);
+      final c = File('${nested.path}${Platform.pathSeparator}旧导出.zip.tmp')
+        ..writeAsStringSync('更早的半截导出');
+      // 一份**正经的**导出文件不能被顺手删掉
+      final keep = File('${exportsDir.path}${Platform.pathSeparator}guideline-20261001.zip')
+        ..writeAsStringSync('完整导出');
+
+      for (final f in <File>[a, b, c]) {
+        expect(f.existsSync(), isTrue, reason: '前置：${f.path} 存在');
+      }
+
+      storage.load(); // 启动路径的清理
+
+      for (final f in <File>[a, b, c]) {
+        expect(
+          f.existsSync(),
+          isFalse,
+          reason: '${f.uri.pathSegments.last} 该被清掉（含子目录里的）',
+        );
+      }
+      expect(keep.existsSync(), isTrue, reason: '正经的导出文件不能被删');
+      expect(keep.readAsStringSync(), '完整导出');
     });
 
     test('落盘文本符合契约格式：2 空格缩进、LF、末尾单换行', () {
@@ -257,6 +453,56 @@ void main() {
         AppPaths.rollingBackupCount,
       );
       expect(titleOf(10), isNot('v1'), reason: 'v1 已经被挤出窗口');
+    });
+
+    test('日快照是**原子写**：写一半失败时不留半截文件，当天还会重试', () {
+      // 这一条钉的是 2026-10-01 修的一处静默缺陷（第三轮独立审查查出）：
+      // 日快照原来走裸 `File.copySync`（没有"临时文件 → 改名"），
+      // 写这份文件时被杀 / 掉电 / 磁盘满会留下一个**半截的**
+      // `guideline.daily.<今天>.json`；而"今天有没有快照"的判据是
+      // `existsSync()` —— 半截文件照样算数，于是当天**再也不重试**，
+      // 同时 `_pruneDaily()` 还会把最老那份**完好的**挤掉。
+      //
+      // 注入手法：拦掉"日快照那一份的改名"。原子写走的是
+      // `AtomicFile.writeBytes`（tmp → rename），所以改名被拒 ⇒ 目标文件不存在；
+      // 裸 `copySync` 那条路根本不经过改名 ⇒ 目标文件会出现（半截或完整）。
+      File dailyOf(int millis) {
+        final d = DateTime.fromMillisecondsSinceEpoch(millis);
+        String two(int v) => v.toString().padLeft(2, '0');
+        return AppPaths(dir).dailyBackup('${d.year}${two(d.month)}${two(d.day)}');
+      }
+
+      storage.save(storeWith('先有一份主文件'), nowMillis: day);
+      // 第一次保存已经留下今天的日快照 —— 先删掉，模拟"今天的还没写成"
+      final daily = dailyOf(day);
+      if (daily.existsSync()) daily.deleteSync();
+      expect(daily.existsSync(), isFalse, reason: '前置：今天还没有日快照');
+
+      AtomicFile.renameHook = (from, to) {
+        if (to.path.contains(AppPaths.dailyPrefix)) {
+          throw const FileSystemException('注入的失败：日快照改名被拒');
+        }
+        from.renameSync(to.path);
+      };
+      addTearDown(() => AtomicFile.renameHook = null);
+
+      storage.save(storeWith('第二笔'), nowMillis: day + step);
+
+      expect(
+        daily.existsSync(),
+        isFalse,
+        reason: '写一半失败后**绝不能**留下半截文件 —— '
+            '它会被 `existsSync()` 当成"今天已经有快照了"',
+      );
+
+      // 恢复之后当天必须还能补上这一份（也就是"没有被当成已经留过"）
+      AtomicFile.renameHook = null;
+      storage.save(storeWith('第三笔'), nowMillis: day + 2 * step);
+      expect(
+        daily.existsSync(),
+        isTrue,
+        reason: '当天仍然要能补上这份日快照 —— 失败那次不该把这一天"用掉"',
+      );
     });
 
     test('每天第一份保存留下日快照，且同一天不会重复生成', () {
@@ -474,6 +720,89 @@ void main() {
       expect(error, contains('至少要保留一份'));
       expect(File(only.path).existsSync(), isTrue, reason: '拒绝之后文件必须原样在');
       expect(storage.listBackups().length, 1);
+    });
+
+    test('盘上有读不出来的备份文件时，也不许把最后一份**能用的**放走', () {
+      // 这条钉的是一个"数错了对象"的缺陷（2026-10-01 修）：
+      // 老实现用 `listBackups().length <= 1` 当底线，而列表里**能用的**备份才算数
+      // （`recordCount != null`）。盘上若另有无法解析的备份文件，它们既不进计数、
+      // 也不能当安全网 —— 于是"至少留一份"这条线会被绕过，用户手里最后一份
+      // 能回退的备份被删掉，只剩一堆坏文件。
+      storage.save(storeWith('第一版'), nowMillis: day);
+      storage.save(storeWith('第二版'), nowMillis: day + step);
+
+      // 造两份读不出来的垃圾：既不删它，也不让它冒充安全网
+      storage.paths.rollingBackup(5).writeAsStringSync('{"broken": ');
+      storage.paths.rollingBackup(6).writeAsStringSync('[1,2,3]');
+
+      final usable = storage
+          .listBackups()
+          .where((b) => b.recordCount != null)
+          .toList(growable: false);
+      expect(usable.length, greaterThanOrEqualTo(2), reason: '先得有得删');
+
+      // 一份一份删到只剩最后一份能用的
+      var stopped = 0;
+      for (final entry in usable) {
+        if (storage.deleteBackup(entry.path) != null) stopped += 1;
+      }
+      expect(stopped, 1, reason: '最后一份能用的必须被拦住，且只拦这一次');
+
+      final survivors = storage.listBackups().where((b) => b.recordCount != null);
+      expect(survivors.length, 1, reason: '盘上必须还剩一份读得出来的备份');
+    });
+
+    test('盘上只剩**读不出来的**备份时，那些垃圾必须删得掉（2026-10-01 修）', () {
+      // 独立核验查出来的：底线原来对**任何目标**都套用，于是盘上 0 份能用的时
+      // 每一份都被拒 —— 用户清不掉那些坏文件，还收到一句"至少要保留一份能用的
+      // 备份"，可他手里**一份能用的都没有**，那句话答非所问。
+      //
+      // 正确行为：删一份**读不出来的**备份永远不会让"能用的"变少，所以不该拦
+      // （它本来也不是安全网，只是占着滚动窗口的位置）。
+      storage.save(storeWith('先造点东西'), nowMillis: day);
+      // 首次保存只留日快照，滚动备份要再存一次才会轮转出来
+      storage.save(storeWith('再造一份'), nowMillis: day + step);
+
+      // 把**每一份**备份都弄成"读不出来"的：schemaVersion 写成未来值
+      final future = () {
+        final json = StoreFile.empty().toJson();
+        json['schemaVersion'] = StoreFile.currentSchemaVersion + 1;
+        return const JsonEncoder.withIndent(null).convert(json);
+      }();
+      var broken = 0;
+      for (final entry in storage.listBackups()) {
+        File(entry.path).writeAsStringSync(future);
+        broken += 1;
+      }
+      expect(broken, greaterThanOrEqualTo(1), reason: '先得造出坏备份');
+
+      final listed = storage.listBackups();
+      final bad = listed.where((b) => b.recordCount == null).toList();
+      expect(bad, isNotEmpty, reason: '这些就是"读不出来的"');
+      expect(
+        listed.where((b) => b.recordCount != null),
+        isEmpty,
+        reason: '前提：盘上一份能用的都没有',
+      );
+
+      // 每一份坏备份都必须删得掉 —— 否则用户永远清不掉这些垃圾
+      for (final entry in bad) {
+        expect(
+          storage.deleteBackup(entry.path),
+          isNull,
+          reason: '删"读不出来的"备份不该被拦：它本来就不是安全网',
+        );
+      }
+      expect(
+        storage.listBackups().where((b) => b.recordCount == null),
+        isEmpty,
+        reason: '清完之后坏备份应当一个不剩',
+      );
+      expect(
+        storage.paths.storeFile.existsSync(),
+        isTrue,
+        reason: '主文件毫发无损',
+      );
     });
 
     test('只认列出来的备份：主文件 / 偏好文件 / 随便一个路径都删不动', () {

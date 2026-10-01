@@ -14,8 +14,6 @@ class AtomicFile {
 
   final File file;
 
-  bool get exists => file.existsSync();
-
   /// **真正的落盘钩子**（P1-4）。
   ///
   /// `RandomAccessFile.flushSync()` 只把用户态缓冲交给内核，**不等价于 POSIX `fsync`** ——
@@ -51,6 +49,17 @@ class AtomicFile {
   /// 生产代码永不设置它。
   static void Function(File from, File to)? renameHook;
 
+  /// 测试用的失败注入点：**换掉"复制"这一步**（默认 `null` = 真的复制）。
+  ///
+  /// 与 [renameHook] 分开是必要的：备份轮转里"移位"走改名、"留下最新那份"走复制
+  /// （见 `AppStorage._rotateBackups`），而**权限 / 磁盘满最常见的表现是复制失败**
+  /// （`copySync` 要真写一份新文件）。只拦改名的话，备份那一步会照样成功，
+  /// 于是"备份没写出来"这条路径根本测不到 —— 2026-10-01 就是这样漏掉了一个
+  /// "没写出来却报成功"的缺陷（`snapshotBackupNow`）。
+  ///
+  /// 生产代码永不设置它。
+  static void Function(File from, File to)? copyHook;
+
   static void _rename(File from, File to) {
     final hook = renameHook;
     if (hook != null) {
@@ -58,6 +67,19 @@ class AtomicFile {
       return;
     }
     from.renameSync(to.path);
+  }
+
+  /// 复制一个文件（备份留档用）。
+  ///
+  /// 走 [copyHook] 时由钩子决定成败；否则 `copySync`。**抛出的异常由调用方处理** ——
+  /// 备份失败不该阻断主流程，那是 `AppStorage._copyFile` 的职责。
+  static void copyFile(File from, File to) {
+    final hook = copyHook;
+    if (hook != null) {
+      hook(from, to);
+      return;
+    }
+    from.copySync(to.path);
   }
 
   static File tmpOf(File f) => File('${f.path}.tmp');
@@ -173,12 +195,54 @@ class AtomicFile {
     }
   }
 
+  /// 清掉**整个目录里**残留的 `.tmp`（含子目录，启动时调用一次）。
+  ///
+  /// 为什么需要它、而 [cleanupTmp] 不够（2026-10-01 补，独立核验指出）：
+  /// [cleanupTmp] 要调用方**先列出文件**，于是"哪些文件会原子写"这件事散在各处；
+  /// 而导出与交接说明写在 `exports/` **子目录**里（`writeExport` /
+  /// `writeHandoffExport`），它们的 `.tmp` 谁也没列到、一直没人清。
+  ///
+  /// 这个方法的判据**不是"这是哪个文件"，而是"这个名字是不是临时文件"** ——
+  /// [AtomicFile] 写盘时临时文件恒定叫 `<目标名>.tmp`，所以按名字扫就把
+  /// "所有原子写的落点"一次覆盖，**新增写入点不必回来登记**。
+  /// 这也顺带修掉了 [AppPaths.atomicWrittenFiles] 那种"列清单"思路的根因：
+  /// 清单会漏，扫目录不会。
+  ///
+  /// 递归（`followLinks: false`）：`exports/` 是一层，但不再赌它永远只有一层。
+  static int cleanupTmpIn(Directory dir) {
+    if (!dir.existsSync()) return 0;
+    var removed = 0;
+    try {
+      for (final entry in dir.listSync(recursive: true, followLinks: false)) {
+        if (entry is! File) continue;
+        if (!entry.path.endsWith('.tmp')) continue;
+        try {
+          entry.deleteSync();
+          removed += 1;
+        } catch (_) {
+          // 忽略：删不掉也不影响正确性
+        }
+      }
+    } catch (_) {
+      // 目录读不了也不该阻断启动
+    }
+    return removed;
+  }
+
   /// 把损坏文件隔离保留（返回隔离后的路径）。
   ///
   /// **不覆盖已有的现场**：同一毫秒里连续隔离两次（同一测试里就会发生）、
   /// 或时钟被回拨，原来的实现会让第二份把第一份静默盖掉 —— 而那两份现场
   /// 恰恰是"最后一道人工求救通道"。目标已存在时依次取 `-2` / `-3` …
-  String quarantine(int stamp) {
+  ///
+  /// **失败时返回 `null`，不再返回主文件自己的路径**（2026-10-01 修）。
+  /// 旧写法失败时 `return file.path`，而调用方（`AppStorage.load`）把返回值
+  /// 无条件记进 `quarantinedPaths` —— 于是：
+  ///   · 界面上那条"已隔离保留现场"的告警**指向主文件本身**，那不是现场；
+  ///   · 紧接着 `_writeBackRecovered` 写的**正是同一路径**，
+  ///     等于告警指着的文件下一刻就被覆盖了。
+  /// 调用方现在必须先看是不是 `null`，再决定说什么。
+  String? quarantine(int stamp) {
     var target = corruptOf(file, stamp);
     var attempt = 1;
     while (target.existsSync()) {
@@ -189,7 +253,7 @@ class AtomicFile {
       file.renameSync(target.path);
     } catch (_) {
       // 隔离失败时保持原文件不动
-      return file.path;
+      return null;
     }
     return target.path;
   }

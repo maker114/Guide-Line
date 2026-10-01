@@ -125,6 +125,15 @@ class WorkspaceState {
   }
 
   /// 原子落盘：**整份数据一次写入**（单文件让跨实体变更天然原子），偏好另存一份。
+  ///
+  /// **被更新版本的 App 锁住时抛 [StoreLockedByNewerSchema]** —— 但那道抛
+  /// 现在在 `AppStorage.save` 里（2026-10-01 第二次修）。
+  ///
+  /// 第一版我把判断放在这里（`save` 之后看 `storage.lockedByNewerSchema`），
+  /// 结果只堵住了 5 个直接调 `save()` 的调用点里的 2 个 —— 另外三个
+  /// （`restoreBackup` / `applyMergedStore` / `applyImport`，以及
+  /// `snapshotBackupNow`）继续假装成功。**能写盘的那一层才知道自己写没写成**，
+  /// 所以守卫搬进了 `AppStorage.save`；这里不需要再做任何事。
   void persist() {
     storage.save(buildStoreFile());
     storage.savePrefs(prefs);

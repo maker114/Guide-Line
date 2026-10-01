@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../json/canonical.dart';
-import '../json/document.dart';
 import '../json/store_file.dart';
 import '../models/entity.dart';
 import '../models/enums.dart';
@@ -61,7 +60,21 @@ class AppStorage {
 
   LoadReport load({int? nowMillis}) {
     paths.ensureDirectories();
-    AtomicFile.cleanupTmp(paths.managedFiles);
+    // `.tmp` 清理要**覆盖到所有原子写的落点**，不只是三个数据文件。
+    // 分两件事做，因为它们性质不同：
+    //   · 根目录那几类（主文件 / 偏好 / 背景图 / 日快照 / 三个私有存档）
+    //     需要**先列出谁会被原子写** —— `atomicWrittenFiles` 就是那个清单；
+    //   · `exports/` 子目录里的导出与交接说明也一样是原子写的，但**列清单的思路
+    //     在这里会漏**（2026-10-01 独立核验指出：这两处一直没人清）。
+    //     所以那里改成**按名字扫目录** —— `AtomicFile` 的临时文件恒定叫
+    //     `<目标名>.tmp`，于是不再依赖"记得回来登记"。
+    AtomicFile.cleanupTmp(paths.atomicWrittenFiles);
+    AtomicFile.cleanupTmp(<File>[
+      _implementationHistoryFile,
+      _resetSnapshotFile,
+      _githubSyncFile,
+    ]);
+    AtomicFile.cleanupTmpIn(paths.exportsDir);
 
     final issues = DecodeIssues();
     final quarantined = <String>[];
@@ -112,8 +125,21 @@ class AppStorage {
         store = parsed.store!;
       } else {
         // 主文件读不出来 / 读不了 → 隔离现场，然后尝试最近的备份
-        issues.error('主数据文件无法解析，已隔离保留现场');
-        quarantined.add(AtomicFile(file).quarantine(stamp));
+        //
+        // **隔离失败与隔离成功要说不同的话**（2026-10-01 修）：`quarantine` 现在
+        // 失败时返回 `null`，而不是主文件自己的路径 —— 后者会让下面那句
+        // "已隔离保留现场"撒谎（指向主文件），而且紧接着 `_writeBackRecovered`
+        // 写的正是同一路径，告警指着的文件下一刻就被覆盖了。
+        final quarantinedTo = AtomicFile(file).quarantine(stamp);
+        if (quarantinedTo == null) {
+          issues.error(
+            '主数据文件无法解析，且隔离失败（文件仍留在原处，没有被改动）。'
+            '请先把它复制到别处保底，不要直接继续使用。',
+          );
+        } else {
+          issues.error('主数据文件无法解析，已隔离保留现场：$quarantinedTo');
+          quarantined.add(quarantinedTo);
+        }
         _pruneQuarantine();
         final recovery = _loadNewestBackup(issues);
         if (recovery != null) {
@@ -139,6 +165,12 @@ class AppStorage {
   ///
   /// 一旦为真就**不再写盘**：那种文件属于更高版本的 App，这边一写就等于把
   /// 用户在新版里的数据换成一份旧形态的空壳。
+  ///
+  /// **这是本题唯一的判据状态**，不给外面读 —— 它原来有一个公开 getter
+  /// `lockedByNewerSchema`，用作"`save()` 静默 return 之后上层怎么知道"，
+  /// 而 2026-10-01 起 `save()` 改成**直接抛** `StoreLockedByNewerSchema`（见它自己的
+  /// 文档），那个 getter 就再没有调用点了（全仓零调用），已删。
+  /// 留着它的害处和别的死代码一样：让人以为"这里还有人要问锁没锁"。
   bool _lockedByNewerSchema = false;
 
   /// 磁盘上的主文件是不是"更新版本写的"。**[save] 的最后一道防线。**
@@ -174,27 +206,19 @@ class AppStorage {
   /// 尝试解析；**区分"解析不了"与"版本高于本应用"**。
   ///
   /// 返回值里 `store != null` 才算成功。这个区分是 P0-1 的核心：
-  /// [StoreFile.parse] 对"版本过高"只记一条 error 并返回空 store，如果把它当成功，
+  /// [StoreFile.parse] 对"版本过高"返回空 store，如果把它当成功，
   /// 上层就会拿着一份空库继续跑，第一次保存就把用户的真数据覆盖掉。
+  ///
+  /// 判据用的是 [StoreFile.parseDetailed] 的**状态**（[StoreParseStatus.tooNew]），
+  /// 不再去匹配错误文案 —— 理由见 [StoreFile.parseDetailed] 的文档：
+  /// 文案是给用户看的，改一个字的措辞不该改变"这份文件是不是更新的 App 写的"。
   ({StoreFile? store, bool lockedByNewerSchema}) _tryParse(String text, DecodeIssues issues) {
-    try {
-      Canonical.decode(text);
-    } catch (_) {
-      return (store: null, lockedByNewerSchema: false);
-    }
-    final parsed = StoreFile.parse(text, issues);
+    final parsed = StoreFile.parseDetailed(text, issues);
     return (
-      store: parsed,
-      lockedByNewerSchema: _isNewerSchema(issues),
+      store: parsed.store,
+      lockedByNewerSchema: parsed.status == StoreParseStatus.tooNew,
     );
   }
-
-  /// [StoreFile.parse] 的"版本过高"分支留下的那条 error。
-  ///
-  /// 按文案匹配不理想，但 `StoreFile.parse` 在那一支里只返回空 store、没有别的出口；
-  /// 这条文案同时也是给用户看的，改动它会被 `app_storage_test.dart` 的 P0-1 用例拦下。
-  bool _isNewerSchema(DecodeIssues issues) =>
-      issues.errors.any((e) => e.contains('高于本应用支持的'));
 
   /// 把恢复出来的数据**立刻写回主文件**。
   ///
@@ -356,6 +380,24 @@ class AppStorage {
   ///   · **其余** —— 按 [rotateMinIntervalMillis] 节流。
   ///
   /// 主文件本身**照旧每次都写**：节流只作用于备份，"防断电 / 防杀进程"这条不能松。
+  ///
+  /// ⚠️ **被更新版本锁住时抛 [StoreLockedByNewerSchema]，不再静默 return**
+  /// （2026-10-01 第二次修，见下）。
+  ///
+  /// 第一版我把这道守卫的"抛"放在 `WorkspaceState.persist()` 里，只堵住了
+  /// **5 个调用点里的 2 个**。另外三个直接调 `save()` 的入口于是继续假装成功：
+  /// `AppController.restoreBackup`（最狠 —— 它 `save()` 之后照样
+  /// `return parsed.store!`，还把内存换成恢复的数据，**盘上一个字节没动**，
+  /// 用户重启即全丢）、`applyMergedStore`、`applyImport`，以及 `snapshotBackupNow`
+  /// （它锁住时会报"请检查存储空间或权限"，理由根本不对）。
+  ///
+  /// 正解是把"写不成"这件事**放在最会写盘的那一层**说：这里抛，五个调用点
+  /// 全都当场知道，而不是各自去猜。上层那三处本来就 `try/catch` 着
+  /// （`catch (error) → '失败：$error'`），所以抛出即得到正确文案；
+  /// `snapshotBackupNow` 多接一个类型就能给出准确理由。
+  ///
+  /// **这是"报成功但没写"这类缺陷里最后一条**：此前已收口的有
+  /// `_rotateNow` 的返回值、`snapshotBackupNow` 的 mtime 判据、`run()` 的回滚。
   void save(StoreFile store, {int? nowMillis, bool forceRotate = false}) {
     paths.ensureDirectories();
     final now = nowMillis ?? DateTime.now().millisecondsSinceEpoch;
@@ -365,7 +407,7 @@ class AppStorage {
     // 本次 load 已经发现、或期间文件被新版改过，都在这里拦下。
     if (_lockedByNewerSchema || _diskLockedByNewerSchema()) {
       _lockedByNewerSchema = true;
-      return;
+      throw const StoreLockedByNewerSchema();
     }
 
     final stamped = store.copyWith(savedAt: now);
@@ -393,15 +435,19 @@ class AppStorage {
   int get backupsRevision => _backupsRevision;
   int _backupsRevision = 0;
 
-  /// 数据修订号：**主数据文件真的落盘一版**就 +1（需求①的触发依据）。
+  /// 数据落盘计数：**主数据文件真的落盘一版**就 +1（需求①的触发依据）。
   ///
   /// 与 [backupsRevision] 不是一回事：那个数"备份文件的集合"变没变，这个数
-  /// "盘上的活数据改过几版" —— 自动同步靠它回答"这一段编辑会话里到底改没改过东西"。
-  /// 被更新版本的 App 锁住而没写盘的那一次**不算**：盘上什么都没变。
-  int get dataRevision => _dataRevision;
+  /// "盘上的活数据改过几版"。被更新版本的 App 锁住而没写盘的那一次**不算**：
+  /// 盘上什么都没变。
+  ///
+  /// **刻意是私有的**（2026-10-01）：原来有个同义的公开 getter `dataRevision`，
+  /// 但生产与测试**都没有调用点** —— 上层真正要问的是下面那句
+  /// [editedSinceSessionStart]（"这一段会话里到底改过没"），而不是"改过几版"。
+  /// 留一个没人用的公开计数只会在下次重构时被误当成"有人依赖它"。
   int _dataRevision = 0;
 
-  /// 本段编辑会话开始那一刻的修订号（[beginEditSession] 取的快照）。
+  /// 本段编辑会话开始那一刻的落盘计数（[beginEditSession] 取的快照）。
   int _sessionStartRevision = 0;
 
   /// 这一段编辑会话里有没有真的写过盘。
@@ -474,8 +520,15 @@ class AppStorage {
     // 日快照：今天还没有快照时先留一份（在轮转之前，保证是"今天开始时的状态"）
     final today = _yyyymmdd(now);
     final todayFile = paths.dailyBackup(today);
+    //
+    // **必须原子写**（2026-10-01 修）：这里原来走 `_copyFile` → 裸 `File.copySync`，
+    // 没有"临时文件 → 改名"那一步。于是写这份文件时进程被杀 / 掉电 / 磁盘满，
+    // 会留下一个**半截的** `guideline.daily.<今天>.json` —— 而上面那句判据是
+    // `!todayFile.existsSync()`，于是当天**再也不重试**，`_pruneDaily()` 还照常
+    // 把最老那份**完好的**日快照挤掉。一份读不出的残片 + 少一份可用备份，
+    // 全程静默。
     if (!todayFile.existsSync()) {
-      if (_copyFile(store, todayFile)) wroteAny = true;
+      if (_writeFileAtomically(store, todayFile)) wroteAny = true;
       _pruneDaily();
     }
 
@@ -542,10 +595,36 @@ class AppStorage {
   /// 能诚实回答"这次到底有没有留下存档"。
   bool _copyFile(File from, File to) {
     try {
-      from.copySync(to.path);
+      // 走 `AtomicFile.copyFile` 而不是直接 `from.copySync`：那条路上有 `copyHook`
+      // 注入点，测试才能确定性地复现"备份写不进去"（权限 / 磁盘满）。
+      //
+      // ⚠️ 这一行 **2026-10-01 漏提交过一次**：`copyHook` 本身进了仓库，
+      // 而调用它的这一行没进 —— 于是钩子在**真实路径上永远不会被触发**，
+      // 而用例因为"测试自己设了钩子"照绿。是核验时逐个文件对 diff 才发现的。
+      // 教训：加注入点时要**同时**确认"生产代码真的调它了"，
+      // 否则测出来的只是测试自己搭的台子。
+      AtomicFile.copyFile(from, to);
       return true;
     } catch (_) {
       // 备份失败不能阻断主流程（主文件仍会被原子写入）
+      return false;
+    }
+  }
+
+  /// 把 [from] 的内容**原子地**写成 [to]（临时文件 → flush → 改名）。
+  ///
+  /// 与 [_copyFile] 的区别是"要么完整、要么不存在"：[_copyFile] 是裸 `copySync`，
+  /// 写一半被打断会留下一个**半截文件** —— 而调用方（日快照那条）用
+  /// `existsSync()` 判"今天已经有了"，于是半截文件会被当成"已经留过了"，
+  /// 当天不再重试。**日快照必须走这一条。**
+  ///
+  /// 滚动备份那几份不用它：它们是"移位 + 覆盖最新那份"，而移位本来就用改名
+  /// （原子），最新那份失败了也有旧的可退 —— 那一条的语义不同，别混。
+  bool _writeFileAtomically(File from, File to) {
+    try {
+      AtomicFile(to).writeBytes(from.readAsBytesSync());
+      return true;
+    } catch (_) {
       return false;
     }
   }
@@ -687,7 +766,7 @@ class AppStorage {
   /// 两条安全线，都是刻意的：
   ///   · **只认自己列的备份**——路径必须出现在 [listBackups] 里。这样即便有人把
   ///     别处传来的路径塞进来，也删不到主文件、偏好文件或背景图；
-  ///   · **不允许删到一份不剩**——没有云端时本地备份是唯一的安全网，
+  ///   · **不许删到一份能用的都不剩**——没有云端时本地备份是唯一的安全网，
   ///     "把备份清空"应该是不可能的操作。返回被拒绝的原因，让界面能如实说明。
   ///
   /// 返回 `null` 表示删掉了；否则返回拒绝原因。
@@ -697,8 +776,27 @@ class AppStorage {
     if (target == null) {
       return '这不是一份可删除的备份';
     }
-    if (entries.length <= 1) {
-      return '至少要保留一份备份，没有云端时它是唯一的安全网';
+    // 2026-10-01 修：原来这里数的是 `entries.length`，而 [entries] 里混着**读不出
+    // 记录**的备份（`_recordCountOf` 给 null 的那些：半截文件、`schemaVersion` 过高、
+    // 记录全坏）。于是底线数错了对象 —— 它想守的是"磁盘上还剩几份**能当安全网用**的
+    // 备份"，却数成了"列表里有几条"。两份结论会分叉，而分叉的代价是：
+    // 盘上有坏文件凑数时，"至少留一份"这条线被绕过，用户手里最后一份**能回退**
+    // 的备份被放走，只剩一堆读不出来的文件。
+    //
+    // 所以判据改成"删掉这一份之后，还剩几份**能用**的"（`recordCount != null`
+    // 即解析出了记录，与 [listBackups] 标签里"能不能写条数"同一套判据）。
+    //
+    // 2026-10-01 再修一处：**这条底线只该在"被删的那份本身能用"时才生效**
+    // （独立核验查出来的）。原来它对任何目标都套用，于是盘上**只剩坏备份**时
+    // （0 份能用的）每一份都被拒 —— 用户清不掉那些垃圾文件，而且收到一句
+    // "至少要保留一份能用的备份"，可他手里**一份能用的都没有**，那句话答非所问。
+    // 正确的行为：删一份**读不出来的**备份永远不会让"能用的"变少，
+    // 所以不该拦（它本来也不是安全网，只是占着滚动窗口的位置）。
+    final targetIsUsable = target.recordCount != null;
+    final usableAfterDelete =
+        entries.where((e) => e.path != backupPath && e.recordCount != null).length;
+    if (targetIsUsable && usableAfterDelete == 0) {
+      return '至少要保留一份能用的备份，没有云端时它是唯一的安全网';
     }
     final file = File(backupPath);
     if (file.existsSync()) file.deleteSync();
@@ -711,8 +809,13 @@ class AppStorage {
   /// 「实现计划」历史正文的文件名。
   ///
   /// 它**不是数据**：不进主数据文件、不进导出、不进备份轮转，也没有 `schemaVersion`
-  /// —— 只是一段"AI 覆盖正文之前那一版"的临时留档。所以它连 `AppPaths` 都不进，
-  /// 省得被 `managedFiles`（`.tmp` 清理）和别人的路径清单当成数据文件看待。
+  /// —— 只是一段"AI 覆盖正文之前那一版"的临时留档。所以它**不进 `AppPaths` 的
+  /// 数据文件清单**，省得被别人的路径清单当成数据文件看待。
+  ///
+  /// （2026-10-01 更正：这句原来写"连 `AppPaths` 都不进，省得被 `managedFiles`
+  /// （`.tmp` 清理）…看待"—— 已经过期了。它现在**确实**会被清 `.tmp`
+  /// （`load` 里那份私有存档清单），只是**仍然不算数据**。
+  /// "要不要清它的垃圾"与"它算不算数据"是两件事。）
   static const String implementationHistoryFileName = 'implementation_history.json';
 
   File get _implementationHistoryFile => File(
@@ -871,10 +974,20 @@ class AppStorage {
   ///
   /// 写不进去**只当没记上**：文件已经推上去了（或已经拉下来了），
   /// 真实结果不因为这一份记账写失败而改变 —— 与"护栏失败不阻断主流程"同一口径。
+  ///
+  /// ⚠️ **必须把盘上原有的 `offlineWarnedOn` 带过来**（2026-10-01 修）。
+  /// 与 [writeOfflineWarnedOn] 共用一份文件，而那个方向的写入是**读回旧键再补一个**
+  /// （见它自己的文档）；这一边原来是**整份覆盖**，于是每同步成功一次就把
+  /// "今天已经警告过连不上"抹掉 —— 当天再断网会**重复弹同一条警告**。
+  /// 两侧口径不对称，这就是后果。现在两边都只改自己那个键。
   void writeSyncRecord(SyncRecord record) {
     try {
       paths.ensureDirectories();
-      AtomicFile(_githubSyncFile).writeText(record.toCanonicalText());
+      // 记账自己带了就用它，没带就把盘上那个键带过来（空串 = 没有，不写出去）。
+      final kept = record.offlineWarnedOn.isNotEmpty
+          ? record
+          : record.copyWith(offlineWarnedOn: readOfflineWarnedOn());
+      AtomicFile(_githubSyncFile).writeText(kept.toCanonicalText());
     } catch (_) {
       // 见上
     }
@@ -1083,9 +1196,6 @@ class AppStorage {
     }
     return UiPrefs.empty;
   }
-
-  /// 便于测试与调试：把当前数据写成某份集合的规范文本。
-  static String canonicalTextOf(Document document) => document.toCanonicalText();
 }
 
 enum BackupKind { rolling, daily }
@@ -1111,4 +1221,21 @@ class BackupEntry {
 
   /// 这份备份里 `items` 的总条数；**解析不了给 `null`**（不猜、也不写成 0）
   final int? recordCount;
+}
+
+/// 盘上那份主数据文件是**更新版本的 App** 写的，本次一个字节都没写。
+///
+/// 由 [AppStorage.save] 抛出 —— **能写盘的那一层才知道自己写没写成**。
+/// 放在 `lib/core/store` 而不是 `lib/features`：`lib/core` 不能反向 import
+/// `lib/features`，而抛出点在这里。（2026-10-01 第一次修时它住在
+/// `workspace_state.dart`，于是只有 `WorkspaceState.persist` 那一条路会抛，
+/// 另外四个直接调 `save()` 的入口继续假装成功。）
+///
+/// 单独一个类型（而不是复用 `RuleViolation`）是为了让 `AppController.run`
+/// 能给出**这一件事**的文案：用户该做的是升级 App，而不是去查存储空间。
+class StoreLockedByNewerSchema implements Exception {
+  const StoreLockedByNewerSchema();
+
+  @override
+  String toString() => '主数据文件由更新版本的 App 写入，本次改动没有保存';
 }

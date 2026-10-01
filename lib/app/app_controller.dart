@@ -211,12 +211,23 @@ class AppController extends ChangeNotifier {
 
   int get projectCount => workspace.liveProjects.length;
 
-  int get inspirationCount => workspace.inspirationInbox.length;
-
-  int get eventCount => workspace.liveEvents.length;
-
   /// 任务总数：**排除已归档** —— 「更多 → 全部任务」页头那个「共 N 条（含子任务）」
   /// 用的就是它，入口副标题与页内数字必须是同一个数（Q20）。
+  ///
+  /// ⚠️ **这个口径与 [projectCount] 不同，两者不要相加。**
+  /// 2026-10-01 清掉两个零调用的 getter（`eventCount` / `inspirationCount`）时
+  /// 顺手把这件事写清楚 —— 此前它们四个并排放在一起，看着像"一套计数"，
+  /// 实际上：
+  ///
+  /// | 计数 | 口径 |
+  /// |---|---|
+  /// | [projectCount] | 未删除，**含已归档** |
+  /// | [taskCount] | 未删除，**排除已归档**（与「全部任务」页头一致） |
+  /// | `export_page.dart` 的 `_currentCounts` | 未删除，**含已归档** —— 导出是把盘上活记录备走，已归档也要备 |
+  /// | [searchableCount] | 未归档（灵感还只算待处理的），能搜到的那批 |
+  ///
+  /// 两个已删的 getter 是**零调用点**的：生产代码里没有任何地方读过它们
+  /// （只有上面那段注释提到），留着只会让人以为"这四个是一组的"。
   int get taskCount => workspace.liveTasks.where((t) => !t.archived).length;
 
   /// 归档区总数（Q20）。归档区现在是**三档**：已归档 / 已处理的灵感 / 回收站，
@@ -236,8 +247,8 @@ class AppController extends ChangeNotifier {
 
   /// **能搜到的东西有几条**（Q20）——「更多」入口那个「N 条内容可搜」用的就是它。
   ///
-  /// 以前这里自己加了一遍 `projectCount + eventCount + taskCount + inspirationCount`：
-  /// 四个 getter 里三个**含已归档**，而搜索实际只搜未归档的（灵感还只搜待处理的），
+  /// 以前这里自己加了一遍 `projectCount + taskCount + …` 之类的和：那几个 getter
+  /// **口径各不相同**（见下），而搜索实际只搜未归档的（灵感还只搜待处理的），
   /// 于是那句话写着"（不含已归档）"、数字却是含归档算出来的。
   /// 现在入口与搜索页调的是 `Workspace.searchableContentCount` 同一个口径。
   int get searchableCount => workspace.searchableContentCount;
@@ -328,8 +339,15 @@ class AppController extends ChangeNotifier {
   /// 而用户看到的是「改成功了」—— 下次启动才发现改动没了。这种**假装成功**
   /// 比当场报错危险得多，所以磁盘类错误必须翻译成明确的失败文案。
   ///
-  /// 只接 [FileSystemException]：那是磁盘/权限类问题。程序自身的 bug（类型错误等）
-  /// 仍旧照常抛出，不在生产环境里被悄悄咽掉。
+  /// 只接 [FileSystemException] 与 [StoreLockedByNewerSchema]：前者是磁盘/权限类问题，
+  /// 后者是"盘上那份文件属于更新版本的 App、本次一个字节都没写"。
+  /// 程序自身的 bug（类型错误等）仍旧照常抛出，不在生产环境里被悄悄咽掉。
+  ///
+  /// 为什么 [StoreLockedByNewerSchema] 必须在这里被接住并报出来（2026-10-01 修）：
+  /// 在那之前 `AppStorage.save` 遇到这种情形是**静默 return** 的 —— 而 `run` 只认异常，
+  /// 于是它 `notifyListeners()`、返回 `null`（= 成功），界面照报"改好了"，
+  /// 用户整个会话的编辑在退出后全部消失。全仓其它"报成功但没写"的路径都已收口，
+  /// **只剩这一处还在假装成功**。
   String? run(void Function() action) {
     final before = workspace.snapshotInMemory();
     try {
@@ -338,6 +356,12 @@ class AppController extends ChangeNotifier {
       return null;
     } on RuleViolation catch (violation) {
       return violation.message;
+    } on StoreLockedByNewerSchema {
+      // 内存退回动作前：让界面与磁盘保持一致，用户看到的是"这次没生效"
+      workspace.rollbackTo(before);
+      notifyListeners();
+      return '主数据文件由更新版本的 App 写入，本次改动没有保存。'
+          '请升级 App 后再编辑 —— 现在继续改，改动在退出后会全部丢失。';
     } on FileSystemException catch (error) {
       // 内存退回动作前：宁可让界面"这次没生效"，也不能显示一个磁盘上没有的状态
       workspace.rollbackTo(before);
@@ -407,14 +431,40 @@ class AppController extends ChangeNotifier {
   /// 而用户点这个按钮的意思就是"现在、立刻留一份"——节流会让这句话落空。
   /// 返回 `null` 表示成功。
   String? snapshotBackupNow() {
+    // 轮转是**先把旧的往后挪、再把主文件复制成 backup.1**，所以 `backup.1` 的
+    // 修改时刻变了，就说明这一次真的写出了一份新的。
+    final newest = storage.paths.rollingBackup(1);
+    final before = newest.existsSync() ? newest.lastModifiedSync() : null;
+
     try {
       storage.save(workspace.buildStoreFile(), forceRotate: true);
+    } on StoreLockedByNewerSchema {
+      // **理由必须对**（2026-10-01）：它原来是掉进下面那个
+      // `on FileSystemException` 的，于是被锁住时会报"请检查存储空间或权限" ——
+      // 而真实原因是"盘上那份文件属于更新版本的 App"。让用户去查存储空间
+      // 是把他往错的方向支。
+      return '主数据文件由更新版本的 App 写入，这次备份没有写。'
+          '请升级 App 后再备份 —— 现在这份备份在磁盘上并不存在。';
     } on FileSystemException catch (error) {
       return '保存失败，这次备份没有写进磁盘：${error.message}。请检查存储空间后重试。';
     }
-    // 主文件写成功 ≠ 备份写成功：**盘上真有这一份才算成功**（P1-3）。
-    // 旧实现只据此返回 null；磁盘满时备份一份都没写出，界面却报"已备份一份"。
-    if (!storage.paths.rollingBackup(1).existsSync()) {
+
+    // 主文件写成功 ≠ **这一次**的备份写成功（P1-3）。
+    //
+    // 判据是"新写出来了一份"（比 `backup.1` 的修改时刻），而不是"盘上存在一份"。
+    // 为什么改：旧写法 `!rollingBackup(1).existsSync()` 问的是"盘上有没有"，
+    // 而这里想知道的是"**这一次**写出来没有" —— 两件事只有在"上一次那份恰好
+    // 还留在 backup.1"时才会分叉，而轮转的移位会先把旧的挪成 backup.2、
+    // 顺手让备份数少一份，所以那个分叉**很难真的发生**（2026-10-01 试过构造，
+    // 没构造成；旧写法在那条路径上也会给出正确结论）。
+    //
+    // 也就是说这次改的是**判据的语义**、不是修一个已发生的缺陷：新写法直接回答
+    // 它想问的问题，不再依赖"移位一定会让旧的那份消失"这个间接性质。
+    // 配套的收益是**可测**：`AtomicFile.copyHook` 让"备份写不出来"在 Windows 上
+    // 也能确定性复现（原先只能靠只读目录，而 `attrib +R` 对目录不生效，
+    // 用例退化成恒过）。
+    final after = newest.existsSync() ? newest.lastModifiedSync() : null;
+    if (after == null || after == before) {
       return '备份没有写进磁盘，本次备份未能保存。'
           '请检查存储空间或权限后重试；（主数据文件本身已保存）';
     }
@@ -1153,9 +1203,10 @@ class AppController extends ChangeNotifier {
   /// 所以这一次只做两件事：收会话，然后拿盘上的时间戳与云端比。
   ///
   /// 需求①（ADR-093）：以前是"每一次回主页都连一次网"，于是翻个列表、看一眼统计
-  /// 也会转一次圈。现在闸门设在**数据修订号**上（`AppStorage.dataRevision`）：
-  /// 进编辑会话时记下基线，出会话时对一下 —— 这一趟一条记录都没写过就直接收场，
-  /// 不联网、指示器也不出现。闸门认的是"写没写过盘"，不是"点没点过界面"：
+  /// 也会转一次圈。现在闸门设在**"这一趟写没写过盘"**上
+  /// （`AppStorage.editedSinceSessionStart`）：进编辑会话时记下基线，
+  /// 出会话时对一下 —— 这一趟一条记录都没写过就直接收场，不联网、指示器也不出现。
+  /// 闸门认的是"写没写过盘"，不是"点没点过界面"：
   /// 进了输入框又原样退出来、点了取消，都不算编辑。
   ///
   /// 比对结果是什么都不做时，指示器**回到静默**而不是留一个"已同步"：

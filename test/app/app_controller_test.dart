@@ -11,10 +11,9 @@ import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
+import 'package:guideline/core/store/atomic_file.dart';
 import 'package:guideline/core/store/merge.dart';
 import 'package:guideline/features/workspace.dart';
-
-import '../support/readonly_dir.dart';
 
 /// 写盘失败时的行为（磁盘满 / 权限被拒），以及「导出记账」的口径（Q11）。
 ///
@@ -31,8 +30,6 @@ void main() {
 
   tearDown(() {
     if (tempDir.existsSync()) {
-      // 用例可能把目录上过锁（P1-3），先解锁再删，否则收尾会删不掉
-      restoreDirWritable(tempDir.path);
       tempDir.deleteSync(recursive: true);
     }
   });
@@ -193,29 +190,82 @@ void main() {
       final app = controllerWith(storage);
       app.run(() => app.ws.createProject(title: '项目'));
 
-      // 把目录设成不可写，让备份写入失败。
-      // 走跨平台助手（Windows `attrib +R` / POSIX `chmod 0500`）：以前这里直接调 `attrib`，
-      // Ubuntu runner 上 `Process.runSync` 抛 ProcessException —— CI 从建立起就红在这一条上。
-      final locked = makeDirReadOnly(tempDir.path);
-      addTearDown(() => restoreDirWritable(tempDir.path));
-      if (!locked) {
-        markTestSkipped('这个环境里设不了只读目录');
-        return;
-      }
+      // 让备份**复制**这一步失败（模拟权限 / 磁盘满）。
+      //
+      // 这里换过一次写法：原先靠"把目录设成只读"（Windows `attrib +R` / POSIX `chmod`），
+      // 而那条路**在 Windows 上拦不住写** —— `rollingBackup(1).existsSync()` 恒为真，
+      // 于是用例只走"真的写出来了就该报成功"那一支，**恒过、什么也没证明**。
+      // 注入点是确定性的，两个平台走同一条路（与 `atomic_file_test.dart` 同一个做法）。
+      AtomicFile.copyHook = (from, to) {
+        if (to.path.contains(AppPaths.backupPrefix)) {
+          throw const FileSystemException('注入的失败：备份写不进去');
+        }
+        from.copySync(to.path);
+      };
+      addTearDown(() => AtomicFile.copyHook = null);
 
       final error = app.snapshotBackupNow();
 
-      // 只读目录未必拦得住写（Windows 的 attrib 对目录不是强约束，Linux 上以 root 跑也拦不住），
-      // 拦不住时至少不能报错（下面按实际结果分别断言）
-      if (storage.paths.rollingBackup(1).existsSync()) {
-        expect(error, isNull, reason: '真的写出来了就该报成功');
-      } else {
-        expect(
-          error,
-          isNotNull,
-          reason: '一条备份都没写出来还说"已备份"，就是在骗用户',
-        );
-      }
+      expect(
+        error,
+        isNotNull,
+        reason: '一条备份都没写出来还说"已备份"，就是在骗用户',
+      );
+      expect(
+        storage.paths.rollingBackup(1).existsSync(),
+        isFalse,
+        reason: '这次确实一份都没写出来（下面那条用例才造"旧备份还在"的情形）',
+      );
+    });
+
+    test('上次成功、这次写不出来：不能拿旧的那份冒充（P1-3）', () {
+      final storage = AppStorage(AppPaths(tempDir));
+      final app = controllerWith(storage);
+      app.run(() => app.ws.createProject(title: '项目'));
+
+      // 先正常留一份，让盘上真的有一份滚动备份
+      expect(app.snapshotBackupNow(), isNull, reason: '第一次应当成功');
+      expect(storage.paths.rollingBackup(1).existsSync(), isTrue);
+
+      // 再注入失败：这一次写不出新的了
+      AtomicFile.copyHook = (from, to) {
+        if (to.path.contains(AppPaths.backupPrefix)) {
+          throw const FileSystemException('注入的失败：备份写不进去');
+        }
+        from.copySync(to.path);
+      };
+      addTearDown(() => AtomicFile.copyHook = null);
+
+      final error = app.snapshotBackupNow();
+
+      // 这一条要钉的是**"上次成功过"不能影响这一次的判断**。
+      //
+      // 实测到的机制（写下来免得下一个人像我先猜错一次）：轮转会先把旧备份
+      // **移位**成 `backup.2`，所以新复制失败时 `backup.1` 已经不在盘上了 ——
+      // 于是**旧判据（`rollingBackup(1).existsSync()`）在这里也会给出正确的结论**。
+      // 我原以为这是一条能复现"报假成功"的用例，**突变测试证明不能**：
+      // 把守卫改回旧判据，这条用例照样过。
+      //
+      // 所以这条用例的定位是**锁住行为**（上次成功过、这次没写成 → 必须报错），
+      // 而不是"证明修了一个已发生的缺陷"。真正被修掉的是这个判据**语义上的脆弱**：
+      // 它问的是"盘上有没有一份"，而它想知道的是"这一次写出来没有" ——
+      // 前者只有在"旧的那份恰好还在原位"时才会答错，而移位机制让它很难发生。
+      // 判据改成比 mtime 之后，这个问题从根上不存在了。
+      expect(
+        error,
+        isNotNull,
+        reason: '上次成功过，不等于这一次也成功 —— 写不出来就必须报错',
+      );
+      expect(
+        storage.paths.rollingBackup(1).existsSync(),
+        isFalse,
+        reason: '这次确实没写出新的 backup.1',
+      );
+      expect(
+        storage.paths.rollingBackup(2).existsSync(),
+        isTrue,
+        reason: '旧的那份挪到了 backup.2 —— "上次有一份"与"这次写出来了"是两件事',
+      );
     });
   });
 
@@ -462,11 +512,113 @@ void main() {
       );
 
       // 用户随手改一下 → 保存同样要被拒绝
-      app.run(() => app.ws.createProject(title: '旧版新建的项目'));
+      //
+      // **必须接住返回值并断言它不是 `null`**（2026-10-01 补）。
+      // 这里原先只写 `app.run(...)`、把返回值丢掉 —— 于是"界面有没有如实报错"
+      // 这件事完全没有断言：`AppStorage.save` 被锁住时是**静默 return** 的，
+      // 而 `run` 只认异常 → 它返回 `null`（=成功）、还 `notifyListeners()`，
+      // 界面照报"改好了"，用户整个会话的编辑在退出后全部消失。
+      // 也就是说：**这条用例当时绿着，却对"假装成功"毫无察觉。**
+      final error =
+          app.run(() => app.ws.createProject(title: '旧版新建的项目'));
+      expect(
+        error,
+        isNotNull,
+        reason: '被新版锁住时**必须说"没保存"**，不能返回 null（那等于报成功）。'
+            '这是全仓最后一处"假装成功"，也是这条断言存在的唯一理由',
+      );
+      expect(
+        error,
+        contains('更新版本'),
+        reason: '文案要指向"升级 App"，而不是让用户去查存储空间',
+      );
       expect(
         AppPaths(tempDir).storeFile.readAsStringSync(),
         before,
         reason: '被锁住时任何写入都必须被拒绝（P0-1 的写盘守卫）',
+      );
+    });
+
+    // 2026-10-01 补：**四个绕过 `persist()` 的入口**。
+    //
+    // 我第一版把守卫的"抛"放在 `WorkspaceState.persist()` 里，只堵住了 5 个
+    // 直接调 `save()` 的调用点里的 2 个。另外四个继续假装成功 ——
+    // 其中 `restoreBackup` 最狠：它 `save()` 之后照样 `return parsed.store!`，
+    // 上层据此把内存换成恢复的数据、报成功，而**盘上一个字节没动**，
+    // 用户重启即全丢。这四条当时**一条用例都没有**（独立核验查出来的）。
+    //
+    // 现在守卫在 `AppStorage.save` 里抛，所以这四条的期望统一成"必须报错"。
+    test('从备份恢复：被新版锁住时**不许报成功**，盘上不许有变化', () async {
+      final before = writeFutureStore();
+      final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+
+      // 先造一份"可以拿来恢复"的备份（正常数据，不是未来版本）
+      final goodBackup = AppPaths(tempDir).rollingBackup(1);
+      AppPaths(tempDir).ensureDirectories();
+      goodBackup.writeAsStringSync(_storeWithProject('一份正常备份').toCanonicalText());
+
+      final error = app.restoreBackup(goodBackup.path);
+
+      expect(
+        error,
+        isNotNull,
+        reason: '**这是最危险的一条**：原来它会返回 null（=成功）并把内存换成'
+            '恢复的数据，而主文件一个字节都没动 —— 用户重启即全丢。'
+            '报成功比报失败危险得多',
+      );
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '主文件仍是那份"未来版本"的，不许被换掉',
+      );
+    });
+
+    test('导入：被新版锁住时**不许报成功**', () async {
+      final before = writeFutureStore();
+      final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+
+      final error = app.applyImport(_storeWithProject('导入进来的数据'));
+
+      expect(error, isNotNull, reason: '不许假装导入成功');
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '主文件不许被换成导入的那份',
+      );
+    });
+
+    test('合并导入：被新版锁住时**不许报成功**', () async {
+      final before = writeFutureStore();
+      final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+
+      final error = app.applyMergedStore(_storeWithProject('合并后的数据'));
+
+      expect(error, isNotNull, reason: '不许假装合并成功');
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '主文件不许被换成合并结果',
+      );
+    });
+
+    test('手动备份：被新版锁住时给的理由要**是对的**（不是"检查存储空间"）', () async {
+      final before = writeFutureStore();
+      final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+
+      final error = app.snapshotBackupNow();
+
+      expect(error, isNotNull, reason: '这次备份在磁盘上并不存在，必须说出来');
+      expect(
+        error,
+        contains('更新版本'),
+        reason: '它原来掉进 `on FileSystemException` 分支，报的是'
+            '"请检查存储空间或权限" —— 真实原因是被更新版本锁住。'
+            '让用户去查存储空间是把他往错的方向支',
+      );
+      expect(
+        AppPaths(tempDir).storeFile.readAsStringSync(),
+        before,
+        reason: '主文件不许被动',
       );
     });
   });
@@ -611,6 +763,13 @@ void main() {
 const int _day = 1788652800000;
 
 /// 模拟磁盘写不进去；可以随时开关，用来验证"失败之后还能正常用"。
+///
+/// ⚠️ `failing = false` 时它会走到**真的** `AppStorage.save`，而那个方法现在会在
+/// "盘上那份属于更新版本的 App" 时抛 `StoreLockedByNewerSchema`（2026-10-01 起）。
+/// 所以这个 helper 只该用在**不涉及那条路径**的用例里 —— 否则异常会从
+/// `super.save(...)` 穿出去、变成未捕获错误，而不是被测代码该给出的失败文案。
+/// （独立核验把它列为"可忽略"；这里**不同意**：它是**测试基础设施**的坑，
+/// 下一个人拿它去测锁定场景就会踩 —— 而那正是本轮反复在修的那类事。）
 class _FailingStorage extends AppStorage {
   _FailingStorage(super.paths);
 

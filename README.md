@@ -3,7 +3,7 @@
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
 当前形态是 **Android 单机版 + Windows 桌面版**，用 Flutter 写，数据全部留在你自己这台设备上（手机一份、电脑一份，互不通信）。
 
-当前版本 **2.1.0+50** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
+当前版本 **2.1.1+53** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 [它是什么](#它是什么) · [设计原则](#设计原则) · [功能](#功能) · [技术](#技术) · [快速开始](#快速开始) · [开发](#开发) · [文档](#文档)
 
@@ -121,8 +121,13 @@ test/         契约回归、规则、存储、架构边界、界面与外壳
 tool/         一次性脚本（图标生成与预览、演示数据生成与自检、发布上传、构建恢复）
 ```
 
-分层边界不是靠自觉：`test/core/architecture_test.dart` 扫描源码，`lib/core` 里出现
-Flutter import、插件出现在 `lib/platform` 之外，测试就会失败。
+分层边界不是靠自觉，**两条规矩各有一个守卫**（2026-10-01 把署名改准 ——
+原来这句把两条都算在 `architecture_test.dart` 头上，而它**从不看第三方 package**）：
+
+- `test/core/architecture_test.dart` 扫描源码：`lib/core` 里出现 Flutter import、
+  层间依赖方向不对、出现云端 SDK，测试就会失败；
+- `test/core/platform_boundary_test.dart` 管"新增插件只能出现在 `lib/platform`"
+  —— 这条规矩在此之前**没有任何机器守卫**，是 2026-10-01 才补上的。
 
 ### 数据与安全
 
@@ -143,11 +148,13 @@ Flutter import、插件出现在 `lib/platform` 之外，测试就会失败。
 
 ### 依赖
 
-Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。运行时依赖只有五个：
-`path_provider`、`share_plus`、`file_picker`、`http`、`flutter_secure_storage`
-（`pubspec.yaml` 里还留着 Flutter 模板自带的 `cupertino_icons`，本工程一处都没用到）。
-五个都有 Windows 实现，所以电脑端不额外引任何依赖（`jni`、`url_launcher_windows` 等
-是它们带进来的传递依赖）。
+Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。
+**`pubspec.yaml` 里声明了六个，真在用的是五个**：`path_provider`、`share_plus`、
+`file_picker`、`http`、`flutter_secure_storage`；第六个是 Flutter 模板自带的
+`cupertino_icons`，本工程一处都没 import（已在 2026-10-01 核实）——
+所以那句"只有五个"说的是"真在用"，不是"声明了几个"，这里写清楚免得对不上文件。
+五个都各有 Windows 实现，所以电脑端不额外引任何依赖（`jni`、`url_launcher_windows`
+等是它们带进来的传递依赖）。
 
 ## 快速开始
 
@@ -165,13 +172,17 @@ Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。运行�
 
 ```powershell
 flutter analyze --no-pub    # 必须 0 问题
-flutter test --no-pub       # 必须全绿（当前约 850 例，精确条数以命令输出为准）
+flutter test --no-pub       # 必须全绿（当前约 881 例，精确条数以命令输出为准）
 flutter build apk --release     # 手机端产物 build/app/outputs/flutter-apk/app-release.apk
 flutter build windows --release # 电脑端产物 build/windows/x64/runner/Release/guideline.exe
 ```
 
-- **跑测试很快**：全量约 850 例约 **34 秒**，`analyze` 约 **6 秒**。
-  所以"少跑点测试"省不下什么，别往那个方向优化
+- **跑测试很快**：全量约 881 例约 **34 秒**，`analyze` 约 **6 秒**。
+  所以"少跑点测试"省不下什么，别往那个方向优化。
+  （上下两处的"约 876"是同一个估计值；**精确条数以 `flutter test` 的输出为准** ——
+  静态数出来的声明条数与命令打印的 `+N` 本来就不是一个数，循环里会生成用例。
+  这条口径由 `test/core/docs_consistency_test.dart` 守着：它只要求 README 说的数
+  **不小于**静态声明条数，不钉精确相等。）
 - **构建时显式给版本号**：`android/local.properties` 会缓存
   `flutter.versionName` / `flutter.versionCode`，不显式指定就会打出一个与界面显示
   不一致的包，而且全程不报错
