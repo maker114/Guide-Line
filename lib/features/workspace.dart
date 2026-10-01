@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../core/ids.dart';
 import '../core/json/canonical.dart';
 import '../core/json/document.dart';
@@ -14,6 +16,7 @@ import '../core/rules/archive_zone.dart';
 import '../core/rules/cascade.dart';
 import '../core/rules/completion.dart';
 import '../core/store/app_storage.dart';
+import '../core/store/sha1.dart';
 import '../core/store/ui_prefs.dart';
 import '../core/tree/tree_index.dart';
 import 'workspace_checklist.dart';
@@ -2183,6 +2186,73 @@ class Workspace {
       if (item.id == id) return item;
     }
     return null;
+  }
+
+  /// **本机这一份的内容指纹** —— 对本地数据的规范化文本算 `Sha1` 的前 7 位。
+  ///
+  /// 用途只有一个：GitHub 页顶上那块点阵屏的**下排**（"本机"那一排）。
+  /// 上排摆的是云端提交码（`SyncRecord.commitSha`），两排并排才答得出
+  /// "我这台跟云端是不是同一份"。
+  ///
+  /// 四个口径：
+  ///   · 算的是 [StoreFile.toCanonicalText] —— 全项目**唯一的序列化出口**，
+  ///     所以"同一份数据"必然给同一个指纹，与字段顺序无关；
+  ///   · **但要把易变的信封字段剔掉**（见 [_contentOnlyText]）：`savedAt` 每次保存
+  ///     都会变，把它算进去会让指纹在**没有真实改动时也无故变化** ——
+  ///     那屏上那个号就只是"最后一次保存的时刻"的另一种写法，回答不了
+  ///     "我这份数据是哪一版"。这条是写完测试才发现的（先按 `toCanonicalText`
+  ///     原样算，用例立刻红在"重新载入后指纹变了"）。
+  ///   · **它不等于 GitHub 的内容码**（blob sha）。后者算的是上传的 gzip 字节，
+  ///     而那串字节里带 `exportedAt` 时间戳，本地复现不出来。两排之间
+  ///     **不能靠"码相同"判等**，判等要靠同步记账里的条数比对（见 `analyzeSync`）；
+  ///   · 取前 7 位是为了与 [shortSha] 的惯例一致（点阵屏就是 7 格）。
+  ///     28 bit 不足以做安全用途，只够回答"变了没有"。
+  String localContentSha() =>
+      Sha1.hex(utf8.encode(_contentOnlyText())).substring(0, 7);
+
+  /// 只留**内容**、剔掉信封里易变字段之后,再抹平"写盘会改变写法"的地方。
+  ///
+  /// 两处都要处理,都是写完测试才发现的（第一版直接对 `toCanonicalText()` 算,
+  /// 用例当场红在"重新载入后指纹变了"）：
+  ///
+  ///   ① **`savedAt`** —— "最后写盘时刻",每次保存都变。留着它,指纹就成了
+  ///      时钟的指纹：没有真实改动也会变。
+  ///   ② **十六进制颜色的字母大小写** —— 内存里保留用户/代码给的大小写
+  ///      （`createProject(color: '#AD6868')` 存的就是大写），而从盘上读回来要走
+  ///      [Canonical.normalizeHexColor] 转成小写。于是**同一份数据**
+  ///      "刚改完"与"重新载入后"会算出两个指纹。
+  ///      语义上 `#AD6868` 与 `#ad6868` 是同一个颜色,所以指纹要当它们是同一个。
+  ///      （这里只归一化**指纹的输入**,不动写出逻辑 —— 改写出会让
+  ///      "历史值原样保留"那条契约见 `test/core/contract_evolution_test.dart` 起变化。）
+  ///
+  /// `schemaVersion` 留着：它是格式版本,不是时间,不会自己变。
+  ///
+  /// 为什么每层都走 [Canonical.documentText] 而不是自己 `jsonEncode`：
+  /// 那样会绕开"全项目唯一序列化出口"这条契约,两端就可能对同一份数据算出两个指纹。
+  String _contentOnlyText() {
+    final json = Map<String, dynamic>.from(buildStoreFile().toJson())
+      ..remove('savedAt');
+    return Canonical.documentText(_lowercaseHexColors(json));
+  }
+
+  /// 递归把十六进制颜色字符串统一成小写。
+  ///
+  /// 判据用 [Canonical.hexColorPattern]（`^#[0-9a-f]{6}$`）的**大小写不敏感**版本，
+  /// 而不是"看着像颜色就转"：只有真正合形状的才动,其余字符串一个字节不改。
+  static Object? _lowercaseHexColors(Object? value) {
+    if (value is String) {
+      return Canonical.hexColorPattern.hasMatch(value.toLowerCase())
+          ? value.toLowerCase()
+          : value;
+    }
+    if (value is List) return value.map(_lowercaseHexColors).toList();
+    if (value is Map) {
+      return <String, dynamic>{
+        for (final entry in value.entries)
+          entry.key.toString(): _lowercaseHexColors(entry.value),
+      };
+    }
+    return value;
   }
 }
 

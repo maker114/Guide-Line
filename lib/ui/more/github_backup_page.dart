@@ -263,6 +263,74 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       .map((name) => '${_label(name)} ${counts[name] ?? 0}')
       .join(' · ');
 
+  /// **检查更新**：手动读一次云端、把差异摆出来，**不写任何东西**。
+  ///
+  /// 与 [推送到 GitHub] / [从 GitHub 拉取] 的区别就在这里：
+  ///   · 推送 = 读云端 → 判定 → **写云端**；
+  ///   · 拉取 = 读云端 → 比对 → 确认 → **写本机**；
+  ///   · 检查更新 = 读云端 → 比对 → **只给人看**。
+  ///
+  /// 所以这条路**不碰目录、不碰记账、不碰网**（除了一次只读的 GET），
+  /// 想什么时候点都行 —— 用户问"我这份跟云端差多少"时不必被迫做一个
+  /// 会改数据的决定。
+  ///
+  /// 复用 [AppController.previewGitHubPull]（它本来就是只读的"解出远程那份"），
+  /// 所以校验口径（不是可用备份、读不出数据、没填 Token）与拉取完全一致，
+  /// 不会出现"检查说没事、拉取却拒绝"的分叉。
+  Future<void> _checkUpdates() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _result = null;
+    });
+    final draft = await _draft();
+
+    final preview = await app.previewGitHubPull(draft.config, draft.token);
+    if (!mounted) return;
+    if (preview.remote == null) {
+      setState(() => _busy = false);
+      _setResult(preview.error);
+      return;
+    }
+
+    final remote = preview.remote!;
+    final incoming = _countsText(liveCountsOf(remote.payload!.store));
+    final local = app.ws.buildStoreFile();
+    final current = _countsText(liveCountsOf(local));
+    final commitText = _remoteCommitText(preview.commit);
+
+    final diff = diffStores(base: local, target: remote.payload!.store);
+    if (!diff.hasChanges) {
+      setState(() => _busy = false);
+      _setResult(
+        '云端和这台手机是同一份，没有要更新的东西。\n'
+        '云端：${formatStamp(remote.savedAt)} · $incoming\n'
+        '$commitText',
+      );
+      return;
+    }
+
+    await showStoreDiffSheet(
+      context,
+      diff: diff,
+      title: '云端与这台手机的差别',
+      baseLabel: '这台手机 · 现在这样 · $current',
+      targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
+      // 只读的入口**不放确认按钮**：看完就走，要拉请回上一页按「从 GitHub 拉取」。
+      // 放一个"知道了"是为了让面板有明确的出口，不是因为这里有危险动作。
+      hideConfirm: true,
+      cancelLabel: '知道了',
+      danger: false,
+      note: '$commitText\n\n'
+          // 界面是纯文本、不渲染 Markdown —— 这里不许出现 ** 之类的记号
+          // （`no_markdown_in_ui_test.dart` 守着这条），否则用户会看到星号本身。
+          '这次检查没有改动任何东西：既没写本机、也没写云端、没动备份。\n'
+          '要把云端这份拉到本机，回上一页按「从 GitHub 拉取」。',
+    );
+    if (!mounted) return;
+    setState(() => _busy = false);
+  }
+
   static String _label(DocName name) {
     switch (name) {
       case DocName.projects:
@@ -286,9 +354,41 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         '提交 ${shortSha(record.commitSha)} · 内容码 ${shortSha(record.remoteSha)}';
   }
 
-  /// 这台手机此刻站着的提交码（记账里的那一次上传）。没同步过就是空串，
-  /// 点阵屏收到空串会**整屏变暗** —— 不写"未知"之类的字。
-  String _currentCommitSha() => app.readGitHubSyncRecord()?.commitSha ?? '';
+  /// 记账（读一次，别在 build 里反复读盘）。
+  SyncRecord? _record() => app.readGitHubSyncRecord();
+
+  /// 顶上那块点阵屏：**上排云端提交码、下排本机内容码**。
+  ///
+  /// 两个码**性质不同、不可互判**，所以分成两排而不是"两个并列的号"：
+  ///   · 上排 = 云端那一次上传的**提交码**（`SyncRecord.commitSha`），
+  ///     它答的是"云端现在停在哪一次上传"；
+  ///   · 下排 = 本机这份数据的**内容指纹**（现算），它答的是"我这台是哪一版"。
+  ///
+  /// 为什么下排要现算而不是读记账里那个 `localSha`：记账记的是**上次同步那一刻**
+  /// 的指纹，本地一改它就过期了 —— 而用户看这块屏正是想知道"我现在跟云端一样吗"。
+  /// 现算才会在改动之后立刻变，屏上的两个号不再相等这件事本身就是提示。
+  ///
+  /// ⚠️ 但也**不能反过来靠"两排相等"判断已同步**：上排是 GitHub 的提交码、
+  /// 下排是本地指纹，算法与输入都不同，**本来就永远不相等**。这排屏的作用是
+  /// "各自是谁"，同步与否由下面「上次同步」那行的条数与时间回答。
+  Widget _commitScreen() {
+    final commitSha = _record()?.commitSha ?? '';
+    final localSha = app.localContentSha;
+    return CommitLcd(
+      rows: <CommitLcdRow>[
+        CommitLcdRow(
+          sha: shortSha(commitSha),
+          semanticsLabel: commitSha.isEmpty
+              ? '云端提交码未知，还没同步过'
+              : '云端提交码 ${shortSha(commitSha)}',
+        ),
+        CommitLcdRow(
+          sha: localSha,
+          semanticsLabel: '本机内容码 $localSha',
+        ),
+      ],
+    );
+  }
 
   /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
   static String _remoteCommitText(RemoteCommit? commit) =>
@@ -315,12 +415,13 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: <Widget>[
-                // 最顶上单开的这一格：**这台手机当前站在哪次提交上**。
-                // 不配标题文字 —— 没有提交号时它就是一块熄着的屏，写"未知"
-                // 反而是往界面上摆一句假话（点阵屏自己会说明问题）。
+                // 最顶上单开的这一格：**上排云端、下排本机**（2026-10-02 定的两口径）。
+                // 不配标题文字 —— 没有提交号时那一排就是一片暗点，写"未知"
+                // 反而是往界面上摆一句假话（点阵屏自己会说明问题）；
+                // 哪一排是什么，交给读屏软件那句语义说清。
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: CommitLcd(commitSha: _currentCommitSha()),
+                  child: _commitScreen(),
                 ),
                 SwitchListTile(
                   value: _enabled,
@@ -367,10 +468,18 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                   const Padding(
                     padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
                     child: Text(
-                      '开关关着：推送与拉取均不可用；测试连接是只读的，随时可用。'
+                      '开关关着：推送与拉取均不可用；检查更新与测试连接都是只读的，随时可用。'
                       '这一页不会在未操作时自行联网。',
                     ),
                   ),
+                // 四条按"从只读到会写"排序：看 → 试 → 传上去 → 拉下来。
+                // 两个会改数据的放在后面，且副标题都写明"会不会动数据"。
+                _ActionTile(
+                  icon: Icons.sync_problem_outlined,
+                  title: '检查更新',
+                  subtitle: '读一次云端并逐条比对，只给你看，不动任何数据',
+                  onTap: _busy ? null : _checkUpdates,
+                ),
                 _ActionTile(
                   icon: Icons.wifi_tethering,
                   title: '测试连接',
@@ -380,13 +489,13 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 _ActionTile(
                   icon: Icons.cloud_upload_outlined,
                   title: '推送到 GitHub',
-                  subtitle: '用这台手机的数据覆盖远程备份，不再追问',
+                  subtitle: '用这台手机的数据覆盖云端，不再问第二次',
                   onTap: (_busy || !_enabled) ? null : _push,
                 ),
                 _ActionTile(
                   icon: Icons.cloud_download_outlined,
                   title: '从 GitHub 拉取',
-                  subtitle: '先看条数与时间，再确认覆盖这台手机',
+                  subtitle: '先给你看云端与这台手机的差别，确认后才覆盖',
                   onTap: (_busy || !_enabled) ? null : _pull,
                 ),
                 Padding(

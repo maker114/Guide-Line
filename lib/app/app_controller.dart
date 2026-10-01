@@ -269,6 +269,13 @@ class AppController extends ChangeNotifier {
 
   int? get lastExportedAt => workspace.lastExportedAt;
 
+  /// **本机这一份的内容指纹**（7 位）—— GitHub 页点阵屏**下排**读它。
+  ///
+  /// 是**现算**的、不是记账里的旧值：下排要回答的是"我此刻这份是哪一版"，
+  /// 拿上次同步时记下的旧指纹会让"本地又改过了"这件事在屏上完全看不出来。
+  /// 上排放的是云端提交码（记账里的 `commitSha`），两者职责不同。
+  String get localContentSha => workspace.localContentSha();
+
   /// 「该导出了」的提醒阈值（天）。
   static const int exportReminderDays = 7;
 
@@ -1606,6 +1613,8 @@ class AppController extends ChangeNotifier {
           remoteSha: written.sha,
           recordCount: liveRecordCount(local),
           commitSha: written.commitSha,
+          // 同一刻本机这一份的指纹：点阵屏下排要摆它。
+          localSha: workspace.localContentSha(),
         ),
       );
       notifyListeners();
@@ -1691,6 +1700,8 @@ class AppController extends ChangeNotifier {
         remoteSha: remote.sha,
         recordCount: count,
         commitSha: commit?.sha ?? '',
+        // 拉取之后两端内容一致，本机指纹就在这一刻记下。
+        localSha: workspace.localContentSha(),
       ),
     );
     notifyListeners();

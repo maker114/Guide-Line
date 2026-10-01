@@ -2208,6 +2208,59 @@ void main() {
       expect(isTerminal(NodeStatus.pending), isFalse);
     });
   });
+
+  group('本机内容指纹（点阵屏下排，2026-10-02）', () {
+    // 它是 GitHub 页点阵屏**下排**的数据来源。三条口径要守住：
+    // ① 同一份数据永远给同一个值（否则屏上会无故乱跳）；
+    // ② 数据一变它就变（否则"我改过没有"这件事屏上看不出来）；
+    // ③ 形状是 7 位小写十六进制（点阵只有 7 格，字符集只收 0-9a-f）。
+    test('同一份数据给同一个值，且是 7 位小写十六进制', () {
+      ws.createProject(title: '一个项目');
+      final a = ws.localContentSha();
+      final b = ws.localContentSha();
+      expect(a, b, reason: '现算的指纹必须确定，否则屏上的号会无故乱跳');
+      expect(RegExp(r'^[0-9a-f]{7}$').hasMatch(a), isTrue, reason: '点阵只有 7 格、只收十六进制');
+    });
+
+    test('数据一变，指纹就变', () {
+      ws.createProject(title: '一个项目');
+      final before = ws.localContentSha();
+      ws.createProject(title: '又一个项目');
+      expect(
+        ws.localContentSha(),
+        isNot(before),
+        reason: '指纹不变的话，"本机又改过了"在屏上完全看不出来',
+      );
+    });
+
+    test('同一份数据重新载入后指纹不变（与内存实例无关）', () {
+      // 这条防的是"把对象哈希 / 内存地址混进指纹"这类实现：那样每次载入都会变，
+      // 屏上的下排就永远是新的，用户看不出与云端是否一致。
+      ws.createProject(title: '一个项目');
+      final before = ws.localContentSha();
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(reloaded.localContentSha(), before);
+    });
+
+    test('只改 savedAt（时刻）不改内容时，指纹不变', () {
+      // **这条是写完上面那条之后补的，它钉的是真正的坑**：
+      // 第一版实现直接对 `StoreFile.toCanonicalText()` 算哈希，而那份文本里有
+      // `savedAt`（每次保存都变）。于是指纹在**没有真实改动时也会变** ——
+      // 屏上那个号就只是"最后一次保存时刻"的另一种写法，回答不了
+      // "我这份数据是哪一版"。上面那条用例当场红了（f559f45 → 582e3d6）。
+      ws.createProject(title: '一个项目');
+      final before = ws.localContentSha();
+
+      // 同一个目录、同一份内容，只把 savedAt 往前推 —— 等价于"又存了一次盘"。
+      storage.save(ws.buildStoreFile().copyWith(savedAt: 99999999999999));
+      final reloaded = Workspace.fromLoad(storage, storage.load());
+      expect(
+        reloaded.localContentSha(),
+        before,
+        reason: '指纹只该认内容；把 savedAt 算进去就变成了时钟的指纹',
+      );
+    });
+  });
 }
 
 /// 一份**手写的老数据**：项目带着 `done` / `completed_at`（Q1 之前才会产生的值）。

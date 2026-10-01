@@ -85,6 +85,7 @@ class SyncRecord {
     required this.remoteSha,
     required this.recordCount,
     this.commitSha = '',
+    this.localSha = '',
     this.offlineWarnedOn = '',
   });
 
@@ -97,11 +98,28 @@ class SyncRecord {
   /// 上次同步时两边一致的那一份里有几条活记录。
   final int recordCount;
 
-  /// 上次同步对应的**提交码**（`1.8.5` 及以前的记账没有这一项，读出来是空串）。
+  /// 上次同步对应的**云端提交码**（`1.8.5` 及以前的记账没有这一项，读出来是空串）。
   ///
   /// 空串的含义是**未知**，不是"不一致" —— 老记账文件缺这个字段只说明
   /// "那时还没记"，不能让一次正常的同步被说成双端版本对不上。
+  ///
+  /// 2026-10-02 把口径写明（点阵屏改成两排时）：push 与 pull 两条路写的都是
+  /// **远程那一次提交的 sha**（`written.commitSha` / `latestCommit().sha`），
+  /// 所以这个字段**一直是"云端"那一侧**，从来没有表示过本地。点阵屏上排读它。
   final String commitSha;
+
+  /// 上次同步时**本机这一侧的指纹**（对本地数据的规范化文本算的 `Sha1`）。
+  ///
+  /// 为什么需要它：点阵屏要摆两排（上排云端、下排本机），而 [commitSha] 是云端那个。
+  /// 本地原来**没有任何指纹**，界面上也就无法回答"我这份是哪一版"。
+  ///
+  /// ⚠️ 三个口径，别读错：
+  ///   · 它**不是** GitHub 的内容码（blob sha）。后者算的是**上传的 gzip 字节**，
+  ///     而那串字节里带 `exportedAt` 时间戳，本地复现不出来。两者不能判等。
+  ///   · 空串 = 这条记账建于加这个字段之前，**未知**，不是"不一致"。
+  ///   · 它只是指纹，**丢了不影响任何一条真实记录** —— 与 [offlineWarnedOn]
+  ///     同一个性质：最坏是点阵屏下排暗着，数据一个字都不少。
+  final String localSha;
 
   /// 「GitHub 未连接」那条警告**当天已经弹过一次**的日期（`YYYY-MM-DD`）。
   ///
@@ -122,12 +140,14 @@ class SyncRecord {
       if (syncedAt is! int || sha is! String || count is! int) return null;
       if (sha.isEmpty || syncedAt <= 0 || count < 0) return null;
       final commit = root['commitSha'];
+      final local = root['localSha'];
       final warned = root['offlineWarnedOn'];
       return SyncRecord(
         syncedAt: syncedAt,
         remoteSha: sha,
         recordCount: count,
         commitSha: commit is String ? commit : '',
+        localSha: local is String ? local : '',
         offlineWarnedOn: warned is String ? warned : '',
       );
     } catch (_) {
@@ -142,6 +162,7 @@ class SyncRecord {
         'recordCount': recordCount,
         // 未知就不写出去：与"空值不写出"的契约口径一致。
         if (commitSha.isNotEmpty) 'commitSha': commitSha,
+        if (localSha.isNotEmpty) 'localSha': localSha,
         if (offlineWarnedOn.isNotEmpty) 'offlineWarnedOn': offlineWarnedOn,
       });
 
@@ -150,6 +171,7 @@ class SyncRecord {
     String? remoteSha,
     int? recordCount,
     String? commitSha,
+    String? localSha,
     String? offlineWarnedOn,
   }) =>
       SyncRecord(
@@ -157,6 +179,7 @@ class SyncRecord {
         remoteSha: remoteSha ?? this.remoteSha,
         recordCount: recordCount ?? this.recordCount,
         commitSha: commitSha ?? this.commitSha,
+        localSha: localSha ?? this.localSha,
         offlineWarnedOn: offlineWarnedOn ?? this.offlineWarnedOn,
       );
 }

@@ -1,6 +1,21 @@
 import 'package:flutter/material.dart';
 
-/// 提交号的 **LCD 点阵屏**（7 格，每格 7×9 点）。
+/// 点阵屏上的一排：一个短码 + 它的语义标签。
+///
+/// [semanticsLabel] 是**给读屏软件**的整句（例如"云端提交码 a1b2c3d"）。
+/// [sha] 只放前 7 位十六进制 —— 这与 [shortSha] 的位数一致，
+/// **调用方必须自己先收口**，别把完整 sha 递进来（那会让读屏软件念 40 个字符）。
+class CommitLcdRow {
+  const CommitLcdRow({required this.sha, required this.semanticsLabel});
+
+  /// 短码（前 7 位十六进制）。空串 = 这一排整排暗着。
+  final String sha;
+
+  /// 读屏软件念的那句话。
+  final String semanticsLabel;
+}
+
+/// 提交号的 **LCD 点阵屏**（每排 7 格，每格 7×9 点）。
 ///
 /// 为什么用点阵而不是普通文字：这一格回答的是"我现在跟着的是哪一次上传"，
 /// 七位十六进制码本来就没有语义、只能逐位比 —— 点阵比字体更像"设备上读出来的号"，
@@ -15,13 +30,17 @@ import 'package:flutter/material.dart';
 ///   · 外壳就是一张**普通卡片**（`AppShapes.card` 的圆角 + `elevation: 1`，与灵感页那张
 ///     速记卡片同一档），不另配色。原来那版是"浅灰底 + 细描边 + 圆角 10"，
 ///     摆在卡片流里像另一个软件里的零件。
+///
+/// 2026-10-02 改成**多排**：GitHub 页要并排摆"云端"与"本机"两个码，
+/// 所以里层从"一排"变成"若干排竖向叠放"，每排的语义各说各的。
+/// 一排仍然是 7 格 —— 与 [shortSha] 的位数一致，**两处都得是 7，否则对不上号**。
 class CommitLcd extends StatelessWidget {
-  const CommitLcd({super.key, required this.commitSha, this.cellCount = 7});
+  const CommitLcd({super.key, required this.rows, this.cellCount = 7});
 
-  /// 提交码（前 7 位十六进制）。空串 / null / 越界字符都按"这一格不亮"处理。
-  final String? commitSha;
+  /// 从上到下的若干排。
+  final List<CommitLcdRow> rows;
 
-  /// 格数。默认 7 —— 与 `shortSha` 的位数一致，两处都得是 7，否则对不上号。
+  /// 每排的格数。默认 7 —— 与 `shortSha` 的位数一致，两处都得是 7，否则对不上号。
   final int cellCount;
 
   /// 每格的列数（宽）。
@@ -33,6 +52,9 @@ class CommitLcd extends StatelessWidget {
   /// 格与格之间空一列，点才不会连成一片。
   static const int cellGap = 1;
 
+  /// 排与排之间的间距（px）。
+  static const double rowGap = 10;
+
   /// 一行点阵的总列数（画家据此把宽度换算成点的大小）。
   static int columnsFor(int cellCount) =>
       cellCount * cellWidth + (cellCount - 1) * cellGap;
@@ -40,24 +62,30 @@ class CommitLcd extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final sha = (commitSha ?? '').trim();
-    final chars = List<String>.generate(
-      cellCount,
-      (index) => index < sha.length ? sha[index] : ' ',
-    );
-    return Semantics(
-      // 点阵对读屏软件等于空白：把这段语义留给无障碍
-      label: sha.isEmpty ? '当前没有提交号' : '当前提交号 $sha',
-      child: Card(
-        elevation: 1,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    final lines = <Widget>[];
+    for (var index = 0; index < rows.length; index++) {
+      final row = rows[index];
+      final sha = row.sha.trim();
+      final chars = List<String>.generate(
+        cellCount,
+        (i) => i < sha.length ? sha[i] : ' ',
+      );
+      if (index > 0) lines.add(const SizedBox(height: rowGap));
+      lines.add(
+        Semantics(
+          // 点阵对读屏软件等于空白：这一排是什么意思，只能靠这句话说。
+          label: row.semanticsLabel,
+          // **两排必须各是一个语义节点**（2026-10-02 实测定下来）。
+          // 不加这一行时，Column 会把两排的 label 用换行拼成一个节点，
+          // 读屏软件连成一句念："云端提交码 a1b2c3d 本机内容码 9f8e7d6" ——
+          // 两句糊在一起就分不出哪个是云端哪个是本机了。
+          explicitChildNodes: true,
+          container: true,
           child: LayoutBuilder(
             builder: (context, constraints) {
               final dot = constraints.maxWidth / columnsFor(cellCount);
-              final height = dot * cellHeight;
               return SizedBox(
-                height: height,
+                height: dot * cellHeight,
                 width: constraints.maxWidth,
                 child: CustomPaint(
                   painter: CommitLcdPainter(
@@ -71,6 +99,13 @@ class CommitLcd extends StatelessWidget {
             },
           ),
         ),
+      );
+    }
+    return Card(
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(children: lines),
       ),
     );
   }

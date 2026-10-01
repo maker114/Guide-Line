@@ -422,7 +422,7 @@ void main() {
       expect(app.readGitHubSyncRecord(), isNull);
     });
 
-    testWidgets('同步过一次之后：屏上那串就是记账里存的提交号', (tester) async {
+    testWidgets('同步过一次之后：上排是记账里的云端提交码，且只念 7 位', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
         commit: RemoteCommit(sha: 'abc1234def5678'),
@@ -437,12 +437,123 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(app.readGitHubSyncRecord()!.commitSha, 'abc1234def5678');
+      // 2026-10-02 改：这条断言原来要求标签里给**完整 40 位**，而那正是缺陷本身 ——
+      // 点阵只有 7 格（静默截断，看着没事），标签却把整串递给读屏软件念。
+      // 所以这条从"帮凶"改成"守卫"：**只认 7 位短码**。
       expect(
-        find.bySemanticsLabel('当前提交号 abc1234def5678'),
+        find.bySemanticsLabel('云端提交码 abc1234'),
         findsOneWidget,
-        reason: '点阵是画出来的，读屏只能靠语义标签；标签要给完整提交号',
+        reason: '点阵是画出来的，读屏只能靠语义标签；位数必须与 7 格一致',
+      );
+      expect(
+        find.bySemanticsLabel(RegExp(r'\w{8,}')),
+        findsNothing,
+        reason: '语义句里出现 8 位以上的连续码，就说明有人把完整 sha 递进来了',
+      );
+      // 下排是本机内容码，与上排不是一个东西
+      expect(
+        find.bySemanticsLabel(RegExp(r'^本机内容码 [0-9a-f]{7}$')),
+        findsOneWidget,
+        reason: '下排要摆本机指纹，现算的',
       );
       handle.dispose();
+    });
+
+    // ---------------------------------------------------------- 检查更新（2026-10-02）
+
+    testWidgets('检查更新：两边一样时直说"没有要更新的东西"，且一个字节都不写', (tester) async {
+      // 这一组钉的是「检查更新」的**只读**性质。它是全页唯一"看了不改"的入口，
+      // 所以两件事都要证：① 它真的读了云端；② 它**没写任何东西**
+      // （没写本机、没写记账、没写云端）。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      await openPage(tester, app);
+
+      // 先拉一次，让本机与云端成为同一份（否则下面会走"有差别"那一支）。
+      await tapAction(tester, '从 GitHub 拉取');
+      await tester.tap(find.text('拉取并覆盖'));
+      await tester.pumpAndSettle();
+
+      final writesBefore = gateway.writeCount;
+      final recordBefore = app.readGitHubSyncRecord()!.syncedAt;
+      final readsBefore = gateway.readCount;
+
+      await tapAction(tester, '检查更新');
+      await tester.pumpAndSettle();
+
+      expect(
+        gateway.readCount,
+        greaterThan(readsBefore),
+        reason: '它必须真的去读一次云端，不能只看本地记账就说"一样"',
+      );
+      expect(gateway.writeCount, writesBefore, reason: '检查更新**绝不许**写云端');
+      expect(
+        app.readGitHubSyncRecord()!.syncedAt,
+        recordBefore,
+        reason: '记账不该被动过 —— 检查不是同步',
+      );
+      expect(
+        find.textContaining('没有要更新的东西'),
+        findsOneWidget,
+        reason: '两边一样时要说清"没什么可更新的"，而不是摆一个空面板',
+      );
+    });
+
+    testWidgets('检查更新：有差别时摆出逐条差异，但不给"覆盖"按钮', (tester) async {
+      // 云端与本地内容不同 → 摆面板；而**面板上不许有会改数据的按钮**，
+      // 否则这个"只读入口"就变成了一个伪装成只读的覆盖入口。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 5)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      await openPage(tester, app);
+
+      await tapAction(tester, '检查更新');
+      // `pumpAndSettle` 会超时：差异面板是**一直开着**的（等用户点"知道了"），
+      // 只要它开着就有持续的重建，settle 永远等不到。本文件其它面板用例
+      // 同样只用一次 `pump()`。
+      await tester.pump();
+
+      expect(find.text('云端与这台手机的差别'), findsOneWidget);
+      expect(
+        find.text('知道了'),
+        findsOneWidget,
+        reason: '只读面板的出口是"知道了"',
+      );
+      expect(
+        find.text('拉取并覆盖'),
+        findsNothing,
+        reason: '只读入口不许出现会覆盖本机的按钮',
+      );
+    });
+
+    testWidgets('检查更新在开关关着时也能用（只读入口不依赖开关）', (tester) async {
+      // 推送 / 拉取在开关关着时是禁用的（它们会写）。检查更新只读，不该跟着禁用 ——
+      // 否则用户想"就看看云端有什么"也得先把自动同步打开。
+      //
+      // 判据看的是 `onTap` 是不是 null：`_ActionTile` 禁用就是把手势摘掉
+      // （`ListTile.onTap: null`），**没有** `enabled` 这个参数。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await openPage(tester, app);
+
+      ListTile tileOf(String title) => tester.widget<ListTile>(
+        find.ancestor(of: find.text(title), matching: find.byType(ListTile)),
+      );
+
+      expect(tileOf('检查更新').onTap, isNotNull, reason: '只读入口不该被开关禁用');
+      expect(tileOf('测试连接').onTap, isNotNull, reason: '测试连接也是只读的');
+      expect(tileOf('推送到 GitHub').onTap, isNull, reason: '开关关着，推送要禁用');
+      expect(tileOf('从 GitHub 拉取').onTap, isNull, reason: '开关关着，拉取要禁用');
     });
   });
 }

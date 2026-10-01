@@ -172,12 +172,12 @@ Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。
 
 ```powershell
 flutter analyze --no-pub    # 必须 0 问题
-flutter test --no-pub       # 必须全绿（当前约 881 例，精确条数以命令输出为准）
+flutter test --no-pub       # 必须全绿（当前约 902 例，精确条数以命令输出为准）
 flutter build apk --release     # 手机端产物 build/app/outputs/flutter-apk/app-release.apk
 flutter build windows --release # 电脑端产物 build/windows/x64/runner/Release/guideline.exe
 ```
 
-- **跑测试很快**：全量约 881 例约 **34 秒**，`analyze` 约 **6 秒**。
+- **跑测试很快**：全量约 902 例约 **34 秒**，`analyze` 约 **6 秒**。
   所以"少跑点测试"省不下什么，别往那个方向优化。
   （上下两处的"约 876"是同一个估计值；**精确条数以 `flutter test` 的输出为准** ——
   静态数出来的声明条数与命令打印的 `+N` 本来就不是一个数，循环里会生成用例。
