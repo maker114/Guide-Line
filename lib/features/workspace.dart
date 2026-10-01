@@ -16,6 +16,14 @@ import '../core/rules/completion.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/ui_prefs.dart';
 import '../core/tree/tree_index.dart';
+import 'workspace_state.dart';
+
+// 状态搬到 `workspace_state.dart` 之后，`Workspace` 对外**仍然要看起来和以前一样**：
+// `AppStorage` 与 `UiPrefs` 以前能从本文件借出去（同库 import 传递），
+// 关掉就会让一批只 `import 'workspace.dart'` 的调用方与测试突然编不过。
+// 这不是新暴露的 API，是**保持原有的可见性**。
+export '../core/store/app_storage.dart' show AppStorage, LoadReport;
+export '../core/store/ui_prefs.dart' show UiPrefs;
 
 /// 业务规则被违反（"用户不能这么做"），不是程序错误。
 class RuleViolation implements Exception {
@@ -162,21 +170,34 @@ const int searchHitLimit = 100;
 ///
 /// 单机形态下**没有任何网络/同步逻辑**（原双端方案的同步引擎已随归档搁置）。
 class Workspace {
-  Workspace._(this._storage, this._docs, this._prefs);
+  Workspace._(this._state);
 
   factory Workspace.fromLoad(AppStorage storage, LoadReport report) {
     return Workspace._(
-      storage,
-      <DocName, Document>{
-        for (final name in DocName.values) name: report.store.documentOf(name),
-      },
-      report.prefs,
+      WorkspaceState(
+        storage: storage,
+        documents: <DocName, Document>{
+          for (final name in DocName.values) name: report.store.documentOf(name),
+        },
+        prefs: report.prefs,
+      ),
     );
   }
 
-  final AppStorage _storage;
-  final Map<DocName, Document> _docs;
-  UiPrefs _prefs;
+  /// 共享状态（文档集合 + 偏好 + 存储句柄 + 底层改动通道）。
+  ///
+  /// 它是《workspace-拆分-结论》§3 方向 A 的第一步：**先让状态库内可见，
+  /// 业务逻辑才搬得走**。现状是"只有状态搬过去了" —— 本类的 89 个方法
+  /// 一个都还没搬，读起来与迁移前一样长。
+  final WorkspaceState _state;
+
+  Map<DocName, Document> get _docs => _state.documents;
+
+  UiPrefs get _prefs => _state.prefs;
+
+  set _prefs(UiPrefs value) => _state.prefs = value;
+
+  void _upsert(DocName name, Entity entity) => _state.upsert(name, entity);
 
   // ---------------------------------------------------------------- 只读视图
 
@@ -2140,19 +2161,19 @@ class Workspace {
   /// 记录一次显式展开 / 收起（默认值由 UI 按节点状态算，不写进偏好）。
   void setExpanded(String id, {required bool expanded}) {
     _prefs = _prefs.withExpanded(id, expanded: expanded);
-    _storage.savePrefs(_prefs);
+    _state.storage.savePrefs(_prefs);
   }
 
   void setLastTab(int index) {
     if (_prefs.lastTabIndex == index) return;
     _prefs = _prefs.copyWith(lastTabIndex: index);
-    _storage.savePrefs(_prefs);
+    _state.storage.savePrefs(_prefs);
   }
 
   /// 记下"刚刚成功导出过"（用于「超过 7 天没导出」的提醒）。
   void markExported(int millis) {
     _prefs = _prefs.copyWith(lastExportedAt: millis);
-    _storage.savePrefs(_prefs);
+    _state.storage.savePrefs(_prefs);
   }
 
   /// 直接替换整套界面偏好并落盘。
@@ -2161,13 +2182,13 @@ class Workspace {
   /// 逐个写 setter 不划算，统一走这里。
   void updatePrefs(UiPrefs next) {
     _prefs = next;
-    _storage.savePrefs(_prefs);
+    _state.storage.savePrefs(_prefs);
   }
 
   int? get lastExportedAt => _prefs.lastExportedAt;
 
   /// 数据目录（供设置页展示）
-  String get dataDirectoryPath => _storage.paths.describe();
+  String get dataDirectoryPath => _state.storage.paths.describe();
 
   /// 当前的完整数据快照（导出用）。
   StoreFile buildStoreFile() => StoreFile(documents: _docs, savedAt: Ids.nowMillis());
@@ -2190,8 +2211,8 @@ class Workspace {
 
   /// 原子落盘：**整份数据一次写入**（单文件让跨实体变更天然原子）。
   void persist() {
-    _storage.save(buildStoreFile());
-    _storage.savePrefs(_prefs);
+    _state.storage.save(buildStoreFile());
+    _state.storage.savePrefs(_prefs);
   }
 
   /// 手动触发一次备份轮转（导入、批量操作前可调用）。
@@ -2200,7 +2221,7 @@ class Workspace {
   /// 普通保存的轮转按"编辑会话 / 最小间隔"节流（Q3），而这里正是**用户显式
   /// 要求"现在留一份"**的场景 —— 被节流拦下就等于这句承诺落空。
   void snapshotNow() {
-    _storage.save(buildStoreFile(), forceRotate: true);
+    _state.storage.save(buildStoreFile(), forceRotate: true);
   }
 
   // ---------------------------------------------------------------- 内部
@@ -2240,17 +2261,6 @@ class Workspace {
       if (item.id == id) return item;
     }
     return null;
-  }
-
-  void _upsert(DocName name, Entity entity) {
-    final items = List<Entity>.from(documentOf(name).items);
-    final index = items.indexWhere((e) => e.id == entity.id);
-    if (index >= 0) {
-      items[index] = entity;
-    } else {
-      items.add(entity);
-    }
-    _docs[name] = documentOf(name).copyWith(items: items);
   }
 }
 

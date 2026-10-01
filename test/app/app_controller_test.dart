@@ -11,9 +11,7 @@ import 'package:guideline/core/models/entity.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
-import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/core/store/merge.dart';
-import 'package:guideline/core/store/ui_prefs.dart';
 import 'package:guideline/features/workspace.dart';
 
 import '../support/readonly_dir.dart';

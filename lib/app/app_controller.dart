@@ -15,7 +15,6 @@ import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
 import '../core/store/github_sync.dart';
 import '../core/store/store_diff.dart';
-import '../core/store/ui_prefs.dart';
 import '../features/workspace.dart';
 import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';

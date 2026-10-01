@@ -35,6 +35,60 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.0.0] - 2026-10-01
+
+> 这一版**不改任何行为**，改的是 `Workspace` 的**内部形状**：
+> 把它的共享状态搬进一个独立的容器（`lib/features/workspace_state.dart`）。
+>
+> 为什么值得单独升一位：`Workspace` 现在 2257 行、89 个公开方法，
+> 是仓库里唯一一个被自己记成"最大结构债"的地方（《workspace-拆分-结论》）。
+> 而它拆不动的**真正原因不是方法多，是一个共享的私有改动通道** ——
+> 几乎每个写方法都要读文档集合、过 `_upsert`（全文件被引用 61 次）、有时改偏好，
+> 这三样都是它的私有成员。Dart 里一个类只能待在一个文件中
+> （`part` 与 `extension` 两条路都试过、都被 `analyze` 否决，见该文档 §2），
+> 所以**私有状态不搬出来，任何一段业务逻辑都搬不走**。这一版搬的就是它。
+>
+> **现状要说清楚：只有状态搬过去了，89 个业务方法一个都还没搬。**
+> 所以这一版**不带来任何可读性收益**（`workspace.dart` 反而多了 10 行），
+> 它唯一的产出是"下一步成为可能"。它是地基，不是重构本身。
+
+### Changed
+
+- **`Workspace` 的共享状态搬进 `WorkspaceState`**（新增 `lib/features/workspace_state.dart`，88 行）：
+  文档集合、界面偏好、存储句柄、以及按 id 覆盖或追加记录的底层通道
+  （原 `Workspace._upsert` → `WorkspaceState.upsert`）。规则一条都没进去 ——
+  判据是"这一段有没有业务含义"：`upsert` 只是"按 id 换掉或塞进去"，
+  而它那 61 个**调用方**各自带着规则，仍旧留在 `Workspace` 里
+- **对外零改动**：门面保留全部 89 个方法的同名同签名，方法体改走状态容器。
+  因此 `lib/ui` 与 `lib/app` 上的 **228 个调用点**与 `workspace_test.dart` 里
+  **669 处直接调用一行都不用改** —— 这也是本次能拿现有 812 条用例当安全网的前提
+- 原有私有访问以转发成员保持**语义与名字不变**：`_docs` / `_prefs`（含 setter）/
+  `_upsert` 都还在原处被引用，只是背后指向状态容器
+- `Workspace` 对外的**可见性**保持不变：`AppStorage` 与 `UiPrefs` 以前能从本文件
+  借出去（同库 import 传递），现在用两条 `export` 显式维持 —— 否则只
+  `import 'workspace.dart'` 的调用方与测试会突然编不过。这不是新暴露的 API
+- 清掉 4 处因上述 export 而变成多余的 import（`app_controller.dart`、
+  `workspace_test.dart`、`app_controller_test.dart`、`tool/demo_verify.dart`）
+
+### Added
+
+- 新增 `lib/features/workspace_state.dart`（88 行）：只装状态与最底层的读写，
+  不含任何业务规则。它是《workspace-拆分-结论》§3「方向 A」的第一步，
+  也是后续每一块业务逻辑能各自成文件的前提
+
+### 验证
+
+行为零改动，依据是三条：
+
+- `flutter analyze --no-pub`：No issues found
+- `flutter test --no-pub`：**830 次通过**，与迁移前是同一批用例、同一条结果
+  （其中含 `workspace_test.dart` 里 669 处直接调 `Workspace` 的用例）
+- 序列化与契约回归（`json_contract_test` / `contract_evolution_test` /
+  `contract_negative_test`）全绿 —— 状态搬迁若碰错了文档集合，
+  逐字节的契约样本会立刻红
+
+净行数：`workspace.dart` 2257 → **2267**，`workspace_state.dart` **88**（新增）。
+
 ## [1.12.1] - 2026-10-01
 
 > 这一版修的是**自动上传那条路上的"说假话"与"白干活"**。挑三件最要紧的说：

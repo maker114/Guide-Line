@@ -13,7 +13,6 @@ import 'package:guideline/core/models/project_palette.dart';
 import 'package:guideline/core/rules/archive_zone.dart';
 import 'package:guideline/core/rules/completion.dart';
 import 'package:guideline/core/store/app_paths.dart';
-import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/features/workspace.dart';
 
 /// 业务逻辑层（`Workspace`）测试 —— 由归档的电脑端工程移植到**手机单机版**。

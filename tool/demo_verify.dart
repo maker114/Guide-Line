@@ -13,7 +13,6 @@ import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/core/models/event.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/app_paths.dart';
-import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/core/store/export_codec.dart';
 import 'package:guideline/features/workspace.dart';
 import 'package:guideline/ui/events/task_fold.dart';
