@@ -163,4 +163,40 @@ void main() {
       }
     }
   });
+
+  group('中文字体的兜底链', () {
+    test('主题带兜底链，且**不设** fontFamily（西文仍走平台默认）', () {
+      for (final brightness in Brightness.values) {
+        final theme = themeOf('default', brightness);
+        expect(theme.textTheme.bodyMedium?.fontFamilyFallback, cjkFontFallback,
+            reason: '不设兜底链时，Windows 上中文会落到宋体系（笔画细、有衬线）');
+        // 注意：`fontFamily` 不需要（也不该）在这里断言成 null ——
+        // 测试环境的平台默认字体是 Roboto，真机 Windows 上是 Segoe UI。
+        // 这条只要守住"我们没有**主动**去设一支中文当主字体"即可。
+        expect(theme.textTheme.bodyMedium?.fontFamily, anyOf(isNull, 'Roboto'),
+            reason: '主动设 fontFamily 会把西文从平台默认上拽走');
+
+        // 兜底链要真的落在**用得到的**那些样式上，而不只是 ThemeData 上的一个字段
+        for (final style in <TextStyle?>[
+          theme.textTheme.bodyMedium,
+          theme.textTheme.titleMedium,
+          theme.textTheme.headlineSmall,
+          theme.textTheme.labelLarge,
+        ]) {
+          expect(style?.fontFamilyFallback, cjkFontFallback,
+              reason: '${style?.fontSize} 这条样式没吃到兜底链');
+        }
+      }
+    });
+
+    test('兜底链第一支是雅黑，且不重复', () {
+      expect(cjkFontFallback.first, 'Microsoft YaHei UI');
+      expect(cjkFontFallback.toSet().length, cjkFontFallback.length,
+          reason: '有重复项说明这支白列了');
+      // 每一支都得是"可能存在的字体名"，空串会变成永远命不中的空档
+      for (final family in cjkFontFallback) {
+        expect(family.trim(), isNotEmpty);
+      }
+    });
+  });
 }

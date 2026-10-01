@@ -96,6 +96,8 @@ secrets.json
 
 # ---------- 日志与临时文件 ----------
 *.log
+# 构建 / 测试的原始输出（`flutter test > test_all.txt` 之类）——可再生成，不入库
+test_all.txt
 npm-debug.log*
 yarn-error.log*
 coverage/
@@ -117,3 +119,5 @@ dist/
 # ---------- 本地工具链（不入库）----------
 # Flutter / Dart SDK 若安装在工作区内，放这里
 .tools/
+# Widget Preview related
+.widget_preview/

@@ -182,7 +182,7 @@ void main() {
 
     test('只有本地改过（本地比记账新、远程比记账旧）→ 推', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t2),
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t1)),
         lastSync: SyncRecord(syncedAt: t1, remoteSha: 'sha-1', recordCount: 2),
@@ -195,7 +195,7 @@ void main() {
       final plan = analyzeSync(
         local: storeWith(savedAt: t1),
         localSavedAt: t1,
-        remote: remoteOf(storeWith(savedAt: t2)),
+        remote: remoteOf(storeWith(savedAt: t2, inspirations: 2)),
         lastSync: SyncRecord(syncedAt: t1, remoteSha: 'sha-1', recordCount: 2),
       );
       expect(plan.action, SyncAction.pull);
@@ -204,7 +204,7 @@ void main() {
 
     test('两边都改过 → 退回 bothChanged，且明确写着不会自动合并', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t2),
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t2 + 1)),
         lastSync: SyncRecord(syncedAt: t1, remoteSha: 'sha-1', recordCount: 2),
@@ -216,7 +216,7 @@ void main() {
 
     test('没有记账时基线取 0，两边都算改过 → bothChanged', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t1),
+        local: storeWith(savedAt: t1, inspirations: 2),
         localSavedAt: t1,
         remote: remoteOf(storeWith(savedAt: t2)),
         lastSync: null,
@@ -225,11 +225,12 @@ void main() {
     });
 
     test('谁都没动过（上次同步之后两边都没改）→ noChange，不许说成两边都改过', () {
+      // 活着的内容一模一样，只有**墓碑**不同：这样内容闸门放行，
+      // 一路走到按时间戳判定的那一步 —— 这条要验的正是那一步。
       final plan = analyzeSync(
         local: storeWith(savedAt: t1),
         localSavedAt: t1,
-        // 两个时间戳故意错开：相等的那条走的是上面那个更早的分支
-        remote: remoteOf(storeWith(savedAt: t1 - 60000)),
+        remote: remoteOf(storeWith(savedAt: t1 - 60000, tombstones: 1)),
         lastSync: SyncRecord(syncedAt: t2, remoteSha: 'sha-1', recordCount: 2),
       );
       expect(plan.action, SyncAction.noChange);
@@ -408,7 +409,9 @@ void main() {
   group('需求④：云端提交码对得上就直接覆盖（ADR-093）', () {
     test('对得上：推，并挂上 trustedOverwrite（自动与手动都不再追问）', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t2),
+        // 内容必须**真的**不一样：提交码对得上只是"没人动过云端"，
+        // 内容一字不差时连提交都不该发（内容闸门，见下面那条）。
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t1)),
         lastSync: SyncRecord(
@@ -430,9 +433,49 @@ void main() {
       expect(plan.message, contains('没有第三方改动'));
     });
 
-    test('对不上：还是普通推，要不要摆面板由上层按老规矩来', () {
+    test('内容闸门：提交码对不上但内容一字不差时也不推（需求③）', () {
+      // 正是用户报的那一种：刚从 GitHub 拉回来，本地时间戳被顶成"刚改过"，
+      // 提交码和记账对不上 —— 只看提交码就会把同一份内容再提交一次。
       final plan = analyzeSync(
         local: storeWith(savedAt: t2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-old',
+        ),
+        remoteCommitSha: 'commit-new',
+      );
+
+      expect(plan.action, SyncAction.noChange);
+      expect(plan.trustedOverwrite, isFalse);
+      expect(plan.message, contains('内容'));
+      expect(plan.message, contains('不需要推送也不需要拉取'));
+    });
+
+    test('内容闸门：真改过一条就不再是 noChange', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2, inspirations: 2),
+        localSavedAt: t2,
+        remote: remoteOf(storeWith(savedAt: t1)),
+        lastSync: SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-1',
+          recordCount: 2,
+          commitSha: 'commit-old',
+        ),
+        remoteCommitSha: 'commit-new',
+      );
+
+      expect(plan.action, SyncAction.push, reason: '本地确实多了一条灵感');
+      expect(plan.trustedOverwrite, isFalse, reason: '提交码对不上，得按老规矩摆面板');
+    });
+
+    test('对不上：还是普通推，要不要摆面板由上层按老规矩来', () {
+      final plan = analyzeSync(
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t1)),
         lastSync: SyncRecord(
@@ -474,7 +517,7 @@ void main() {
 
     test('老记账没有提交码：不算对得上，回到老规矩', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t2),
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t1)),
         lastSync: SyncRecord(syncedAt: t1, remoteSha: 'sha-1', recordCount: 2),
@@ -486,7 +529,7 @@ void main() {
 
     test('云端提交码读不到（空串）：同样不算对得上', () {
       final plan = analyzeSync(
-        local: storeWith(savedAt: t2),
+        local: storeWith(savedAt: t2, inspirations: 2),
         localSavedAt: t2,
         remote: remoteOf(storeWith(savedAt: t1)),
         lastSync: SyncRecord(

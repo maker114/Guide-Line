@@ -1,4 +1,4 @@
-# GuideLine 静态分析配置（Android 单机版）。
+# GuideLine 静态分析配置。
 #
 # 分层边界（ADR-024）**不靠 lint**，而是靠 `test/core/architecture_test.dart`
 # 扫描源码守护 —— 这样零额外依赖，且违反时给的是测试失败而不是一条可被忽略的提示。
@@ -11,6 +11,12 @@ analyzer:
     - android/**
     - .tools/**
     - .dart_tool/**
+    - windows/**
+    # `archive/desktop-v1/` 是**归档快照**，只作参考、不参与构建：
+    # 它自己的 `lib` 引用的是两年前的契约（`Workspace.pendingTx`、四文档信封等），
+    # 在今天的 `lib/` 上必然报一堆"未定义"。它不是待修代码，所以整目录排除。
+    # （它自带 `analysis_options.yaml`，单独 `cd` 进去分析仍然有效。）
+    - archive/**
   errors:
     # 未 await 的 Future 是真 bug 温床（本项目出过异常逃逸的问题）
     unawaited_futures: error

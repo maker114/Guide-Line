@@ -1,9 +1,9 @@
 # GuideLine
 
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
-当前形态是 **Android 单机版**，用 Flutter 写，数据全部留在你自己的手机上。
+当前形态是 **Android 单机版 + Windows 桌面版**，用 Flutter 写，数据全部留在你自己这台设备上（手机一份、电脑一份，互不通信）。
 
-当前版本 **1.11.1+46** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
+当前版本 **1.12.0+47** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 [它是什么](#它是什么) · [设计原则](#设计原则) · [功能](#功能) · [技术](#技术) · [快速开始](#快速开始) · [开发](#开发) · [文档](#文档)
 
@@ -40,14 +40,17 @@
 
 ## 功能
 
-底部四个 Tab。
+**同一个 exe / 同一个 App，按窗口宽度换外壳**：窄了是底部四个 Tab（手机那套），
+宽度到 840 以上换成**左侧栏 + 一条整体标题栏**（电脑那套）。侧栏把手机上挤在
+「更多」里的入口（今天 / 本周、全部任务、搜索、归档区、设置）各给一格。
+两侧的页面与业务规则是同一份，只有外壳不同。
 
-| Tab | 干什么 |
+| Tab（手机）/ 侧栏项（电脑） | 干什么 |
 |---|---|
 | **灵感** | 速记、逐条原地编辑、打标签并按标签筛选、长按多选批量分配 / 丢弃 / 删除、多条一起合并进项目 |
 | **项目** | 项目树最多三层，每个项目有目的、实现清单、标识色；同时看到这个项目下待处理的灵感 |
 | **事件** | 一条事件 = 一条任务线：主线按顺序走，节点下挂子任务；进度、搁置、归档 |
-| **更多** | 接下来的任务、全部任务、全局搜索、归档区、主题与背景、备份与恢复、导出 / 导入 |
+| **更多**（电脑上是分开的「今天 / 本周」「全部任务」「搜索」「归档区」「设置」） | 接下来的任务、全部任务、全局搜索、归档区、主题与背景、备份与恢复、导出 / 导入 |
 
 ### 灵感：速记 → 归类 → 合并
 
@@ -107,7 +110,7 @@ lib/
   core/       数据层与规则 —— 纯 Dart，禁止 import Flutter
   features/   业务逻辑，Workspace 装全部业务规则
   app/        应用装配与动作门面
-  ui/         界面，手机外壳加各 Tab
+  ui/         界面，两套外壳（手机底部四格 / 电脑侧栏）加各 Tab 与页面
   platform/   平台适配 —— 唯一允许出现平台判断与插件的地方
 docs/         契约、口径、计划与工程说明
 test/         契约回归、规则、存储、架构边界、界面与外壳
@@ -136,6 +139,8 @@ Flutter import、插件出现在 `lib/platform` 之外，测试就会失败。
 
 Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。运行时依赖只有五个：
 `path_provider`、`share_plus`、`file_picker`、`http`、`flutter_secure_storage`。
+五个都有 Windows 实现，所以电脑端不额外引任何依赖（`jni`、`url_launcher_windows` 等
+是它们带进来的传递依赖）。
 
 ## 快速开始
 
@@ -144,19 +149,30 @@ Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。运行�
 从 [Releases](https://github.com/maker114/Guide-Line/releases) 下载 `guideline-*.apk` 装到手机上。
 **升级安装不会丢数据**（同包名同签名，老数据零迁移）。
 
+电脑端用 `guideline-windows-*.zip`：解压后整个目录一起放着，双击 `guideline.exe` 即可，
+不写注册表、不需要安装。数据在 `%LOCALAPPDATA%\GuideLine`，删掉目录就等于彻底卸载。
+它与手机端**各存各的**，要搬数据走"导出 / 导入"。
+（这个 zip 目前还没随版本发出去 —— 先自己 `flutter build windows --release` 构建。）
+
 ## 开发
 
 ```powershell
 flutter analyze --no-pub    # 必须 0 问题
-flutter test --no-pub       # 必须全绿（当前 550 例）
-flutter build apk --release # 产物 build/app/outputs/flutter-apk/app-release.apk
+flutter test --no-pub       # 必须全绿（当前 810 例）
+flutter build apk --release     # 手机端产物 build/app/outputs/flutter-apk/app-release.apk
+flutter build windows --release # 电脑端产物 build/windows/x64/runner/Release/guideline.exe
 ```
 
-- **跑测试很快**：全量 550 例约 **16 秒**，`analyze` 约 **4 秒**。
+- **跑测试很快**：全量 810 例约 **26 秒**，`analyze` 约 **5 秒**。
   所以"少跑点测试"省不下什么，别往那个方向优化
 - **构建时显式给版本号**：`android/local.properties` 会缓存
   `flutter.versionName` / `flutter.versionCode`，不显式指定就会打出一个与界面显示
   不一致的包，而且全程不报错
+- **电脑端按窗口宽度换外壳**：宽度到 840（`lib/ui/desktop/desktop_shell.dart` 里的
+  `desktopMinWidth`，Flutter 官方 `medium`/`expanded` 那档的分界）就从底部四格换成
+  左侧栏；窄回去仍然是手机那套。两套外壳**并存**，同一个 exe 两种形状。
+  `windows/` 是 `flutter create --platforms=windows` 生成的标准壳，没有手写的 Win32。
+  桌面版的数据落在 `%LOCALAPPDATA%\GuideLine`，不会写进仓库目录
 - **首次构建要留出时间**：Gradle 发行包可能卡在下载上（国内镜像问题）
 - **真机上有些事做不到**：HyperOS 不给 `INJECT_EVENTS`、Flutter 语义树也不暴露文字，
   所以点击 / 滑动 / 输入法 / 系统分享面板**必须人工点**。自动能验的只有：
@@ -201,8 +217,9 @@ Copyright (c) 2026 Maker114。
   要跨设备就自己填一个 GitHub 仓库当备份点 —— 上传 / 拉回手动，
   唯一的自动化是"回到主页把这次改动传上去"（只上传，不会自动拉回覆盖手机）
 - **推送提醒**：FCM 在大陆不可用；提醒只在打开应用时发生
-- **电脑端**：那份归档工程已于 2026-09-24 从工作区移除，源码可从 git 历史取回
-  （归档快照提交 `786b143`），省下约 263 MB
+- **电脑端与手机端互通**：两边各存各的一份数据，不做同步、不做账号配对。
+  唯一能搬数据的是导出 / 导入。电脑端的托盘、全局快捷键、开机自启也都不做 ——
+  那需要额外插件或手写 Win32，留给以后按需再谈
 - **桌面小组件**：技术链路已验证跑通，但小米 HyperOS 只收录商店包解析出来的小部件，
   侧载 App 的原生卡片进不了桌面小部件中心 —— 这条路在小米上走不通，不必再试
 - **多语言**：暂时只有中文

@@ -266,6 +266,51 @@ void main() {
       expect(find.textContaining('远程备份是 0 条记录，不算可用备份'), findsOneWidget);
     });
 
+    testWidgets('两边内容一样：弹一句提醒、不拉回，还能选「仍然强制拉回」', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      expect(app.applyImport(storeWith(savedAt: t1 + 60000, projects: 2)), isNull);
+      final before = app.storage.readStoreSavedAt();
+
+      await openPage(tester, app);
+      await tapAction(tester, '从 GitHub 拉取');
+
+      // 内容一条不差：不摆差异面板（没什么可看的），只提醒一句。
+      expect(find.text('云端和这台手机是同一份'), findsOneWidget);
+      expect(find.textContaining('一条不差'), findsOneWidget);
+      expect(find.text('用远程备份覆盖这台手机'), findsNothing);
+
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+
+      expect(app.storage.readStoreSavedAt(), before, reason: '取消之后盘上一个字都不该变');
+      expect(app.readGitHubSyncRecord(), isNull, reason: '没拉回就不该有记账');
+      expect(find.textContaining('内容相同，没有拉回'), findsOneWidget, reason: '要说清为什么没动');
+    });
+
+    testWidgets('两边内容一样时选「仍然强制拉回」：真的覆盖，并写上记账', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      expect(app.applyImport(storeWith(savedAt: t1 + 60000, projects: 2)), isNull);
+
+      await openPage(tester, app);
+      await tapAction(tester, '从 GitHub 拉取');
+      await tester.tap(find.text('仍然强制拉回'));
+      await tester.pumpAndSettle();
+
+      final record = app.readGitHubSyncRecord();
+      expect(record, isNotNull, reason: '强制拉回也要记账，否则下次还会当成"没同步过"');
+      expect(record!.commitSha, 'abc1234def5678');
+    });
+
     testWidgets('拉取之后写记账，页面上能看到上次同步时间与两个码', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
@@ -300,6 +345,42 @@ void main() {
   });
 
   group('推送', () {
+    testWidgets('点一下就推：不再摆确认框，也不再摆差异面板', (tester) async {
+      // 云端一条、本机两条：内容真的不同 —— 老写法会先弹差异面板等确认。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 1)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      expect(app.applyImport(storeWith(savedAt: t1 + 60000, projects: 2)), isNull);
+
+      await openPage(tester, app);
+      await tapAction(tester, '推送到 GitHub');
+
+      expect(gateway.writeCount, 1, reason: '点一下就该真的推上去（用户口径：默认强制推送）');
+      expect(find.text('推送'), findsNothing, reason: '不该再有确认按钮');
+      expect(find.text('云端 · 会被覆盖'), findsNothing, reason: '不该再摆差异面板');
+      expect(find.textContaining('已推送'), findsOneWidget, reason: '收据还是要给');
+    });
+
+    testWidgets('内容一字不差：一次都不提交，直接说清原因', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      // 同一份内容、只是本机的时间戳更新 —— 正是"刚拉回来又被推一次"的那一幕。
+      expect(app.applyImport(storeWith(savedAt: t1 + 60000, projects: 2)), isNull);
+
+      await openPage(tester, app);
+      await tapAction(tester, '推送到 GitHub');
+
+      expect(gateway.writeCount, 0, reason: '内容一样就不该再添一次无意义的提交');
+      expect(find.textContaining('同一份'), findsOneWidget, reason: '说清是同一份，不必推送');
+    });
+
     testWidgets('记账里带提交码，结果里两个码都摆出来，提交说明带 App 版本号', (tester) async {
       final gateway = _FakeGateway();
       final app = await boot(gateway, _FakeCredentials('ghp_token'));

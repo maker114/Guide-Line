@@ -563,6 +563,7 @@ class AppStorage {
   /// 标签给的是**时间点 + 记录条数**，不再写"（N 次保存前）"：轮转改成按编辑会话
   /// 节流之后，"第几次保存"已经没有意义了，而"这条备份里有多少条记录"能让人
   /// 一眼看出哪一份更接近自己想要的（条数骤降的那一份往往就是误删之前）。
+  /// 滚动备份的写法是连成一串的 `备份0930-21:49-123条`（用户口径）。
   ///
   /// 代价说明：为了数条数，这里会**解析每一份备份**。窗口是固定的
   /// （滚动 10 份 + 日快照 7 份），所以代价有上界，且只在这一页被打开时发生。
@@ -576,7 +577,7 @@ class AppStorage {
       final count = _recordCountOf(file);
       entries.add(BackupEntry(
         path: file.path,
-        label: '上一份 · ${_clockLabel(modifiedAt)}${_countSuffix(count)}',
+        label: '备份${_clockLabel(modifiedAt)}${_countSuffix(count)}',
         kind: BackupKind.rolling,
         sizeBytes: file.lengthSync(),
         modifiedAt: modifiedAt,
@@ -592,7 +593,7 @@ class AppStorage {
       final count = _recordCountOf(file);
       entries.add(BackupEntry(
         path: file.path,
-        label: '日快照 $date${_countSuffix(count)}',
+        label: '日快照 $date${_dailyCountSuffix(count)}',
         kind: BackupKind.daily,
         sizeBytes: file.lengthSync(),
         modifiedAt: modifiedAt,
@@ -602,14 +603,19 @@ class AppStorage {
     return entries;
   }
 
-  /// `09-26 11:57`（年份省略：滚动备份都是最近几天的，日快照的日期在标签里）。
+  /// `0930-21:49`（年份省略：滚动备份都是最近几天的，日快照的日期在标签里）。
   static String _clockLabel(int millis) {
     final d = DateTime.fromMillisecondsSinceEpoch(millis);
     String two(int v) => v.toString().padLeft(2, '0');
-    return '${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+    return '${two(d.month)}${two(d.day)}-${two(d.hour)}:${two(d.minute)}';
   }
 
+  /// 条数后缀：`-42条` / `-无法解析`（日期与条数之间不留空格，连成一串读）。
   static String _countSuffix(int? count) =>
+      count == null ? '-无法解析' : '-$count条';
+
+  /// 日快照那一侧的条数后缀：**保持旧写法**（用户口径：日快照不动）。
+  static String _dailyCountSuffix(int? count) =>
       count == null ? ' · 无法解析' : ' · $count 条';
 
   /// 备份文件里 `items` 的总条数（含墓碑 / 归档，就是文件里实实在在的条数）。
@@ -1096,7 +1102,7 @@ class BackupEntry {
 
   final String path;
 
-  /// 展示用标签：`上一份 · 09-26 11:57 · 42 条` / `日快照 20260926 · 42 条`
+  /// 展示用标签：`备份0930-21:49-42条` / `日快照 20260926 · 42 条`
   final String label;
 
   final BackupKind kind;

@@ -1184,12 +1184,6 @@ class AppController extends ChangeNotifier {
         if (announce) _setAutoSync(const AutoSyncState.idle());
         return;
       case SyncAction.push:
-        if (plan.trustedOverwrite) {
-          // 需求④：云端还是上次同步留下的那一次提交 ⇒ 这中间没有第三方动过云端，
-          // 本机这份直接覆盖上去 —— 不摆面板、不追问。
-          await _pushAutoSync(saved.config, saved.token);
-          return;
-        }
         final remoteStore = check.remote?.payload?.store;
         // 远程那份读不出来（还没有这个文件 = 头一次同步）：没有旧版本可比，
         // 也就没什么可摆的，直接传。
@@ -1197,10 +1191,18 @@ class AppController extends ChangeNotifier {
           await _pushAutoSync(saved.config, saved.token);
           return;
         }
+        // 内容闸门：`analyzeSync` 判"该推"已经保证两边内容不同，这里再比一次是
+        // 同一句话的第二道锁 —— 内容一条不差就绝不提交，不看提交码、不看时间戳。
         final diff = diffStores(base: remoteStore, target: local);
         if (!diff.hasChanges) {
-          // 记录一条不差 ⇒ 推上去只是把同一份内容再提交一次，没意义。
+          // 推上去只是把同一份内容再提交一次，没意义（ADR-091）。
           if (announce) _setAutoSync(const AutoSyncState.idle());
+          return;
+        }
+        if (plan.trustedOverwrite) {
+          // 需求④：云端还是上次同步留下的那一次提交 ⇒ 这中间没有第三方动过云端，
+          // 本机这份直接覆盖上去 —— 不摆面板、不追问。
+          await _pushAutoSync(saved.config, saved.token);
           return;
         }
         if (announce) {

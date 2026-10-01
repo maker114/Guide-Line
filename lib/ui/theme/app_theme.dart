@@ -98,6 +98,32 @@ String toHexColor(Color color) {
 /// 手写迟早会出现某一层比相邻层还深这类错误。
 const Color _neutralSeed = Color(0xFF8A8A8A);
 
+/// **中文字形的兜底字体链**（电脑端字体发虚、发细的根因就在这儿）。
+///
+/// Flutter 自带的那套排版只带西文字形（Roboto / Segoe UI），中文要靠系统兜底。
+/// 而系统兜底挑出来的是**宋体系**（实测：显式写 `Segoe UI` 与"什么都不指定"
+/// 画出来的中文一模一样，而那一版和 `SimSun` 逐字同形）——
+/// 笔画细、有衬线，在浅色底上看着就是"发虚、不像这个应用的字"。
+///
+/// 这里**只给兜底链、不给 `fontFamily`**：
+///   · 西文仍然走平台默认（Windows 是 Segoe UI），不动；
+///   · 只有默认字体没有的字形才会往下找，所以第一支能命中的就是中文用的那支；
+///   · 列里不存在的字体在 Flutter 里是**无害的空档**（不会报错、直接跳过），
+///     所以一份清单可以同时覆盖 Windows（雅黑）、华为（HarmonyOS Sans）、
+///     以及装了 Noto 的机器。
+///
+/// 顺序即优先级：雅黑笔画与西文 UI 最搭，其次是华为与 Noto 这两支开源无衬线。
+const List<String> cjkFontFallback = <String>[
+  'Microsoft YaHei UI',
+  'Microsoft YaHei',
+  'HarmonyOS Sans SC',
+  'Noto Sans SC',
+  'Noto Sans CJK SC',
+  'Source Han Sans SC',
+  'DengXian',
+  'PingFang SC',
+];
+
 /// 只换**前景**：把主题色装进那些"文字 / 图标 / 选中态"的 role，
 /// **一个 surface / background 相关的字段都不碰**。
 ///
@@ -186,6 +212,9 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
     colorScheme: applyAccent(neutral, seed, brightness),
     brightness: brightness,
     useMaterial3: true,
+    // 中文字形走这条兜底链（不设 `fontFamily`，西文仍是平台默认）。
+    // 详见 [cjkFontFallback] 上方的说明：不设它，Windows 上中文会落成宋体。
+    fontFamilyFallback: cjkFontFallback,
     // 紧迫度色阶（绿→红）与版本差异红绿都注册在主题里，控件只按档位取色
     extensions: <ThemeExtension<dynamic>>[
       brightness == Brightness.dark ? UrgencyColors.dark : UrgencyColors.light,

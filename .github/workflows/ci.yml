@@ -86,3 +86,57 @@ jobs:
           name: guideline-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 7
+
+  # 电脑端："能不能在这台干净机器上构建出 exe"也要机器来说，不能只靠本机实测。
+  # 为什么必须有这一步：Windows 构建在**本机**成功过（见 docs/构建与发布.md §11），
+  # 但本机是「装了两年、动过各种配置」的开发机；干净 CI 机器上是第一次验证。
+  # 具体要盯的是插件符号链接：Flutter 把每个插件链进
+  # windows/flutter/ephemeral/.plugin_symlinks/，某些 Windows 配置下建链接会失败。
+  build-windows:
+    name: build windows (release)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release exe
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+)$').Matches[0].Groups[1].Value.Trim()
+          $name = $version.Split('+')[0]
+          $code = $version.Split('+')[1]
+          flutter build windows --release --build-name="$name" --build-number="$code"
+
+      - name: Smoke test the exe
+        # 出得来还不够，要能启动。桌面版数据落在 %LOCALAPPDATA%\GuideLine，CI 上跑一次无副作用
+        shell: pwsh
+        run: |
+          $exe = "build/windows/x64/runner/Release/guideline.exe"
+          if (-not (Test-Path $exe)) { throw "没找到 $exe" }
+          $p = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) { throw "guideline.exe 启动后立刻退出了，退出码 $($p.ExitCode)" }
+          Write-Host "存活：PID $($p.Id)，窗口标题 '$($p.MainWindowTitle)'"
+          $p.CloseMainWindow() | Out-Null
+          Start-Sleep -Seconds 3
+          if (-not $p.HasExited) { $p.Kill() }
+          if (Test-Path "$env:LOCALAPPDATA\GuideLine") {
+            Write-Host "数据目录内容："
+            Get-ChildItem "$env:LOCALAPPDATA\GuideLine" -Force | ForEach-Object { "  $($_.Length)  $($_.Name)" }
+          }
+
+      - name: Upload Windows bundle for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: guideline-windows-x64
+          path: build/windows/x64/runner/Release/
+          retention-days: 7

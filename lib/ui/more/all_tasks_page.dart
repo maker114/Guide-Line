@@ -18,9 +18,13 @@ import 'task_grouping.dart';
 /// 长按任一条进入多选、点条目标切换选中、「全选」只作用于当前可见的那些；
 /// 批量动作给「设到期日」与「归档」。
 class AllTasksPage extends StatefulWidget {
-  const AllTasksPage({super.key, required this.app});
+  const AllTasksPage({super.key, required this.app, this.embedded = false});
 
   final AppController app;
+
+  /// 是否被**桌面外壳**嵌进内容区：嵌进去时不画自己的 `AppBar`
+  /// （外壳顶上已经有一条标题栏，两条叠着就是两个标题）。
+  final bool embedded;
 
   @override
   State<AllTasksPage> createState() => _AllTasksPageState();
@@ -105,7 +109,7 @@ class _AllTasksPageState extends State<AllTasksPage> {
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('全部任务')),
+          appBar: widget.embedded ? null : AppBar(title: const Text('全部任务')),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[

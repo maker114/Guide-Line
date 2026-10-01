@@ -391,11 +391,17 @@ void main() {
 
       final entries = storage.listBackups();
       final rolling = entries.firstWhere((e) => e.kind == BackupKind.rolling);
-      expect(rolling.label, contains('上一份'));
+      // 滚动备份连成一串：`备份0930-21:49-1条`（用户口径）。
+      expect(rolling.label, startsWith('备份'));
+      expect(rolling.label, isNot(contains('上一份')));
       expect(rolling.label, isNot(contains('次保存前')));
-      expect(rolling.label, contains('· 1 条'));
+      expect(rolling.label, contains('-1条'));
+      // 时间点那一段是 `MMDD-HH:mm`（`0930-21:49`），不是旧的 `MM-DD HH:mm`。
+      expect(RegExp(r'^备份\d{4}-\d{2}:\d{2}-1条$').hasMatch(rolling.label), isTrue,
+          reason: '实际是 ${rolling.label}');
       expect(rolling.recordCount, 1, reason: '这份备份里就一个项目');
 
+      // 日快照**不动**：仍是"日快照 20260930 · 1 条"。
       final daily = entries.firstWhere((e) => e.kind == BackupKind.daily);
       expect(daily.label, startsWith('日快照 '));
       expect(daily.label, contains('· 1 条'));
@@ -421,7 +427,7 @@ void main() {
 
       final entries = storage.listBackups();
       expect(entries.first.kind, BackupKind.rolling);
-      expect(entries.first.label, contains('上一份'));
+      expect(entries.first.label, startsWith('备份'));
       expect(entries.any((e) => e.kind == BackupKind.daily && e.label.contains('日快照')), isTrue);
     });
   });

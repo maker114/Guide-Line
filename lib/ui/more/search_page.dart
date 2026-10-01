@@ -23,9 +23,16 @@ import '../theme/shape_tokens.dart';
 /// 多选**只收任务命中**：批量动作（设到期日 / 归档）本来就只对任务有意义，
 /// 让项目 / 事件 / 灵感也能被选中，只会造出一个按下去没有动作的选中集。
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.app});
+  const SearchPage({super.key, required this.app, this.embedded = false});
 
   final AppController app;
+
+  /// 是否被**桌面外壳**嵌进内容区。
+  ///
+  /// 嵌进去时：①不画自己的 `AppBar`（外壳顶上已经有一条标题栏，否则两条标题
+  /// 上下叠着）；②**不 `autofocus`** —— 桌面外壳用 `IndexedStack` 让八页一直活着，
+  /// 一开机就让这一页抢走键盘焦点，灵感页的速记输入框就永远拿不到光标。
+  final bool embedded;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -121,7 +128,7 @@ class _SearchPageState extends State<SearchPage> {
         }
 
         return Scaffold(
-          appBar: AppBar(title: const Text('搜索')),
+          appBar: widget.embedded ? null : AppBar(title: const Text('搜索')),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -140,7 +147,9 @@ class _SearchPageState extends State<SearchPage> {
                   child: TextField(
                     controller: _controller,
                     focusNode: _focus,
-                    autofocus: true,
+                    // 嵌在桌面外壳里时**不抢焦点**：八页一直活着（`IndexedStack`），
+                    // 一开机就 autofocus 会把光标从灵感页的速记框上夺走。
+                    autofocus: !widget.embedded,
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: '搜项目 / 事件 / 任务 / 灵感',

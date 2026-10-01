@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
-import '../../core/json/store_file.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/github_backup_config.dart';
 import '../../core/store/github_sync.dart';
@@ -20,7 +19,9 @@ import '../theme/shape_tokens.dart';
 ///     页面上的两下永远是你亲手点的（自动上传走的是另一条路：
 ///     `AppController.autoSyncAfterHome`，回到主页时比对并上传，见 handoff #87c57e）；
 ///   · **不做自动合并**：两边都改过时只把情况摆出来，让用户自己选；
-///   · **推送前确认、拉取前先预览条数与时间再确认**：两端都是覆盖性操作。
+///   · **推送是强制的**（用户口径）：判定说该推就直接推，不再二次确认；
+///     拉取仍然是覆盖性动作 —— 先比内容，**内容一样就不拉回**，只弹一句提醒
+///     （提醒里可以选强制拉回）；内容不同才摆出逐条差异让人看过再覆盖。
 ///     自动那条路**只上传、不自动拉**，一样要看着差异点确认才覆盖云端。
 ///
 /// 为什么要在页面上摆出**提交码**（ADR-089）：它是"这是哪一次上传"的凭证 ——
@@ -91,9 +92,13 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     return (
       config: GitHubBackupConfig(
         enabled: _enabled,
-        owner: _owner.text.trim().isEmpty ? saved.config.owner : _owner.text.trim(),
+        owner: _owner.text.trim().isEmpty
+            ? saved.config.owner
+            : _owner.text.trim(),
         repo: _repo.text.trim().isEmpty ? saved.config.repo : _repo.text.trim(),
-        branch: _branch.text.trim().isEmpty ? saved.config.branch : _branch.text.trim(),
+        branch: _branch.text.trim().isEmpty
+            ? saved.config.branch
+            : _branch.text.trim(),
         path: _path.text.trim().isEmpty ? saved.config.path : _path.text.trim(),
       ),
       token: token,
@@ -137,7 +142,10 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     );
   }
 
-  /// 推送：先把远程情况摆出来，再按判定结果决定要不要多问一句。
+  /// 推送：**这里是"强制推送"**（用户口径）—— 判定说该推就推，不再弹确认框。
+  ///
+  /// 两种情形仍然不动手：两边内容已经一样（[SyncAction.noChange]，包括"内容码与
+  /// 提交码都对得上"和"刚拉回来的那份"），以及本机一条记录都没有。
   Future<void> _push() async {
     if (_busy) return;
     setState(() {
@@ -155,13 +163,6 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     }
 
     final plan = check.plan!;
-    final local = app.ws.buildStoreFile();
-    final localText = _countsText(liveCountsOf(local));
-    // 远程那份的原文（能读到才有）—— 有它就能把"推上去会盖掉哪几条"逐条摆出来
-    final remoteStore = check.remote?.payload?.store;
-
-    var override = false;
-
     switch (plan.action) {
       case SyncAction.noChange:
         setState(() => _busy = false);
@@ -174,53 +175,25 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           '为避免覆盖远程备份，此处不再继续。请先在本机恢复数据，或前往 GitHub 保存远程备份。',
         );
         return;
-      case SyncAction.bothChanged:
-      case SyncAction.pull:
-        if (!mounted) return;
-        final ok = await _confirmPushOverwrite(
-          local: local,
-          remoteStore: remoteStore,
-          title: '覆盖远程备份',
-          message: '${plan.message}\n\n'
-              '当前这台手机：$localText\n'
-              '${_remoteCommitText(check.remoteCommit)}\n\n'
-              '覆盖之后，远程上一次的内容仍然可以从 GitHub 的提交历史里找回。',
-          confirmLabel: '用本地覆盖远程',
-          danger: true,
-        );
-        if (!ok) {
-          setState(() => _busy = false);
-          return;
-        }
-        override = true;
       case SyncAction.push:
-        if (!mounted) return;
-        final ok = await _confirmPushOverwrite(
-          local: local,
-          remoteStore: remoteStore,
-          title: '推送到 GitHub',
-          message: '会把当前 $localText 上传到 GitHub，覆盖远程同一路径上的文件。\n\n'
-              '远程：${plan.remoteSavedAt == null ? '还没有这份文件' : formatStamp(plan.remoteSavedAt)}\n'
-              '${_remoteCommitText(check.remoteCommit)}',
-          confirmLabel: '推送',
-        );
-        if (!ok) {
-          setState(() => _busy = false);
-          return;
-        }
+      case SyncAction.pull:
+      case SyncAction.bothChanged:
+        // 覆盖云端这件事已经由用户按下的这一下决定，不再问第二遍。
+        break;
     }
 
     final result = await app.pushGitHubBackup(
       draft.config,
       draft.token,
-      overrideRemoteChanges: override,
+      overrideRemoteChanges: true,
     );
     if (!mounted) return;
     setState(() => _busy = false);
     _setResult(result.message);
   }
 
-  /// 拉取：**先预览条数与时间，再确认一次**，然后才覆盖本地。
+  /// 拉取：**先比内容**。两边一样就不拉回，只弹一句提醒（提醒里可以选强制拉回）；
+  /// 有差别才摆出逐条差异让人看过再覆盖。
   Future<void> _pull() async {
     if (_busy) return;
     setState(() {
@@ -242,82 +215,48 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     final local = app.ws.buildStoreFile();
     final current = _countsText(liveCountsOf(local));
 
-    // 拉回也是整份覆盖：把"会被换掉的哪些、换回来的哪些"逐条摆出来（第 3 条反馈）
     final diff = diffStores(base: local, target: remote.payload!.store);
-    final ok = diff.hasChanges
-        ? (await showStoreDiffSheet(
-            context,
-            diff: diff,
-            title: '用远程备份覆盖这台手机',
-            baseLabel: '这台手机 · 会被覆盖 · $current',
-            targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
-            confirmLabel: '拉取并覆盖',
-            cancelLabel: '取消',
-            danger: true,
-            note: '${_remoteCommitText(preview.commit)}\n\n'
-                '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
-          )) ==
-              DiffSheetResult.confirm
-        : await confirmAction(
-            context,
-            title: '用远程备份覆盖这台手机',
-            message: '远程：${formatStamp(remote.savedAt)} · $incoming\n'
-                '${_remoteCommitText(preview.commit)}\n'
-                '现在这台上：$current\n\n'
-                '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
-            confirmLabel: '拉取并覆盖',
-            danger: true,
-          );
-    if (!ok) {
-      setState(() => _busy = false);
-      return;
+    if (!diff.hasChanges) {
+      // 内容一模一样：拉回来只是把同一份数据再覆盖一遍，没有任何变化。
+      // 仍然让人可以执意拉（比如就想要云端那份的记账与时间戳）。
+      final force = await confirmAction(
+        context,
+        title: '云端和这台手机是同一份',
+        message: '对比下来两边的内容一条不差，已经把云端那份拉回来的动作省掉了。\n\n'
+            '云端：${formatStamp(remote.savedAt)} · $incoming\n'
+            '${_remoteCommitText(preview.commit)}\n'
+            '现在这台上：$current',
+        confirmLabel: '仍然强制拉回',
+        cancelLabel: '取消',
+      );
+      if (!force) {
+        setState(() => _busy = false);
+        _setResult('云端和这台手机的内容相同，没有拉回。');
+        return;
+      }
+    } else {
+      final choice = await showStoreDiffSheet(
+        context,
+        diff: diff,
+        title: '用远程备份覆盖这台手机',
+        baseLabel: '这台手机 · 会被覆盖 · $current',
+        targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
+        confirmLabel: '拉取并覆盖',
+        cancelLabel: '取消',
+        danger: true,
+        note: '${_remoteCommitText(preview.commit)}\n\n'
+            '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
+      );
+      if (choice != DiffSheetResult.confirm) {
+        setState(() => _busy = false);
+        return;
+      }
     }
 
     final result = await app.pullGitHubBackup(draft.config, draft.token);
     if (!mounted) return;
     setState(() => _busy = false);
     _setResult(result.message);
-  }
-
-  /// 推送前的确认：**能和云端比对就把差异逐条摆出来**，比不了才退回一句话的收据式确认。
-  ///
-  /// 方向是固定的：基准＝云端、对方＝这台手机 —— 这一屏回答的是
-  /// "推上去之后云端会变成什么样、会丢掉哪几条"（用户口径：与云端比对后上传，
-  /// **出现偏差才**弹差异面板）。远程还没有这份文件时没有可比的旧版本，就不弹。
-  Future<bool> _confirmPushOverwrite({
-    required StoreFile local,
-    required StoreFile? remoteStore,
-    required String title,
-    required String message,
-    required String confirmLabel,
-    bool danger = false,
-  }) async {
-    final remote = remoteStore;
-    final diff = remote == null ? null : diffStores(base: remote, target: local);
-    // 比不了（第一次同步、云端还没有那份文件）或两边一样：退回原来那句话的确认框。
-    if (diff == null || remote == null || !diff.hasChanges) {
-      return confirmAction(
-        context,
-        title: title,
-        message: message,
-        confirmLabel: confirmLabel,
-        danger: danger,
-      );
-    }
-    final choice = await showStoreDiffSheet(
-      context,
-      diff: diff,
-      title: title,
-      baseLabel: '云端 · 会被覆盖 · ${_countsText(liveCountsOf(remote))}',
-      targetLabel: '这台手机 · 会上传 · ${_countsText(liveCountsOf(local))}',
-      confirmLabel: confirmLabel,
-      cancelLabel: '取消',
-      danger: danger,
-      note: message,
-    );
-    // 「取消」与"划掉面板走人"在这里是同一件事：都没推。这一层不负责摆胶囊
-    // （那是自动同步那条路的事）。
-    return choice == DiffSheetResult.confirm;
   }
 
   static String _countsText(Map<DocName, int> counts) => DocName.values
@@ -354,8 +293,8 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
   /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
   static String _remoteCommitText(RemoteCommit? commit) =>
       commit == null || !commit.known
-          ? '远程提交：读不到'
-          : '远程提交：${shortSha(commit.sha)}';
+      ? '远程提交：读不到'
+      : '远程提交：${shortSha(commit.sha)}';
 
   @override
   Widget build(BuildContext context) {
@@ -386,7 +325,9 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 SwitchListTile(
                   value: _enabled,
                   title: const Text('启用 GitHub 备份同步'),
-                  subtitle: const Text('关掉不会丢配置，也不会删除远程备份。\n开着时：每次回到主页会自动上传这次改动，只上传、不会自动拉回。'),
+                  subtitle: const Text(
+                    '关掉不会丢配置，也不会删除远程备份。\n开着时：每次回到主页会自动上传这次改动，只上传、不会自动拉回。',
+                  ),
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
                 const Divider(height: 1),
@@ -398,7 +339,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 ),
                 _Field(
                   label: '仓库名',
-                  hint: '例如 guideline-backup，建议使用私有仓库',
+                  hint: '例如 GuideLink，建议使用私有仓库',
                   controller: _repo,
                 ),
                 _Field(
@@ -418,7 +359,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                   hint: _tokenStored ? '已保存，留空表示不修改' : '至少要能读写这个仓库',
                   controller: _token,
                   obscure: true,
-                  helper: '只存系统安全存储（Android Keystore）；不进偏好文件、不进备份、不进整库导出',
+                  helper: '只存系统安全、存储不进偏好文件、不进备份、不进整库导出',
                 ),
                 const Divider(height: 1),
                 _SectionLabel('同步'),
@@ -439,7 +380,7 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 _ActionTile(
                   icon: Icons.cloud_upload_outlined,
                   title: '推送到 GitHub',
-                  subtitle: '用这台手机的数据覆盖远程备份，推送前会确认',
+                  subtitle: '用这台手机的数据覆盖远程备份，不再追问',
                   onTap: (_busy || !_enabled) ? null : _push,
                 ),
                 _ActionTile(
@@ -460,17 +401,22 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                     padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: LinearProgressIndicator(),
                   ),
-                if (_result != null) _ResultBox(text: _result!, error: _isErrorText(_result!)),
+                if (_result != null)
+                  _ResultBox(text: _result!, error: _isErrorText(_result!)),
                 _SectionLabel('会发出去什么'),
-                const _Bullet('整份数据文件，压缩后即「导出」会生成的那一份：'
-                    '项目、灵感、事件、任务，含墓碑与偏好文件之外的记录'),
-                const _Bullet('上传之后，这份数据会以明文 gzip 的形式存在于你的 GitHub 仓库，'
-                    '因此这个仓库必须是私有的。'),
+                const _Bullet(
+                  '整份数据文件，压缩后即「导出」会生成的那一份：'
+                  '项目、灵感、事件、任务，含墓碑与偏好文件之外的记录',
+                ),
+                const _Bullet(
+                  '上传之后，这份数据会以明文 gzip 的形式存在于你的 GitHub 仓库，'
+                  '因此这个仓库必须是私有的。',
+                ),
                 const _Bullet('每次推送都是仓库里的一次提交，所以旧版本可以从提交历史里找回'),
                 _SectionLabel('不会发出去什么'),
                 const _Bullet('Token 本身：它只存在系统安全存储里，连偏好文件的键都不出现'),
-                const _Bullet('不会自动推送、不会在启动时检查远程；这一版只有手动触发的两次操作。'),
-                const _Bullet('不会把远程备份与本地数据自动合并；两端都改过时，只由你选择合并方向。'),
+                const _Bullet('不会自动拉回：启动时的比对只读，两边对不上时由你选保留哪一边。'),
+                const _Bullet('不会把远程备份与本地数据自动合并：两端都改过时，只由你选择合并方向。'),
               ],
             ),
     );
@@ -488,9 +434,9 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-        child: Text(text, style: Theme.of(context).textTheme.labelLarge),
-      );
+    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+    child: Text(text, style: Theme.of(context).textTheme.labelLarge),
+  );
 }
 
 class _Bullet extends StatelessWidget {
@@ -500,17 +446,17 @@ class _Bullet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text('· '),
-            Expanded(
-              child: Text(text, style: Theme.of(context).textTheme.bodySmall),
-            ),
-          ],
+    padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const Text('· '),
+        Expanded(
+          child: Text(text, style: Theme.of(context).textTheme.bodySmall),
         ),
-      );
+      ],
+    ),
+  );
 }
 
 class _ActionTile extends StatelessWidget {
@@ -528,12 +474,12 @@ class _ActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListTile(
-        leading: Icon(icon),
-        title: Text(title),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: onTap,
-      );
+    leading: Icon(icon),
+    title: Text(title),
+    subtitle: Text(subtitle),
+    trailing: const Icon(Icons.chevron_right),
+    onTap: onTap,
+  );
 }
 
 class _ResultBox extends StatelessWidget {
@@ -552,7 +498,9 @@ class _ResultBox extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: (error ? scheme.error : scheme.primary).withValues(alpha: 0.10),
+          color: (error ? scheme.error : scheme.primary).withValues(
+            alpha: 0.10,
+          ),
           borderRadius: BorderRadius.circular(AppShapes.nestedRadius),
         ),
         child: SelectableText(text),
@@ -592,23 +540,23 @@ class _FieldState extends State<_Field> {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-        child: KeyboardDismissGuard(
-          isFocused: () => _focus.hasFocus,
-          onKeyboardDismissed: _focus.unfocus,
-          child: TextField(
-            controller: widget.controller,
-            focusNode: _focus,
-            obscureText: widget.obscure,
-            decoration: InputDecoration(
-              labelText: widget.label,
-              hintText: widget.hint,
-              helperText: widget.helper,
-              helperMaxLines: 3,
-              isDense: true,
-              border: const OutlineInputBorder(),
-            ),
-          ),
+    padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+    child: KeyboardDismissGuard(
+      isFocused: () => _focus.hasFocus,
+      onKeyboardDismissed: _focus.unfocus,
+      child: TextField(
+        controller: widget.controller,
+        focusNode: _focus,
+        obscureText: widget.obscure,
+        decoration: InputDecoration(
+          labelText: widget.label,
+          hintText: widget.hint,
+          helperText: widget.helper,
+          helperMaxLines: 3,
+          isDense: true,
+          border: const OutlineInputBorder(),
         ),
-      );
+      ),
+    ),
+  );
 }

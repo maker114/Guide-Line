@@ -73,10 +73,10 @@ class BackupsPage extends StatelessWidget {
                       entry.kind == BackupKind.daily ? Icons.today_outlined : Icons.history,
                     ),
                     title: Text(entry.label),
-                    // 时间已经在标签里了（`上一份 · 09-26 11:57 · 42 条`），
-                    // 副标题只补体积与"点开能看差在哪" —— 同一行里把时间写两遍反而更难扫。
+                    // 时间与条数都在标签里了（`备份0930-21:49-123条`），
+                    // 副标题只补体积 —— "点开能看差在哪"由点击本身回答，不必写在行里。
                     subtitle: Text(
-                      '${_formatBytes(entry.sizeBytes)} · 打开可查看与当前数据的差异',
+                      _formatBytes(entry.sizeBytes),
                       style: theme.textTheme.labelSmall,
                     ),
                     onTap: () => _showDiff(context, entry),
@@ -84,7 +84,9 @@ class BackupsPage extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
                         TextButton(
-                          onPressed: () => _restore(context, entry),
+                          // 「恢复」与点开这一行是**同一条路**：先摆差异，
+                          // 看过之后在那一屏上按「恢复这份」才真的换数据。
+                          onPressed: () => _showDiff(context, entry),
                           child: const Text('恢复'),
                         ),
                         // 删除只对**滚动备份**开放：日快照是"某一天的留档"，
@@ -116,11 +118,14 @@ class BackupsPage extends StatelessWidget {
     showToast(context, '已写入一份备份');
   }
 
-  /// 点开一份备份：**先把"它和现在差在哪"摆出来**，再让人决定要不要恢复。
+  /// 点开一份备份（或者按「恢复」）：**先把"它和现在差在哪"摆出来**，
+  /// 再让人在那一屏上决定要不要恢复。两条路走的是同一个方法 ——
+  /// 恢复是覆盖性动作，**和现在不一样才让人看见差异再点**（用户口径）。
   ///
   /// 懒加载（点开才读盘）：备份有十几份，进页面就把每一份都读出来解析一遍、
   /// 只为在列表里摆个数字，不值。方向是"恢复之后手机上会变成什么样"——
   /// 基准＝现在（红＝会被换掉的），对方＝那份备份（绿＝恢复后会有的）。
+  /// 和现在一模一样时只说一句，连面板都不摆（没什么可看的）。
   Future<void> _showDiff(BuildContext context, BackupEntry entry) async {
     final backup = app.readBackupStore(entry.path);
     if (backup == null) {
@@ -148,20 +153,7 @@ class BackupsPage extends StatelessWidget {
     _applyRestore(context, entry);
   }
 
-  Future<void> _restore(BuildContext context, BackupEntry entry) async {
-    final ok = await confirmAction(
-      context,
-      title: '从备份恢复',
-      message: '当前数据会被替换为「${entry.label}」。\n'
-          '当前数据会先轮转进备份，所以这一步可以再恢复回来。',
-      confirmLabel: '恢复',
-      danger: true,
-    );
-    if (!ok || !context.mounted) return;
-    _applyRestore(context, entry);
-  }
-
-  /// 真正落盘那一步 —— 差异面板与确认框两条路都汇到这里。
+  /// 真正落盘那一步 —— 差异面板上按了「恢复这份」才走到这里。
   void _applyRestore(BuildContext context, BackupEntry entry) {
     final error = app.restoreBackup(entry.path);
     if (error != null) {

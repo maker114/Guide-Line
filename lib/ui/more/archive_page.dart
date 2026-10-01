@@ -46,9 +46,13 @@ enum ArchiveSection {
 }
 
 class ArchivePage extends StatefulWidget {
-  const ArchivePage({super.key, required this.app});
+  const ArchivePage({super.key, required this.app, this.embedded = false});
 
   final AppController app;
+
+  /// 是否被**桌面外壳**嵌进内容区：嵌进去时不画自己的 `AppBar`
+  /// （外壳顶上已经有一条标题栏，两条叠着就是两个标题）。
+  final bool embedded;
 
   @override
   State<ArchivePage> createState() => _ArchivePageState();
@@ -67,7 +71,7 @@ class _ArchivePageState extends State<ArchivePage> {
         final zone = app.ws.archiveZone;
         final processed = _ProcessedInspirations.of(zone);
         return Scaffold(
-          appBar: AppBar(title: const Text('归档区')),
+          appBar: widget.embedded ? null : AppBar(title: const Text('归档区')),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[

@@ -3,6 +3,7 @@ import '../json/store_file.dart';
 import '../models/entity.dart';
 import '../models/enums.dart';
 import 'export_codec.dart';
+import 'store_diff.dart';
 
 /// GitHub 备份同步的**纯 Dart 判定内核**。
 ///
@@ -322,9 +323,10 @@ Map<DocName, int> liveCountsOf(StoreFile store) => <DocName, int>{
 
 /// 判定"现在该做什么"。
 ///
-/// 判定只看两个时间戳（[StoreFile.savedAt]，也就是导出时的 `exportedAt`）
-/// 与上次同步的记账 —— 不解析字段、不做合并。**这不是省事，是口径**：
-/// 手机上把两份人生记录自动并起来，比让用户手动选一次危险得多。
+/// 判定看两样东西：**两边的内容**（[diffStores] 比规范文本）与两个时间戳
+/// （[StoreFile.savedAt]，也就是导出时的 `exportedAt`），外加上次同步的记账。
+/// 内容那一步只回答"要不要动手"，**不做合并**：手机上把两份人生记录自动并起来，
+/// 比让用户手动选一次危险得多，所以两边真不一样时仍旧让用户选。
 SyncPlan analyzeSync({
   required StoreFile local,
   required int? localSavedAt,
@@ -365,6 +367,28 @@ SyncPlan analyzeSync({
       localSavedAt: localSavedAt,
       remoteSavedAt: remoteSavedAt,
     );
+  }
+
+  // 内容闸门（2026-10-01 反馈）：**两边内容一模一样就什么都不做**。
+  //
+  // 只比时间戳会把"刚拉回来的那一份"当成"本地改过"：拉取会把本地时间戳顶成
+  // 拉取那一刻，于是下一次自动上传必然判定"本地比远程新"，把内容一字不差的
+  // 文件再提交一次 —— 提交码不同，内容却是同一份（ADR-091 反对的正是这种提交）。
+  // 这里换用与差异面板同一个判据（[diffStores] 比规范文本，比的是全部记录、
+  // 因此不受时间戳影响）：**内容相同 ⇒ 判定成"同一份"**，不推、不拉、不记账。
+  if (remote.payload != null) {
+    final contentDiff = diffStores(base: remote.payload!.store, target: local);
+    if (!contentDiff.hasChanges) {
+      return SyncPlan(
+        action: SyncAction.noChange,
+        message: '这台手机上的内容和云端是同一份，'
+            '只是时间戳对不上（两边最后都改于 ${formatStamp(localSavedAt)} / '
+            '${formatStamp(remoteSavedAt)}）。\n'
+            '共 $localCount 条记录，不需要推送也不需要拉取。',
+        localSavedAt: localSavedAt,
+        remoteSavedAt: remoteSavedAt,
+      );
+    }
   }
 
   if (localSavedAt == remoteSavedAt) {

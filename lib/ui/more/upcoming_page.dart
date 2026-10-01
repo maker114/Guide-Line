@@ -16,9 +16,13 @@ import 'task_grouping.dart';
 /// 页面右上角那个「日历」按钮会打开按月排的任务日历：哪几天有任务、
 /// 分别属于哪条线（事件标识色），点一天就能看到那天的任务。
 class UpcomingTasksPage extends StatelessWidget {
-  const UpcomingTasksPage({super.key, required this.app});
+  const UpcomingTasksPage({super.key, required this.app, this.embedded = false});
 
   final AppController app;
+
+  /// 是否被**桌面外壳**嵌进内容区：嵌进去时不画自己的 `AppBar`
+  /// （外壳顶上已经有一条标题栏，两条叠着就是两个标题）。
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +43,7 @@ class UpcomingTasksPage extends StatelessWidget {
         );
 
         return Scaffold(
-          appBar: AppBar(title: const Text('接下来的任务')),
+          appBar: embedded ? null : AppBar(title: const Text('接下来的任务')),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
