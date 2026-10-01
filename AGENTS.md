@@ -131,8 +131,12 @@
 ## 9. 其他既有约定
 
 - **契约**：`docs/spec/数据契约.md` 是权威。字段变更必须把契约样本与规格文档改在**同一个提交**里。
-- **分层**：`lib/core` 纯 Dart（禁止 import Flutter）；新增插件只能出现在 `lib/platform`；
-  由 `test/core/architecture_test.dart` 扫描源码守护。
+- **分层**：`lib/core` 纯 Dart（禁止 import Flutter）；新增插件只能出现在 `lib/platform`。
+  **两条各有各的守卫，别记混**：
+  - `test/core/architecture_test.dart` 守的是"core 不许 import Flutter、层间依赖方向、
+    不许出现云端 SDK"，它**从不看第三方 package**；
+  - **新增插件只能进 `lib/platform`** 由 `test/core/platform_boundary_test.dart` 守
+    （2026-10-01 才补上；在此之前这条规矩没有任何机器守卫，靠自觉）。
 - **颜色**：界面里不硬编码颜色，一律从 `Theme` / `ThemeExtension` 取。
 - **决策编号**：新决策只用 `ADR-xxx` 一套，取全局最大值 +1，**与引用它的代码同一个提交**
   登记进 `docs/决策索引.md`。
