@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/rules/archive_zone.dart';
 import 'package:guideline/ui/projects/project_actions.dart';
 
 /// 项目删除确认框的文案口径（Q6）：**灵感与"项目 / 事件 / 任务"分开说**。
@@ -78,9 +79,17 @@ void main() {
       find.textContaining('1 条已合并灵感会退回「未分配」'),
       findsOneWidget,
     );
-    // 项目 / 事件 / 任务那一侧仍如实说"能恢复、30 天后自动清除"
+    // 项目 / 事件 / 任务那一侧仍如实说"能恢复、N 天后自动清除"
+    //
+    // **天数引常量、不抄字面量**（2026-10-01 改）：这里原来写成 "30 天"，
+    // 而 30 是 `trashRetentionDays` 的值 —— 测试把生产常量抄成字面量之后，
+    // 改常量的那天测试照样绿、界面上那句承诺却会照旧说 30 天。
+    // 引常量后，文案与常量一旦分叉，这条断言就红。
     expect(
-      find.textContaining('项目 / 事件 / 任务可在「更多 → 归档区 → 回收站」恢复，30 天后自动清除'),
+      find.textContaining(
+        '项目 / 事件 / 任务可在「更多 → 归档区 → 回收站」恢复，'
+        '$trashRetentionDays 天后自动清除',
+      ),
       findsOneWidget,
     );
     expect(
@@ -103,7 +112,11 @@ void main() {
     expect(find.textContaining('永久删除'), findsNothing);
     expect(find.textContaining('不进回收站'), findsNothing);
     expect(
-      find.textContaining('可在「更多 → 归档区 → 回收站」恢复，30 天后自动清除'),
+      // 同样引常量：这一处原来也把 "30 天" 抄成了字面量（突变测试抓出来的 ——
+      // 只改上面那一处时，这条仍会盯着 30 不放）
+      find.textContaining(
+        '可在「更多 → 归档区 → 回收站」恢复，$trashRetentionDays 天后自动清除',
+      ),
       findsOneWidget,
     );
 
