@@ -290,6 +290,16 @@ class _AiPreviewPageState extends State<AiPreviewPage> {
       return;
     }
     // 勾选状态单独放回去：`replaceProjectItems` 一律建成未完成
+    //
+    // ⚠️ **这里刻意不包 `run()`**（2026-10-01 核过，结论是"不用改"）：
+    // `setProjectItemDone` 每次都 `persist()`，而 `AppStorage.save` 现在会在
+    // "盘上那份属于更新版本的 App" 时抛 `StoreLockedByNewerSchema` ——
+    // 光看这一句会以为该包上。但实际**走不到**：
+    //   · 被锁住时，上面那次 `replaceProjectItems` 已经被 `run()` 挡下并 `return`；
+    //   · 而 `setProjectItemDone` 自己**先校验参数、后碰存储**（项目/条目不存在时
+    //     先抛 `RuleViolation`），所以真能进到这个循环时，存储一定是可写的。
+    // 也就是说加包装是**不可测的防卫代码** —— 它会让"没人走过的分支"留在库里，
+    // 而这正是本项目反复清理的那类东西。真要改就等它变成可达的那一天。
     if (texts.isNotEmpty) {
       final w = widget.app.ws;
       final project = w.findProject(widget.projectId);

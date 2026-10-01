@@ -114,6 +114,7 @@ void main() {
   test('同一毫秒隔离两次：第二份不会盖掉第一份的现场（P1-7）', () {
     final first = File('${dir.path}${Platform.pathSeparator}a.json')..writeAsStringSync('现场一');
     final firstPath = AtomicFile(first).quarantine(1000);
+    expect(firstPath, isNotNull, reason: '隔离成功必须给出真实现场的路径');
     expect(first.existsSync(), isFalse, reason: '隔离就是把它改名挪走');
 
     // 同一个时间戳再来一次（同一测试里就会发生；真机上是时钟被回拨）
@@ -121,8 +122,35 @@ void main() {
     final secondPath = AtomicFile(second).quarantine(1000);
 
     expect(secondPath, isNot(firstPath), reason: '两份现场必须都在，不能互相覆盖');
-    expect(File(firstPath).readAsStringSync(), '现场一');
-    expect(File(secondPath).readAsStringSync(), '现场二');
+    expect(File(firstPath!).readAsStringSync(), '现场一');
+    expect(File(secondPath!).readAsStringSync(), '现场二');
+  });
+
+  test('隔离失败时返回 null，**不许把被隔离的文件自己当成现场**（2026-10-01 修）', () {
+    // 旧写法失败时 `return file.path`，而 `AppStorage.load` 把返回值无条件记进
+    // `quarantinedPaths` —— 于是界面上"已隔离保留现场"那句告警**指向主文件本身**，
+    // 而紧接着 `_writeBackRecovered` 写的正是同一路径：告警指着的文件下一刻就被覆盖。
+    //
+    // 造"改名失败"：把**隔离目标本身**占成一个**目录** —— `renameSync` 往一个
+    // 已存在的目录上覆盖会失败。
+    // （第一次我试的是"把父目录做成文件"，不成立：Dart 的 `renameSync` 会自动建父目录，
+    //   于是文件照样被改名走，用例红在"原文件保持不动"那条上。）
+    final src = File('${dir.path}${Platform.pathSeparator}broken.json')
+      ..writeAsStringSync('读不出来的内容');
+    final target = AtomicFile.corruptOf(src, 1000);
+    Directory(target.path).createSync(recursive: true);
+
+    final result = AtomicFile(src).quarantine(1000);
+
+    expect(result, isNull, reason: '隔离失败就说失败，不能返回一个不是现场的路径');
+    expect(
+      result,
+      isNot(src.path),
+      reason: '**尤其是不能返回被隔离文件自己的路径** —— 那会让告警指向它，'
+          '而下一步恢复写回的就是它',
+    );
+    expect(src.existsSync(), isTrue, reason: '隔离失败时原文件保持不动');
+    expect(src.readAsStringSync(), '读不出来的内容', reason: '内容也不许被改动');
   });
 
   test('cleanupTmp：清掉上次崩溃留下的 .tmp，主文件原样不动（T-8）', () {

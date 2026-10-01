@@ -89,7 +89,7 @@ class AppInfo {
 
   static const String version = '2.2.0';
 
-  static const String buildNumber = '64';
+  static const String buildNumber = '65';
 
   /// 界面与导出里展示的完整版本（`1.8.5+37`）。
   ///

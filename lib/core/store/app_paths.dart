@@ -55,6 +55,51 @@ class AppPaths {
 
   List<File> get managedFiles => <File>[storeFile, prefsFile, backgroundImageFile];
 
+  /// **会用 `.tmp` 中转的文件（给 `cleanupTmp` 用）—— 比 [managedFiles] 宽。**
+  ///
+  /// 为什么不能直接往 [managedFiles] 里加：那个清单的语义是"**这是数据文件**"，
+  /// 别处会照着它判断"哪些东西要进轮转 / 导出 / 备份"（见 `app_storage.dart` 里
+  /// 那句"省得被 `managedFiles` 当成数据文件看待"）。私有存档（实现计划正文、
+  /// 重置快照、同步记录）**不是数据**，加进去会改变那些判断。
+  ///
+  /// 但它**确实是原子写的** —— 主文件、偏好、背景图、日快照、实现计划正文、
+  /// 重置快照、同步记录，外加 `exports/` 子目录里的导出与交接说明，
+  /// 所以崩溃时一样会留下 `.tmp`：清理要覆盖到，判定"是不是数据"则不要。
+  /// 两件事用一个清单表达过，就会顾此失彼。
+  ///
+  /// （2026-10-01 更正：这段原来写"7 处"、并暗示列清单就够。实际是 **10 处**，
+  /// 而 `exports/` 那两处**列清单的思路必然漏掉** —— 它们现在由
+  /// `AtomicFile.cleanupTmpIn(paths.exportsDir)` 按目录扫名字来清。）
+  ///
+  /// 日快照是**每天一个新名字**，所以这里现扫目录（`managedFiles` 那种写死的
+  /// 三条做不到）。
+  ///
+  /// ⚠️ 扫到的可能是**残留的 `.tmp` 本身**（崩溃时"正式文件还没就位"，
+  /// 于是目录里只有 `guideline.daily.20260906.json.tmp`）—— 所以两种都要收进来。
+  /// 第一次我写的是"只收 `.json` 结尾的"，于是把那种残留**恰好排除掉**，
+  /// 而那正是最该清的一种（用例当场红了）。
+  List<File> get atomicWrittenFiles {
+    final out = <File>[...managedFiles];
+    if (!directory.existsSync()) return out;
+    for (final entry in directory.listSync()) {
+      if (entry is! File) continue;
+      final name = entry.uri.pathSegments.last;
+      if (!name.startsWith(dailyPrefix)) continue;
+      // 正式文件（`…json`）→ 清理时会去找它的 `.tmp`；
+      // 残留的 `.tmp` 本身 → 直接作为候选（它的 `.tmp.tmp` 不存在，无副作用）
+      if (name.endsWith('.json')) {
+        out.add(entry);
+      } else if (name.endsWith('.json.tmp')) {
+        // ⚠️ **必须用 `_join` 拼回绝对路径**：第一次我写的是
+        // `File(name.substring(...))` —— 那是**相对路径**，`tmpOf` 拼出来的
+        // `…tmp` 会从进程工作目录去找，`existsSync()` 为假，
+        // 于是"清理"**静默什么都没做**（探针打出来才看见）。
+        out.add(File(_join(name.substring(0, name.length - '.tmp'.length))));
+      }
+    }
+    return out;
+  }
+
   void ensureDirectories() {
     if (!directory.existsSync()) directory.createSync(recursive: true);
   }
