@@ -359,7 +359,10 @@ class _ProcessedInspirationsPane extends StatelessWidget {
             ),
             trailing: actionable
                 ? PopupMenuButton<String>(
-                    tooltip: '更多',
+                    // tooltip 是**给读屏软件念的**（长按也会显示）。原来写「更多」，
+                    // 念出来只有"更多"两个字，听的人不知道这是对哪一条、能做什么。
+                    // 2026-10-02 改准：这是这一条内容的操作入口。
+                    tooltip: '这一条的操作',
                     onSelected: (value) async {
                       if (value == 'restore') {
                         if (merged) {
@@ -442,7 +445,9 @@ class _TrashPane extends StatelessWidget {
               style: Theme.of(context).textTheme.labelSmall,
             ),
             trailing: PopupMenuButton<String>(
-              tooltip: '更多',
+              // 与「已处理灵感」那一档同一句话（2026-10-02）：
+              // 原来念「更多」，听的人不知道是对哪一条、能做什么。详见上面那处注释。
+              tooltip: '这一条的操作',
               onSelected: (value) async {
                 if (value == 'restore') {
                   _restore(context, entity);

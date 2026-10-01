@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app/app_controller.dart';
 import 'platform/data_directory.dart';
@@ -59,6 +60,17 @@ class GuidelineApp extends StatelessWidget {
           // 于是"跟随系统"一直是**唯一**的行为，想固定用深色也没有入口。
           // 现在三个取值都能在「更多 → 主题与背景」里选（`ui_prefs.themeMode`）。
           themeMode: themeModeOf(prefs),
+          // 中文本地化（2026-10-02 加）：应用自己的文案一直是中文，但 **Flutter
+          // 内置组件**的文案默认只有英文 —— 关于弹窗上那两颗 "View licenses" /
+          // "Close" 就是这么来的，也是全应用唯一没本地化的地方。
+          //
+          // 只声明 `zh` 一种：这不是"支持多语言"，而是**把内置文案钉到中文**。
+          // 列的候选只有中文，系统语言是别的也仍走中文，与"应用只有中文文案"
+          // 这个既有事实一致（声明十几种反而会让内置文案跟着系统语言变，
+          // 于是界面一半中文一半英文）。
+          localizationsDelegates: GlobalMaterialLocalizations.delegates,
+          supportedLocales: const <Locale>[Locale('zh')],
+          locale: const Locale('zh'),
           builder: (context, child) => AppBackground(
             bytes: controller.backgroundBytes,
             opacity: prefs.backgroundOpacity,

@@ -31,6 +31,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # 中文本地化：Flutter 内置组件的文案（`showAboutDialog` 的 "View licenses" /
+  # "Close"、日期选择器的按钮……）默认只有英文。2026-10-02 加上 ——
+  # 关于弹窗那两颗按钮一直是英文，是全应用唯一没本地化的地方（审查发现 🟡）。
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

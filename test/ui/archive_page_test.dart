@@ -141,7 +141,7 @@ void main() {
     await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('更多'));
+    await tester.tap(find.byTooltip('这一条的操作').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('恢复'));
     await tester.pumpAndSettle();
@@ -165,7 +165,7 @@ void main() {
     await tester.tap(find.text('回收站'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('更多'));
+    await tester.tap(find.byTooltip('这一条的操作').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('恢复'));
     await tester.pumpAndSettle();
@@ -195,7 +195,7 @@ void main() {
     );
     // 行上必须有来源标记：三档合一之后，"这条是怎么来的"只能靠它
     expect(find.text('已合并'), findsOneWidget, reason: '逐条标来源');
-    await tester.tap(find.byTooltip('更多'));
+    await tester.tap(find.byTooltip('这一条的操作').first);
     await tester.pumpAndSettle();
     expect(
       find.text('恢复为待处理，项目内容不退回'),
@@ -266,7 +266,9 @@ void main() {
 
     expect(find.text('被遮住的灵感'), findsOneWidget);
     expect(
-      find.byTooltip('更多'),
+      // 这里**不能**加 `.first`：`findsNothing` 要的是"整个页面一个都没有"，
+      // 而 `.first` 会把它变成"第一个匹配项"的语义，断言就失去意义了。
+      find.byTooltip('这一条的操作'),
       findsNothing,
       reason: '它没被处理过，只是项目归档了（Q53）—— 给一个"恢复为待处理"会让人以为它坏过',
     );

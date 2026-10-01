@@ -47,7 +47,7 @@ const List<AppThemePreset> appThemePresets = <AppThemePreset>[
   AppThemePreset(id: 'default', name: '默认蓝', seed: Color(0xFF2F6FEB), mood: '干净、通用'),
   AppThemePreset(id: 'ink', name: '墨黑', seed: Color(0xFF37474F), mood: '克制、少颜色'),
   AppThemePreset(id: 'pine', name: '松绿', seed: Color(0xFF2E7D32), mood: '安静、耐看'),
-  AppThemePreset(id: 'clay', name: '陶土', seed: Color(0xFFB4532A), mood: '温暖、有点土气的好看'),
+  AppThemePreset(id: 'clay', name: '陶土', seed: Color(0xFFB4532A), mood: '温暖、偏土黄'),
   AppThemePreset(id: 'plum', name: '梅紫', seed: Color(0xFF7B3FA0), mood: '偏文艺'),
   AppThemePreset(id: 'sand', name: '沙金', seed: Color(0xFF9A7B31), mood: '旧纸张的感觉'),
   AppThemePreset(id: 'ocean', name: '海松', seed: Color(0xFF0E7C86), mood: '清爽、偏冷'),

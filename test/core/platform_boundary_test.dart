@@ -111,8 +111,25 @@ void main() {
   });
 }
 
-/// 允许出现在任何一层的 SDK 包（不是插件）。
-const Set<String> _sdkPackages = <String>{'flutter', 'flutter_test'};
+/// 允许出现在任何一层的 **SDK 包**（不是插件）。
+///
+/// `flutter` / `flutter_test` 是 SDK 本体；`flutter_localizations` 也是 Flutter
+/// 官方仓库里的一个包（`packages/flutter_localizations`），**没有任何平台通道**，
+/// 所以它不属于这条规则要防的东西 —— 规则防的是"插件漏进分层"，
+/// 而本地化只是往 `MaterialApp` 上挂几个 delegate。
+///
+/// 2026-10-02 登记：关于弹窗的 "View licenses" / "Close" 一直是英文
+/// （全应用唯一没本地化的地方），修法只能在 `MaterialApp` 上挂
+/// `flutter_localizations` 的 delegate，而 `MaterialApp` 在 `lib/main.dart` ——
+/// 它既不在 `lib/platform` 也不该为这个新增一层。
+///
+/// ⚠️ **别顺手把它当成"以后放宽"的先例**：判据是"这个包有没有平台通道"。
+/// `path_provider` / `share_plus` 这类有原生实现的一律仍归插件，只能进 `lib/platform`。
+const Set<String> _sdkPackages = <String>{
+  'flutter',
+  'flutter_test',
+  'flutter_localizations',
+};
 
 /// `lib/platform` 下**当前**真的在用的插件，以及各自被 import 的处数。
 ///

@@ -55,9 +55,13 @@ class BackupsPage extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Text(
-                  // 只留"会被覆盖、想反悔要尽快"这一句：它是丢失风险
+                  // 只留"会被覆盖、想反悔要尽快"这一句：它是丢失风险。
+                  // 2026-10-02 把**日快照**那一档也写进来 —— 原文只说了滚动备份
+                  // 留几份，而页面上明明还列着"日快照"那一类，用户会问"那些留多久"。
+                  // 两个数字都引常量，不再各写一遍。
                   '滚动备份只保留 ${AppPaths.rollingBackupCount} 份，'
-                  '会被后续保存依次覆盖；如需恢复到较早的备份请尽快。',
+                  '会被后续保存依次覆盖；日快照按天各留一份、最多 ${AppPaths.dailyBackupCount} 天。'
+                  '如需恢复到较早的备份请尽快。',
                   style: theme.textTheme.bodySmall,
                 ),
               ),
