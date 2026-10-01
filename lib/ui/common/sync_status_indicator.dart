@@ -155,10 +155,19 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
     super.initState();
     _shown = widget.state;
     _morph.value = _shown.isRunning ? 0 : 1;
+    // 整格的淡出与缩放读的是 `_exit.value`，而它**不在任何按帧重建的 builder 里**
+    // （`AnimatedBuilder` 只包住胶囊内部）—— 所以退场时整格不会自己重画，
+    // 实测现象是"形状在收、外层不透明度却一直是 1"，正是用户说的"生硬"。
+    // 挂一个 setState 让它每帧重建。这一格只有几十像素，代价可忽略。
+    _exit.addListener(_onExitTick);
     if (_shown.isVisible) {
       _enter.forward(from: 0);
       if (_shown.isRunning) _spin.repeat();
     }
+  }
+
+  void _onExitTick() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -169,6 +178,7 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
 
   @override
   void dispose() {
+    _exit.removeListener(_onExitTick);
     _enter.dispose();
     _morph.dispose();
     _spin.dispose();
@@ -208,22 +218,52 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
     }
   }
 
-  /// 该消失了：先按原路收回圆环，再淡出 —— 不是"啪"地不见（需求②）。
+  /// 该消失了：**形状收回与淡出同时起跑**，不是"先收完、停住、再淡"。
+  ///
+  /// 2026-10-02 按实机反馈改（用户："最后的消失有点生硬"）。用探针量过旧版每一帧：
+  ///
+  /// ```
+  /// 旧版（串行）：
+  ///   t=120ms morph=0.571 exit=1.000 size=78.6  opacity=[1.00]   ← 文字已淡尽
+  ///   t=280ms morph=0.000 exit=1.000 size=36.0  opacity=[1.00]   ← 形状收完，仍全不透明
+  ///   t=360ms morph=0.000 exit=0.800 size=36.0                    ← 才开始淡
+  ///   t=520ms morph=0.000 exit=0.000 size=36.0                    ← 淡完
+  /// ```
+  ///
+  /// 生硬有两处，全在这张表里：
+  ///   1. **收缩全程外层不透明度一直是 1** —— 形状在变小，视觉重量却一点没减；
+  ///   2. **文字在 120ms 就淡尽了，形状却要缩到 280ms** —— 中间 160ms 是
+  ///      "一个空胶囊在缩"，然后停住，再单独淡 200ms。
+  ///
+  /// 现在两个控制器**同时反向、同一段时长**（都用 [_morphDuration]）：
+  /// 形状一边收、整格一边淡，收到圆环时正好淡尽，没有"停一下再淡"那一段。
   void _startLeaving() {
     if (_leaving || !_shown.isVisible) return;
     _leaving = true;
     _spin.stop();
+    // 与 `_morph` 同长：两条曲线共用一段时间轴，末端一起到 0。
+    _exit.duration = SyncStatusIndicator._morphDuration;
+    _exit.reverse();
     _morph.reverse().whenComplete(() {
       if (!mounted || !_leaving) return;
-      _exit.reverse().whenComplete(() {
-        if (!mounted || !_leaving) return;
-        setState(() {
-          _leaving = false;
-          _shown = _idle;
-        });
+      setState(() {
+        _leaving = false;
+        _shown = _idle;
       });
     });
   }
+
+  /// 成形进度的当前值（0 = 圆环，1 = 胶囊）。
+  ///
+  /// 标 [visibleForTesting] 而不是把控制器整个公开：动画"匀不匀"是**观感**，
+  /// 只有真机看得准；但"两段有没有重叠""退场总长对不对"是**可以量的** ——
+  /// 那就该让测试量得到，而不是靠人盯着屏幕猜。
+  @visibleForTesting
+  double get morphProgressForTesting => _morph.value;
+
+  /// 退场不透明度的当前值（1 = 全不透明，0 = 已淡尽）。
+  @visibleForTesting
+  double get exitProgressForTesting => _exit.value;
 
   @override
   Widget build(BuildContext context) {

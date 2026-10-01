@@ -238,13 +238,71 @@ void main() {
       reason: '退场放到一半还占着那一格（先按原路收回圆环，再淡出）',
     );
 
-    // 收成形（280ms）→ 淡出（200ms）
+    // 收成形（280ms）与淡出（200ms）**重叠着放**，所以这两下之后就该空了。
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pump(const Duration(milliseconds: 300));
     expect(
       tester.getSize(find.byType(SyncStatusIndicator)),
       Size.zero,
       reason: '放完才真的腾出位置',
+    );
+  });
+
+  testWidgets('退场：形状还在收的时候就已经开始淡了（两段重叠，不是串行）', (tester) async {
+    // 这条钉的是 2026-10-02 按实机反馈改掉的那个问题：
+    // 原来写的是「先按原路收回圆环，**收完**再淡出」—— 用户说"最后的消失有点生硬"。
+    // 生硬就生硬在：形状收完之后**停在圆环上、透明度还是 1**，然后才开始淡，
+    // 视觉上"动一下、停住、再淡掉"。
+    //
+    // 而原来那条用例只断言"尺寸还占着"与"最后归零" —— **串行改成并行它照样绿**，
+    // 所以它守不住这件事。这条专门盯**中途那一帧**：形状还没收完时，
+    // 不透明度必须已经小于 1。
+    Widget tree(AutoSyncState state) => MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              title: const Text('项目'),
+              actions: <Widget>[SyncStatusIndicator(state: state)],
+            ),
+          ),
+        );
+
+    await tester.pumpWidget(tree(const AutoSyncState.done('abcdef1')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.pumpWidget(tree(const AutoSyncState.idle()));
+    await tester.pump();
+
+    // 退场总长取 $morphDuration = 280ms。走到 ~200ms（约 0.71）时：
+    //   · 形状：还没收完（morph > 0），所以整格还在；
+    //   · 透明度：Interval(0.45, 1) 已经过去一半多，必须明显小于 1。
+    await tester.pump(const Duration(milliseconds: 200));
+
+    double opacityNow() {
+      final widgets = tester.widgetList<Opacity>(
+        find.descendant(
+          of: find.byType(SyncStatusIndicator),
+          matching: find.byType(Opacity),
+        ),
+      );
+      // 最外层那个才是整格的透明度（里面那个是胶囊上的文字）。
+      return widgets.first.opacity;
+    }
+
+    expect(
+      tester.getSize(find.byType(SyncStatusIndicator)).height,
+      26,
+      reason: '这时候形状还没收完，那一格仍占着',
+    );
+    expect(
+      opacityNow(),
+      lessThan(1),
+      reason: '形状还在收就已经在淡了 —— 两段必须重叠；等于 1 说明又串行了',
+    );
+    expect(
+      opacityNow(),
+      greaterThan(0),
+      reason: '也不该已经淡光 —— 淡到最后一段才归零',
     );
   });
 
