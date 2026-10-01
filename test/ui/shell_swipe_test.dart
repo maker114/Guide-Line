@@ -177,7 +177,9 @@ void main() {
 
     await swipe(tester, 3);
 
-    expect(find.text('主题与背景'), findsOneWidget, reason: '更多页的内容出现了');
+    // 2026-10-02：入口名从「主题与背景」统一成「外观」（与页面 AppBar 一致）。
+    // 这里同时也是「更多页的内容出现了」的判据。
+    expect(find.text('外观'), findsWidgets, reason: '更多页的内容出现了');
     // 这条原来写的是 `inTitle(find.text('关于'))`（`ShellTitle` 的子树）—— 而
     // `关于` 挂在 `AppBar` 的 **actions** 槽上，与 `title` 槽（`ShellTitle`）是并列关系，
     // 不是后代，所以那个写法恒为 0 命中。改成限定在 `AppBar` 整条里找。

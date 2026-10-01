@@ -27,7 +27,8 @@ import 'package:guideline/ui/more/export_page.dart';
 ///   · **先预览后落盘** —— 四个集合各给"新增 / 更新 / 保留 / 墓碑"，用户点确认前
 ///     就能看出多进来什么、覆盖了什么、删掉了什么；
 ///   · 悬挂引用与同 id 重复要单独说一句（且引用不当场改写）；
-///   · "同一秒以本机为准"这条口径必须写在框里；
+///   · "改动时间相同时本机赢"这条口径必须写在框里（2026-10-02 改的措辞：
+///     先给结论"以改动时间较晚的那份为准"，再补"时间完全相同时算本机赢"）；
 ///   · 报告没有任何变化时**不弹框、不写盘**（写一次就多一份备份、还动了 savedAt）。
 void main() {
   late Directory currentDir;
@@ -237,9 +238,16 @@ void main() {
     expect(find.textContaining('灵感：新增 1 · 更新 0 · 保留 0 · 墓碑 0'), findsOneWidget);
     expect(find.textContaining('合计：新增 2 · 更新 0 · 保留 0 · 墓碑 0'), findsOneWidget);
     expect(
-      find.textContaining('同一秒里的改动以本机为准'),
+      // 2026-10-02 改措辞：原来是"同一秒里的改动以本机为准"（把实现细节当结论说）。
+      // 现在先给结论"以改动时间较晚的那份为准"，再补"时间完全相同时算本机赢"。
+      find.textContaining('时间完全相同'),
       findsOneWidget,
-      reason: '胜负规则里"相等时本地赢"这条必须让用户看见',
+      reason: '胜负规则里"相等时本机赢"这条必须让用户看见',
+    );
+    expect(
+      find.textContaining('以改动时间较晚的那份为准'),
+      findsOneWidget,
+      reason: '结论要摆在前面 —— 用户判断的是"这条最后是谁的"',
     );
 
     await tester.tap(find.widgetWithText(FilledButton, '合并'));
@@ -312,7 +320,14 @@ void main() {
     await openImportDialog(tester, app, fileWith(projects: <Entity>[grave]), entry: '合并导入');
 
     expect(find.textContaining('项目：新增 0 · 更新 0 · 保留 0 · 墓碑 1'), findsOneWidget);
-    expect(find.textContaining('墓碑是对方删除过的记录'), findsOneWidget, reason: '墓碑不能被当成"多出来一条数据"');
+    expect(
+      // 2026-10-02 改措辞：正文里不再出现"墓碑"这个词（那是代码与文档里的说法，
+      // 摆给用户看是术语泄漏）。逐条计数那一行仍写"墓碑" —— 它是表单字段名，
+      // 与 `MergeReport` 的字段一一对应。正文则说清"是什么"。
+      find.textContaining('条对方删掉过的记录'),
+      findsOneWidget,
+      reason: '墓碑不能被当成"多出来一条数据"',
+    );
 
     await tester.tap(find.widgetWithText(FilledButton, '合并'));
     await tester.pumpAndSettle();

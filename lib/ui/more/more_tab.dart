@@ -92,7 +92,11 @@ class _MoreTabState extends State<MoreTab> {
         const SectionHeader('外观'),
         _MoreItem(
           icon: Icons.palette_outlined,
-          title: '主题与背景',
+          // 与页面标题一致（页面 AppBar 写的是「外观」）。原来这里写「主题与背景」，
+          // 于是同一个地方在列表里和点进去之后叫两个名字 —— 2026-10-02 统一。
+          // 选「外观」而不是「主题与背景」：这一页除了主题还有背景图、不透明度、
+          // 模糊，叫「主题与背景」说不全。
+          title: '外观',
           subtitle: _appearanceSubtitle(),
           page: AppearancePage(app: app),
         ),
