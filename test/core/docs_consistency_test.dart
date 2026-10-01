@@ -53,39 +53,77 @@ void main() {
     );
   });
 
-  test('README 里那个「例数」不许伪装成精确值', () {
-    // ## 这道闸为什么是现在这个样子（它换过一次形状）
+  test('三处「例数」必须说同一个数，而且不许把测试规模说小', () {
+    // ## 这道闸为什么是现在这个样子（它换过两次形状）
     //
     // 第一版钉的是"README 写的数 == `test/` 下声明的条数"。**那个口径是错的**，
     // 而且错得很隐蔽：声明条数 ≠ `flutter test` 跑出来的数，因为有用例是在
     // `for` 循环里生成的（`json_contract_test.dart` 按集合名、
     // `source_chip_tone_test.dart` 按主题×明暗、`theme_test.dart`、`contract_evolution_test.dart`
     // 都这么写）。2026-10-01 实测：**声明 832 条，跑出来 +850**。
+    // 第一版把 832 写进 README，用户照着敲 `flutter test` 看到的却是 `+850`。
     //
-    // 第一版把 832 写进了 README，而用户照着 README 那一行敲 `flutter test`，
-    // 屏幕上会是 `+850` —— 门面当场对不上自己的命令。它第一次真正触发，
-    // 也正是这种误伤：另一批用例加进来时它红了，而它红的原因与被测行为毫无关系。
+    // 第二版改成"只钉一条诚实的下限"，于是 README 那个数不会偏小 ——
+    // **但它拦不住偏高，也管不着别的文档**。2026-10-01 独立核验实测到三处
+    // 说的是三个数：README「约 880」、`docs/开发节奏.md`「约 850」、
+    // `docs/构建与发布.md`「810 例全绿」，而当时真值是 876。
+    // 「开发节奏」那一处还自称"照 README 的口径" —— 可见只守一处等于没守。
     //
-    // 所以现在**不再钉精确数**，只钉一条诚实的下限：README 说的数不许比
-    // 文件里能数出来的声明还少（少说 = 把测试规模说小了）。精确值以命令输出为准，
-    // README 用「约」字兜住。
-    final readme = File('README.md').readAsStringSync();
-    final declared = RegExp(r'当前约 (\d+) 例').firstMatch(readme)?.group(1);
-    expect(
-      declared,
-      isNotNull,
-      reason: 'README 里找不到形如「当前约 850 例」的那一处 —— '
-          '**带「约」字是有意的**：精确条数以 `flutter test` 的输出为准，'
-          '静态数出来的声明条数与之不等（循环里会生成用例）。',
-    );
-
-    final declaredCount = int.parse(declared!);
+    // 现在第三版：**三处一起管，且三处必须说同一个数**。
+    // 两条判据各管一件事：
+    //   · 每条都不许小于静态声明数（别把规模说小）；
+    //   · 三处彼此相等（别各自漂）。
+    // 仍然**不钉精确值**（那是第一版的错）：允许带「约」字，也允许不带。
+    final sources = <String, String>{
+      'README.md': 'README',
+      'docs/开发节奏.md': '开发节奏',
+      'docs/构建与发布.md': '构建与发布',
+    };
     final floor = _countTestDeclarations();
+    final found = <String, int>{};
+
+    sources.forEach((path, label) {
+      final text = File(path).readAsStringSync();
+      // 只认「**约** N 例」这个写法（三处当前口径都是它）。
+      //
+      // 为什么必须带「约」、不能只认 `N 例`：这三篇文档里**本来就有别的** `N 例` ——
+      // `开发节奏.md` 记着"那时全量才 177 例"（历史快照）、还讲"一次加 3 例"这类
+      // 说明性数字。把它们一起抓进来，守卫会红在一个与被测口径毫无关系的地方
+      // （第一版就是栽在这种误伤上）。带「约」字同时表达了两件事：
+      // **这是估计值**、**这是当前口径**。
+      final numbers = RegExp(r'约 (\d+) 例')
+          .allMatches(text)
+          .map((m) => int.parse(m.group(1)!))
+          .toSet();
+      expect(
+        numbers,
+        isNotEmpty,
+        reason: '$path 里找不到形如「约 N 例」的那一处。'
+            '这个数**必须写在文档里**（并带上「约」字），否则用户不知道测试规模、'
+            '也没人守它。',
+      );
+      expect(
+        numbers.length,
+        1,
+        reason: '$path 里出现了多个不同的例数：$numbers —— '
+            '同一份文档前后说法不一致，读的人不知道该信哪个。',
+      );
+      final count = numbers.single;
+      expect(
+        count,
+        greaterThanOrEqualTo(floor),
+        reason: '$path 说"约 $count 例"，而仅静态声明就有 $floor 条 —— 把测试规模说小了。'
+            '往大改，别往下改。',
+      );
+      found[label] = count;
+    });
+
     expect(
-      declaredCount,
-      greaterThanOrEqualTo(floor),
-      reason: 'README 说"约 $declaredCount 例"，而仅静态声明就有 $floor 条 —— '
-          '把测试规模说小了。往大改（并带上「约」字），别去掉「约」。',
+      found.values.toSet().length,
+      1,
+      reason: '三处必须说**同一个数**，实际是：$found。'
+          '这个数由 `test/core/docs_consistency_test.dart` 统一对着 —— '
+          '改一处不改另两处，这条就会红（2026-10-01 它们一度分别是 880 / 850 / 810）。',
     );
   });
 
@@ -146,6 +184,51 @@ void main() {
     );
   });
 
+  test('《决策索引》里的「代码引用」列与实际次数一致（ADR 与 Q 都要）', () {
+    // 为什么加这一条：上面那条只查"编号有没有行"，**不查行里的数对不对** ——
+    // 2026-10-01 实测发现 ADR 有 **9 处**、Q 有 **10 处**记的数早就过期了
+    // （ADR-095 记 0、实际 27；Q32 记 12、实际 4 ……）。
+    // 那一列如果只是装饰就罢了，但它的用途写得很明确：
+    // **"大于 0 的条目，改动受影响的代码时必须同步本行"** ——
+    // 数不对，这条纪律就没有依据。
+    //
+    // 口径与索引 §3 开头那句一致：`ADR-\d{2,3}` / `\bQ\d{1,2}\b` 全文匹配，
+    // 扫 `lib/` 与 `test/` 的 `.dart`，**不含本文件**
+    // （这里出现的编号只是"编号长什么样"的示例，不是引用）。
+    final indexLines = File('docs/决策索引.md').readAsLinesSync();
+    final adrActual = _countReferences(RegExp(r'ADR-\d{2,3}'));
+    final qActual = _countReferences(RegExp(r'\bQ\d{1,2}\b'));
+
+    expect(adrActual, isNotEmpty, reason: '一个 ADR 编号都没扫到？扫描路径写错了');
+    expect(qActual, isNotEmpty, reason: '一个 Q 编号都没扫到？扫描路径写错了');
+
+    // 表里的一行形如 `| ADR-095 | 说明… | 27 | 落点… |` ——
+    // 编号在第 2 格、引用数在第 4 格。`~ADR-0xx~` 是被划掉的那些，照样要对齐。
+    final rowPattern = RegExp(r'^\|\s*~*((?:ADR-\d{2,3})|(?:Q\d{1,2}))~*\s*\|.*?\|\s*(\d+)\s*\|');
+    final mismatches = <String>[];
+    var checked = 0;
+    for (final line in indexLines) {
+      final m = rowPattern.firstMatch(line);
+      if (m == null) continue;
+      final id = m.group(1)!;
+      final recorded = int.parse(m.group(2)!);
+      final actual = id.startsWith('ADR') ? (adrActual[id] ?? 0) : (qActual[id] ?? 0);
+      checked += 1;
+      if (recorded != actual) {
+        mismatches.add('  $id：索引记 $recorded，实际 $actual');
+      }
+    }
+
+    expect(checked, greaterThan(50), reason: '只认出 $checked 行？表格形状变了');
+    expect(
+      mismatches,
+      isEmpty,
+      reason: '《决策索引》的「代码引用」列与代码里的实际次数对不上：\n'
+          '${mismatches.join('\n')}\n'
+          '改代码时顺手更新那一格；那一列的用途就是"哪些条目的代码值得盯" —— 数不准就没用。',
+    );
+  });
+
   test('spec 文档里不许写"做到哪一步了"', () {
     // 口径归 spec，进度归《决策索引》与 CHANGELOG。混在一起的结果是：
     // 2026-09-27 发现《定义与边界》当时的 §8/§10 里 12 条陈述与代码事实相反
@@ -170,6 +253,27 @@ void main() {
           '或者把进度写进 CHANGELOG：\n  ${offenders.join('\n  ')}',
     );
   });
+}
+
+/// `lib/` 与 `test/` 的 `.dart` 里某个编号模式出现的**总次数**（编号 → 次数）。
+///
+/// **不含本文件**：这里是"编号长什么样"的示例所在的文件，算进来会自我指涉 ——
+/// 上面的 `_adrPattern` 与 `rowPattern` 里各有一处字面量，会让 ADR 的计数凭空多出来。
+Map<String, int> _countReferences(RegExp pattern) {
+  final counts = <String, int>{};
+  for (final dir in <String>['lib', 'test']) {
+    final root = Directory(dir);
+    if (!root.existsSync()) continue;
+    for (final entity in root.listSync(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.dart')) continue;
+      if (entity.uri.pathSegments.last == 'docs_consistency_test.dart') continue;
+      for (final m in pattern.allMatches(entity.readAsStringSync())) {
+        final id = m.group(0)!;
+        counts[id] = (counts[id] ?? 0) + 1;
+      }
+    }
+  }
+  return counts;
 }
 
 /// 读 `pubspec.yaml` 里唯一的 `version:` 行；读不到就抛一条**能读懂**的错误。
