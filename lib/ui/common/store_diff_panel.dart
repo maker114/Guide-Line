@@ -33,6 +33,7 @@ Future<DiffSheetResult> showStoreDiffSheet(
   bool danger = false,
   bool barrierDismissible = true,
   String? note,
+  bool hideConfirm = false,
 }) async {
   final result = await showModalBottomSheet<DiffSheetResult>(
     context: context,
@@ -50,6 +51,7 @@ Future<DiffSheetResult> showStoreDiffSheet(
       cancelLabel: cancelLabel,
       danger: danger,
       note: note,
+      hideConfirm: hideConfirm,
     ),
   );
   // 没点按钮就关掉 = "我还没想好"，与点了「暂不推送」不是一回事：
@@ -81,6 +83,7 @@ class StoreDiffSheet extends StatelessWidget {
     this.cancelLabel,
     this.danger = false,
     this.note,
+    this.hideConfirm = false,
   });
 
   final StoreDiff diff;
@@ -98,6 +101,14 @@ class StoreDiffSheet extends StatelessWidget {
 
   /// 底下补一句"接下来会发生什么"（覆盖方向、会不会先备份）。
   final String? note;
+
+  /// 把主按钮收起来，只留次按钮（[cancelLabel]）。
+  ///
+  /// 只有一个用它的地方：开机比对发现"本机 0 条、云端有东西"时，「覆盖云端数据」
+  /// 是明令禁止的动作（见 `StartupSyncRequest.pullOnly`），那一支上只留
+  /// 「使用云端数据」。按钮不是"禁用"，是**根本不存在** —— 摆一个灰按钮
+  /// 仍然是在说"这件事你可以做，只是现在不行"。
+  final bool hideConfirm;
 
   @override
   Widget build(BuildContext context) {
@@ -184,16 +195,18 @@ class StoreDiffSheet extends StatelessWidget {
                           Navigator.of(context).pop(DiffSheetResult.cancel),
                       child: Text(cancelLabel!),
                     ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    style: danger
-                        ? FilledButton.styleFrom(
-                            backgroundColor: theme.colorScheme.error)
-                        : null,
-                    onPressed: () =>
-                        Navigator.of(context).pop(DiffSheetResult.confirm),
-                    child: Text(confirmLabel),
-                  ),
+                  if (!hideConfirm) ...<Widget>[
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      style: danger
+                          ? FilledButton.styleFrom(
+                              backgroundColor: theme.colorScheme.error)
+                          : null,
+                      onPressed: () =>
+                          Navigator.of(context).pop(DiffSheetResult.confirm),
+                      child: Text(confirmLabel),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -985,12 +985,18 @@ class AppController extends ChangeNotifier {
   ///
   /// [remoteCommit] 是远程**此刻**那一次提交：推送前的确认框要把它摆出来，
   /// 用户才知道自己这次覆盖掉的是哪一次上传。
+  ///
+  /// [offline] 与 [error] 是**两个问题**：`error` 说"为什么没成"（给人看的那句话），
+  /// `offline` 说"这算不算网络问题"（决定右上角摆黄胶囊还是红胶囊）。以前后者是
+  /// 拿 `error` 这句中文去比对出来的（`looksOffline` 认"连不上"三个字），文案一改
+  /// 就静默失配；现在由抛错的地方标（ADR-095）。
   Future<
       ({
         RemoteBackup? remote,
         RemoteCommit? remoteCommit,
         SyncPlan? plan,
         String? error,
+        bool offline,
       })> checkGitHubBackup(
     GitHubBackupConfig config,
     String token,
@@ -998,10 +1004,22 @@ class AppController extends ChangeNotifier {
     final cleaned = config.normalized();
     final reason = cleaned.validate();
     if (reason != null) {
-      return (remote: null, remoteCommit: null, plan: null, error: reason);
+      return (
+        remote: null,
+        remoteCommit: null,
+        plan: null,
+        error: reason,
+        offline: false,
+      );
     }
     if (token.trim().isEmpty) {
-      return (remote: null, remoteCommit: null, plan: null, error: '还没填 Token');
+      return (
+        remote: null,
+        remoteCommit: null,
+        plan: null,
+        error: '还没填 Token',
+        offline: false,
+      );
     }
 
     try {
@@ -1012,23 +1030,36 @@ class AppController extends ChangeNotifier {
       final plan = analyzeSync(
         local: local,
         // 本地那句 savedAt 要读**盘上**的：`buildStoreFile()` 现取 `now()`，
-        // 拿它做基线的话本地永远"刚改过"。
-        localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
+        // 拿它做基线的话本地永远"刚改过"（ADR-095 第 ④ 条）。
+        localSavedAt: storage.readStoreSavedAt() ?? lastSyncedAt(),
         remote: remote,
         lastSync: storage.readSyncRecord(),
         // 需求④（ADR-093）：云端**此刻**那一次提交的码。它跟上次同步记账里那一个
         // 一致，就说明这中间没有第三方动过云端，本机可以直接覆盖上去。
         remoteCommitSha: remoteCommit?.sha ?? '',
       );
-      return (remote: remote, remoteCommit: remoteCommit, plan: plan, error: null);
+      return (
+        remote: remote,
+        remoteCommit: remoteCommit,
+        plan: plan,
+        error: null,
+        offline: false,
+      );
     } on GitHubBackupException catch (error) {
-      return (remote: null, remoteCommit: null, plan: null, error: error.message);
+      return (
+        remote: null,
+        remoteCommit: null,
+        plan: null,
+        error: error.message,
+        offline: looksOffline(error),
+      );
     } catch (error) {
       return (
         remote: null,
         remoteCommit: null,
         plan: null,
         error: '读取远程失败：$error',
+        offline: false,
       );
     }
   }
@@ -1142,12 +1173,42 @@ class AppController extends ChangeNotifier {
   /// 不弹窗、不画胶囊（用户口径）。
   Future<void> startupSyncCheck() => _autoSyncOnce(announce: false);
 
+  /// 自动上传的**防重入闸**：这一趟还跑着就绝不另起一趟（ADR-095 第 ③ 条）。
+  ///
+  /// 为什么不用 `autoSync.isRunning` 当闸：那个状态只在 `announce = true` 时才置位，
+  /// 而且**置位发生在第一个 await 之后** —— 手机外壳与桌面外壳各自在 `initState`
+  /// 里喊一声"开机比对一次"，两趟就能同时挤进来（连两次网、弹两次面板）。
+  /// 这个标记在方法**第一行**就立起来，`finally` 里放倒。
+  bool _autoSyncInFlight = false;
+
+  /// 拿盘上那句"本地数据最后一次落盘的时刻"当冲突判定的基线。
+  ///
+  /// 盘上还没有主数据文件时（本次运行一次都没写过盘）返回 [SyncRecord.syncedAt]，
+  /// 也就是"上次同步的那一刻" —— 那一刻两边是一致的，于是"本地改过吗"这个问题
+  /// 得到的答案是**没改过**，这正是事实。
+  ///
+  /// 以前这里退到 `local.savedAt`，而那个值来自 `buildStoreFile()` 现取的 `now()`
+  /// （`Ids.nowMillis()`）：**一次都没编辑过的本机于是被判成"刚改过"**，
+  /// 于是①每次回主页都白连一次网，②开机时还摆一扇"这台手机上也有改动"的面板
+  /// 去问一个用户根本没做过的事（ADR-095 第 ④ 条）。
+  int? lastSyncedAt() => storage.readSyncRecord()?.syncedAt;
+
   /// 比对一次，并按计划行事。
   ///
   /// [announce] = 要不要转那颗圆环。编辑后的自动同步转（用户要看它在动），
   /// 启动那次静默比对**不转** —— 需求⑤说的"不显示右上角圆环"。
   Future<void> _autoSyncOnce({required bool announce}) async {
-    if (autoSync.isRunning) return;
+    // 进门前上锁：下面每一个 await 都可能换出去，锁必须在这之前立起来。
+    if (_autoSyncInFlight) return;
+    _autoSyncInFlight = true;
+    try {
+      await _autoSyncOnceLocked(announce: announce);
+    } finally {
+      _autoSyncInFlight = false;
+    }
+  }
+
+  Future<void> _autoSyncOnceLocked({required bool announce}) async {
     // 已经摆着一个待确认的差异时，不再叠第二次比对。
     if (pendingAutoPushDiff != null || pendingStartupSync != null) return;
 
@@ -1161,7 +1222,8 @@ class AppController extends ChangeNotifier {
     final check = await checkGitHubBackup(saved.config, saved.token);
     if (check.error != null) {
       final reason = check.error!;
-      if (looksOffline(reason)) {
+      // "算不算连不上"由抛错的地方标（ADR-095 第 ⑤ 条），不拿中文去比对。
+      if (check.offline) {
         // 连不上：黄胶囊常驻（不自己消失），点开能看网络那句原话。
         _setAutoSync(AutoSyncState.offline(reason));
         // "继续编辑可能与云端产生差异"那句主动警告只在开机那一次（需求⑤）：
@@ -1175,6 +1237,35 @@ class AppController extends ChangeNotifier {
     final plan = check.plan;
     if (plan == null) {
       _setAutoSync(const AutoSyncState.failed('比对不出结果，请到同步页查看。'));
+      return;
+    }
+
+    // 本机 0 条活记录：**先拦下来**，再谈别的（ADR-095 第 ② 条）。
+    //
+    // 为什么要单独提前到 switch 之前：`analyzeSync` 里"提交码对得上 ⇒ 直接覆盖"
+    // 那一条排在 `localEmpty` **前面**（ADR-093 的位置口径），于是"本机 0 条 +
+    // 云端仍是上次那次提交"会判成 `push/trustedOverwrite`，从这里直奔
+    // `_pushAutoSync`，而 `pushGitHubBackup` 又会用 `localEmpty` 把它拒掉 ——
+    // 白跑一趟网络，用户只收到一枚红胶囊，还看不到那扇"要不要把云端取回来"的
+    // 面板。本机 0 条这件事比"云端有没有被别人动过"要紧，所以在这一层先判。
+    if (liveRecordCount(local) == 0) {
+      final remoteStore = check.remote?.payload?.store;
+      final cloudHasRecords =
+          remoteStore != null && liveRecordCount(remoteStore) > 0;
+      if (!announce && cloudHasRecords) {
+        pendingStartupSync = StartupSyncRequest(
+          diff: diffStores(base: remoteStore, target: local),
+          message: '云端备份里有 ${liveRecordCount(remoteStore)} 条记录，'
+              '这台手机上一个字都还没有。可以先把云端那份取回来，'
+              '取回之后两边就是同一份了。',
+          pullOnly: true,
+        );
+      }
+      _setAutoSync(
+        AutoSyncState.blocked(label: '没有可上传的记录', reason: plan.message),
+      );
+      // 摆了面板就得喊一声：外壳靠这条通知去拿 `pendingStartupSync`。
+      if (pendingStartupSync != null) notifyListeners();
       return;
     }
 
@@ -1250,7 +1341,9 @@ class AppController extends ChangeNotifier {
         notifyListeners();
         return;
       case SyncAction.localEmpty:
-        // 本机 0 条：读坏了也会显示成 0 条，所以**不拿空文件去覆盖云端**（Q-2）。
+        // 走不到这里：本机 0 条在上面就拦掉了。留着这个分支是为了
+        // switch 对枚举穷尽 —— 哪天 `analyzeSync` 多出一种"本机空"的动作，
+        // 编译器会在这里提醒。
         _setAutoSync(
           AutoSyncState.blocked(label: '没有可上传的记录', reason: plan.message),
         );
@@ -1274,22 +1367,50 @@ class AppController extends ChangeNotifier {
     _setAutoSync(const AutoSyncState.idle());
   }
 
-  /// 把这一趟自动上传做完，并把结果翻成指示器的四态。
+  /// 把这一趟自动上传做完，并把结果翻成指示器的状态。
+  ///
+  /// **`ok` 不等于"传上去了"**（ADR-095 第 ① 条）：`pushGitHubBackup` 在动手前
+  /// 会再判一次，判出"两边本来就是同一份"（`noChange`）时它一个字节都不写、
+  /// 只回一句 `ok: true`。那时候若照旧摆绿胶囊，提交码只能从记账里回读到
+  /// **上一次**那一枚 —— 界面于是拿别人的号报这一趟的成功。
+  /// 所以这里看 [PushOutcome.wrote]：没写就当作"这趟空转"，回静默。
   Future<void> _pushAutoSync(GitHubBackupConfig config, String token) async {
     final result = await pushGitHubBackup(config, token);
+    _reportAutoPush(result);
+  }
+
+  /// 把一次推送的结果翻成右上角那个指示器该说的话。
+  ///
+  /// 三条出口，一条都不许少：
+  ///   · 真写了（[PushOutcome.wrote]）→ 绿胶囊 + **这一次**的提交码
+  ///     （`pushGitHubBackup` 刚写进记账的那一枚，直接从它手里拿，不回读）；
+  ///   · 没成 → 红胶囊 + 原话；
+  ///   · 成了但什么都没写（两边本来就是同一份）→ **回静默，不摆绿胶囊、
+  ///     绝不报提交码**。为什么不摆一枚黄胶囊说这件事：空转不是"需要你看一眼"
+  ///     的状态，摆上去就会**常驻到下一次同步成功**（黄胶囊的规矩），
+  ///     等于每次多点一下都留一个永久提示。同一件事在 `_autoSyncOnce` 里也是
+  ///     回静默（[SyncAction.noChange] 那句注释），两处口径一致。
+  void _reportAutoPush(PushOutcome result) {
     if (!result.ok) {
       _setAutoSync(AutoSyncState.failed(result.message));
       return;
     }
-    // 提交码从记账里回读：pushGitHubBackup 已经把这一次的码写进去了，
-    // 不必为了显示再改一次它的返回值（那个签名手工页也在用）。
-    _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
+    if (!result.wrote) {
+      _setAutoSync(const AutoSyncState.idle());
+      return;
+    }
+    _setAutoSync(AutoSyncState.done(result.commitSha));
   }
 
   /// 用户在开机那扇面板上点了「覆盖云端数据」：把本机这份推上去。
   ///
   /// 与自动推送的区别是这一步有**明确授权**：用户看过差异、亲手选了"用本机覆盖
   /// 云端"，所以连 pull / bothChanged 也让它过（等于在同步页上点过那第二次确认）。
+  ///
+  /// **本机 0 条活记录时这扇面板上不会出现这个按钮**（ADR-095 第 ② 条）：
+  /// 那种情形下 `pushGitHubBackup` 一定会拒绝（读坏了也显示成 0 条，不拿空的
+  /// 覆盖云端），面板给一个按了必然失败的按钮等于先承诺再反悔。
+  /// 所以这里读的是**同一套出口**：拒绝就按拒绝报红，不另写一套"应该不会发生"。
   Future<void> acceptStartupPush() async {
     if (pendingStartupSync == null) return;
     pendingStartupSync = null;
@@ -1300,11 +1421,7 @@ class AppController extends ChangeNotifier {
       saved.token,
       overrideRemoteChanges: true,
     );
-    if (!result.ok) {
-      _setAutoSync(AutoSyncState.failed(result.message));
-      return;
-    }
-    _setAutoSync(AutoSyncState.done(readGitHubSyncRecord()?.commitSha ?? ''));
+    _reportAutoPush(result);
   }
 
   /// 用户在开机那扇面板上点了「使用云端数据」：拿云端那份覆盖本机。
@@ -1358,18 +1475,21 @@ class AppController extends ChangeNotifier {
   /// [overrideRemoteChanges] 是用户在"两边都改过"时明确选了"用本地覆盖远程"。
   /// 不点它就不会覆盖 —— **这一条不许被界面绕过**：手机上把两份人生记录
   /// 自动并起来，比让用户手动选一次危险得多。
-  Future<({bool ok, String message})> pushGitHubBackup(
+  ///
+  /// 返回值见 [PushOutcome]：**`ok` 与"真的写了"是两件事** ——
+  /// 判出"两边本来就是同一份"时它一个字节都不写，只回一句 `ok: true`。
+  Future<PushOutcome> pushGitHubBackup(
     GitHubBackupConfig config,
     String token, {
     bool overrideRemoteChanges = false,
   }) async {
     final cleaned = config.normalized();
     final reason = cleaned.validate();
-    if (reason != null) return (ok: false, message: reason);
+    if (reason != null) return PushOutcome.failure(reason);
     // 总开关是用户手上的闸：关着就是"别动网"（含"我改主意了"）。
     // 界面会把按钮置灰，但灰按钮挡不住无障碍焦点与热键重入，所以这里再挡一次。
-    if (!cleaned.enabled) return (ok: false, message: _gitHubDisabledMessage);
-    if (token.trim().isEmpty) return (ok: false, message: '还没填 Token');
+    if (!cleaned.enabled) return PushOutcome.failure(_gitHubDisabledMessage);
+    if (token.trim().isEmpty) return PushOutcome.failure('还没填 Token');
 
     try {
       final remote = await gitHub.readBackup(config: cleaned, token: token.trim());
@@ -1382,7 +1502,9 @@ class AppController extends ChangeNotifier {
       final local = workspace.buildStoreFile();
       final plan = analyzeSync(
         local: local,
-        localSavedAt: storage.readStoreSavedAt() ?? local.savedAt,
+        // 盘上那句"本地最后一次落盘"；没落过盘就用上次同步那一刻
+        // （见 [lastSyncedAt]：不拿"现在"顶替，否则本机永远"刚改过"）。
+        localSavedAt: storage.readStoreSavedAt() ?? lastSyncedAt(),
         remote: remote,
         lastSync: storage.readSyncRecord(),
         // 与自动同步同一套判定（Q-4：手动页本质是自动推送的手动版）：
@@ -1391,21 +1513,21 @@ class AppController extends ChangeNotifier {
       );
 
       if (plan.action == SyncAction.noChange) {
-        return (ok: true, message: '两边是同一份，没有要推的东西。');
+        // ⚠️ 这里**什么都没写**：调用方必须看 [PushOutcome.wrote] 再决定要不要说
+        // "传上去了"（ADR-095 第 ① 条）。
+        return PushOutcome.unchanged('两边是同一份，没有要推的东西。');
       }
       if (plan.action == SyncAction.localEmpty) {
-        return (
-          ok: false,
-          message: '${plan.message}\n\n'
-              '为避免误覆盖远程数据，这里不再继续：请先在这台手机上恢复数据，或者到远程把备份保存下来。',
+        return PushOutcome.failure(
+          '${plan.message}\n\n'
+          '为避免误覆盖远程数据，这里不再继续：请先在这台手机上恢复数据，或者到远程把备份保存下来。',
         );
       }
       if (plan.action == SyncAction.pull || plan.action == SyncAction.bothChanged) {
         if (!overrideRemoteChanges) {
-          return (
-            ok: false,
-            message: '${plan.message}\n\n'
-                '要覆盖远程请再点一次「推送」并在确认框里选「用本地覆盖远程」。',
+          return PushOutcome.failure(
+            '${plan.message}\n\n'
+            '要覆盖远程请再点一次「推送」并在确认框里选「用本地覆盖远程」。',
           );
         }
       }
@@ -1434,17 +1556,17 @@ class AppController extends ChangeNotifier {
         ),
       );
       notifyListeners();
-      return (
-        ok: true,
+      return PushOutcome.written(
+        commitSha: written.commitSha,
         message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
             '提交 ${shortSha(written.commitSha)} · 内容码 ${shortSha(written.sha)}\n'
             '远程路径：${cleaned.path}，分支 ${cleaned.branch}\n'
             '提交码是"同一次上传"的凭证：另一台手机上读到同一个码，就是同一份。',
       );
     } on GitHubBackupException catch (error) {
-      return (ok: false, message: '推送失败：${error.message}');
+      return PushOutcome.failure('推送失败：${error.message}');
     } catch (error) {
-      return (ok: false, message: '推送失败：$error');
+      return PushOutcome.failure('推送失败：$error');
     }
   }
 
@@ -1564,6 +1686,53 @@ class AppController extends ChangeNotifier {
     }
     return warnings;
   }
+}
+
+/// 一次「推送到 GitHub」的结果（ADR-095 第 ① 条）。
+///
+/// 为什么不是 `({bool ok, String message})` 那个记录类型：那样**答不出**
+/// "这一趟到底写没写远程"。而"推送"有三个结局，不是两个：
+///   · 真提交了一次（[wrote] = true）；
+///   · 没成（[ok] = false）；
+///   · **成了，但一个字节都没写** —— 判定发现两边本来就是同一份
+///     （[SyncAction.noChange]）。这一支也回 `ok: true`，可它**没有提交码可报**：
+///     界面若照旧摆绿胶囊，就只能去记账里回读到**上一次**那一枚提交码，
+///     于是把上一次的号说成这一次的（绿胶囊撒谎）。
+///
+/// 所以把"写没写"单独摆出来，让调用方没法忽略它。
+class PushOutcome {
+  const PushOutcome._({
+    required this.ok,
+    required this.wrote,
+    required this.message,
+    this.commitSha = '',
+  });
+
+  /// 没成：网络、Token、权限、本机 0 条、需要用户二次确认……
+  const PushOutcome.failure(String message)
+      : this._(ok: false, wrote: false, message: message);
+
+  /// 成了，但远程**一个字都没改**（两边本来就是同一份）。
+  const PushOutcome.unchanged(String message)
+      : this._(ok: true, wrote: false, message: message);
+
+  /// 真写了一次提交。[commitSha] 就是**这一次**的提交码。
+  const PushOutcome.written({
+    required String commitSha,
+    required String message,
+  }) : this._(ok: true, wrote: true, message: message, commitSha: commitSha);
+
+  /// 这一趟有没有失败。
+  final bool ok;
+
+  /// 这一趟有没有**真的在远程写下一次提交**。false 时 [commitSha] 必为空串。
+  final bool wrote;
+
+  /// 给人看的那句话（失败原因 / 空转说明 / 成功摘要）。
+  final String message;
+
+  /// 这一次上传的提交码；没写就是**空串**（不是"未知"，是"这次没有"）。
+  final String commitSha;
 }
 
 /// 把「推开一个页面 / 回到外壳」翻译成存储层的编辑会话。

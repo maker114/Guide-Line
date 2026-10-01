@@ -12,10 +12,27 @@ import '../core/store/github_sync.dart';
 ///
 /// 与 `AiRequestException` 同一个形状：消息本身就是可以显示给用户的中文，
 /// 界面不必再翻译一遍。
-class GitHubBackupException implements Exception {
-  const GitHubBackupException(this.message);
+///
+/// [network] 是**这句错是不是"连不上"**的结构化判据（ADR-095）：界面上
+/// "GitHub 未连接"那枚黄胶囊与"这次真的失败了"那枚红胶囊要分开说，而分开的
+/// 依据以前是拿中文去比对上一条错误消息（`looksOffline` 认"连不上"三个字）——
+/// 文案改一个词就静默失配，离线会被说成"这次真的失败"，用户去改 Token、
+/// 改仓库名，而真正该做的是看一下网络。现在由**抛错的地方**自己声明。
+class GitHubBackupException implements Exception, GitHubBackupNetworkError {
+  const GitHubBackupException(this.message, {this.network = false});
 
   final String message;
+
+  /// 这一条是不是"网络层面没通"（连不上 / 超时 / 请求被中断）。
+  ///
+  /// Token 不对、仓库名写错、文件太大都是另一种失败，**不要**标成 true：
+  /// 把它们混进"网络不好"，用户会一直等一个永远不会来的自动重试。
+  final bool network;
+
+  /// 给 core 层问的那个名字（[GitHubBackupNetworkError] 是 core 定的口子，
+  /// `looksOffline` 只认它，于是 core 不必 import 平台层）。
+  @override
+  bool get isNetworkFailure => network;
 
   @override
   String toString() => message;
@@ -392,13 +409,17 @@ class HttpGitHubBackupGateway implements GitHubBackupGateway {
       throw GitHubBackupException(
         '连不上 api.github.com：${error.osError?.message ?? error.message}\n'
         '请检查网络与该地址是否可达；若始终连不上，请确认安装包的联网权限没有被去掉',
+        network: true,
       );
     } on HttpException {
-      throw const GitHubBackupException('网络请求失败，稍后再试');
+      throw const GitHubBackupException('网络请求失败，稍后再试', network: true);
     } on TimeoutException {
-      throw GitHubBackupException('请求超过 ${limit.inSeconds} 秒未完成，请稍后再试');
+      throw GitHubBackupException(
+        '请求超过 ${limit.inSeconds} 秒未完成，请稍后再试',
+        network: true,
+      );
     } catch (error) {
-      throw GitHubBackupException('请求超时或中断：$error');
+      throw GitHubBackupException('请求超时或中断：$error', network: true);
     }
   }
 

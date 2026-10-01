@@ -270,16 +270,32 @@ bool commitCodeMatches({String? remoteCommitSha, String? lastSyncedCommitSha}) {
   return remote == last;
 }
 
+/// 一个错自己声明的"我是不是网络问题"。
+///
+/// 平台层的 `GitHubBackupException` 通过 `implements` 实现它 —— `looksOffline`
+/// 于是既能问到那个标记，又不必把平台层 import 进来（分层硬线）。
+abstract interface class GitHubBackupNetworkError {
+  /// true = 连不上 / 超时 / 请求被中断；false = Token、权限、地址、体积这类。
+  bool get isNetworkFailure;
+}
+
 /// 这句错是不是"连不上 GitHub"（需求⑤：连不上要单独给一句警告 + 一枚常驻胶囊，
 /// 跟"这次真的失败了"分开说）。
 ///
-/// 只认网络层那几句原话（文案来自 `lib/platform/github_backup_client.dart`）：
-/// Token 无效、路径写错、文件太大都是另一种失败，该红就红 —— 把它们混进
-/// "网络不好"，用户会一直等一个永远不会来的自动重试。
-bool looksOffline(String message) =>
-    message.contains('连不上') ||
-    message.contains('网络请求失败') ||
-    message.contains('请求超时');
+/// **判据是抛错方自己标的那个标记**（[GitHubBackupNetworkError.isNetworkFailure]，
+/// 平台层那个异常类实现的就是它），不是拿中文去比对消息（ADR-095）：
+/// 以前这里认的是"连不上 / 网络请求失败 / 请求超时"三个中文串，文案改一个词就
+/// 静默失配 —— 离线会被说成"这次真的失败"，用户于是去改 Token、改仓库名，
+/// 而真正该做的是看一眼网络。
+///
+/// 参数写成 `Object?` 而不是那个异常类型，是为了**不 import 平台层**
+/// （`lib/core` 不许依赖 `lib/platform`，由 `test/core/architecture_test.dart` 守着）：
+/// 这里只问"你有没有说自己 network: true"。没实现这个接口的东西（自己写的配置
+/// 错误、GitHub 的 4xx/5xx，以及随手传进来的消息串）一律算失败。
+bool looksOffline(Object? error) => switch (error) {
+      final GitHubBackupNetworkError failure => failure.isNetworkFailure,
+      _ => false,
+    };
 
 /// 目标仓库本身（不是里面的文件）：只用来回答"这个仓库到底在不在、我看不看得见"。
 ///

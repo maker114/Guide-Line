@@ -7,6 +7,7 @@ import 'package:guideline/core/models/inspiration.dart';
 import 'package:guideline/core/models/project.dart';
 import 'package:guideline/core/store/export_codec.dart';
 import 'package:guideline/core/store/github_sync.dart';
+import 'package:guideline/platform/github_backup_client.dart';
 
 /// GitHub 备份同步的**判定内核**（纯 Dart，不联网）。
 ///
@@ -590,17 +591,45 @@ void main() {
     });
   });
 
-  group('连不上 GitHub 的原话认不认得出（需求⑤）', () {
-    test('平台层那几句网络原话都算连不上', () {
-      expect(looksOffline('连不上 api.github.com（检查网络或代理设置）'), isTrue);
-      expect(looksOffline('网络请求失败，稍后再试'), isTrue);
-      expect(looksOffline('请求超时（10 秒），稍后再试'), isTrue);
+  group('连不上 GitHub 认不认得出（需求⑤ / ADR-095）', () {
+    test('抛错方标了 network 的才算连不上', () {
+      expect(
+        looksOffline(const GitHubBackupException('连不上 api.github.com', network: true)),
+        isTrue,
+      );
+      expect(
+        looksOffline(const GitHubBackupException('网络请求失败，稍后再试', network: true)),
+        isTrue,
+      );
+      expect(
+        looksOffline(const GitHubBackupException('请求超时，请稍后再试', network: true)),
+        isTrue,
+      );
     });
 
-    test('别的错（Token、权限）不算连不上：那是真失败，右上角要画红的', () {
-      expect(looksOffline('还没填 Token'), isFalse);
-      expect(looksOffline('GitHub 说没有权限（401）'), isFalse);
-      expect(looksOffline(''), isFalse);
+    test('别的错（Token、权限、地址）不算连不上：那是真失败，右上角要画红的', () {
+      expect(looksOffline(const GitHubBackupException('还没填 Token')), isFalse);
+      expect(
+        looksOffline(const GitHubBackupException('Token 无效或已过期')),
+        isFalse,
+        reason: '让用户去改 Token，而不是干等一个永远不会来的自动重试',
+      );
+      expect(
+        looksOffline(const GitHubBackupException('仓库或分支不存在，HTTP 404')),
+        isFalse,
+      );
+      expect(looksOffline(const GitHubBackupException('')), isFalse);
+    });
+
+    test('没有标记的东西一律不算连不上（这条闸就是"别拿中文去认"）', () {
+      // 这正是 ADR-095 第 ⑤ 条要防的：以前 `looksOffline` 认的是消息里
+      // "连不上 / 网络请求失败 / 请求超时"三个中文串，下面这些都会判成 true ——
+      // 而它们现在一个都不许判 true（消息本身不再参与判断）。
+      expect(looksOffline('连不上 api.github.com'), isFalse);
+      expect(looksOffline('网络请求失败，稍后再试'), isFalse);
+      expect(looksOffline('请求超时（10 秒）'), isFalse);
+      expect(looksOffline(null), isFalse);
+      expect(looksOffline(StateError('连不上')), isFalse);
     });
   });
 }

@@ -7,9 +7,8 @@ import 'package:flutter/material.dart';
 import '../app/app_controller.dart';
 import '../app/auto_sync_state.dart';
 import '../core/rules/archive_zone.dart';
-import '../core/store/store_diff.dart';
 import '../platform/shortcut_channel.dart';
-import 'common/store_diff_panel.dart';
+import 'common/auto_sync_panels.dart';
 import 'common/sync_status_indicator.dart';
 import 'desktop/desktop_shell.dart';
 import 'events/event_tab.dart';
@@ -772,147 +771,23 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _pageProgress.value = _index.toDouble();
     _pages.addListener(_syncPageProgress);
-    // 自动同步"有偏差才问"的那张面板靠这条监听弹出来：控制器摆出
-    // `pendingAutoPushDiff`，外壳看到就来问（理由见 AppController 上的注释）。
-    widget.app.addListener(_onAppChanged);
     _bindCaptureShortcut();
     // 需求⑤：每次进软件先**静默**比对一次 —— 不摆圆环，两边对不上才弹面板，
     // 连不上就弹一次警告（当天只弹一次）。`unawaited`：这是开机顺手起的一趟，
-    // 界面不等它；结果靠 `_onAppChanged` 回来。
+    // 界面不等它。
+    //
+    // 比出来的那三扇弹窗（本次改动 / 开机二选一 / 连不上）由 `AutoSyncPanels`
+    // 端出来 —— 手机外壳与桌面外壳挂的是**同一份**（ADR-095 第 ⑥ 条）。
     unawaited(widget.app.startupSyncCheck());
   }
 
   @override
   void dispose() {
-    widget.app.removeListener(_onAppChanged);
     _pages
       ..removeListener(_syncPageProgress)
       ..dispose();
     _pageProgress.dispose();
     super.dispose();
-  }
-
-  /// 自动同步的差异面板同一时刻只开一张（重复弹两张会把用户按在确认键上）。
-  bool _autoPushSheetOpen = false;
-
-  /// 启动静默比对那扇面板同时只开一张（与上面同一口径）。
-  bool _startupSheetOpen = false;
-
-  /// 连不上 GitHub 的警告同时只开一张。
-  bool _offlineWarningOpen = false;
-
-  void _onAppChanged() {
-    if (!mounted) return;
-    // 监听回调是在 notifyListeners() 里跑的，那一帧不能开路由 —— 一律挪到帧后。
-    final diff = widget.app.pendingAutoPushDiff;
-    if (diff != null && !_autoPushSheetOpen) {
-      _autoPushSheetOpen = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _askAutoPush(diff));
-    }
-    final startup = widget.app.pendingStartupSync;
-    if (startup != null && !_startupSheetOpen && !_autoPushSheetOpen) {
-      _startupSheetOpen = true;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _askStartupSync(startup));
-    }
-    final offline = widget.app.pendingStartupOfflineWarning;
-    if (offline != null && !_offlineWarningOpen) {
-      _offlineWarningOpen = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _warnOffline(offline));
-    }
-  }
-
-  /// 「回到主页自动同步」走到"云端那份会被覆盖"这一步时的问法。
-  ///
-  /// 只在**真有偏差**时才走到这里（没偏差的直接传了，见 `autoSyncAfterHome`）——
-  /// 弹一次能看清楚的改动清单，比让用户事后去 GitHub 上猜自己推了什么强。
-  Future<void> _askAutoPush(StoreDiff diff) async {
-    if (!mounted) {
-      _autoPushSheetOpen = false;
-      return;
-    }
-    final choice = await showStoreDiffSheet(
-      context,
-      diff: diff,
-      title: '本次改动需要推送',
-      baseLabel: '云端数据，将被覆盖',
-      targetLabel: '这台手机，将推送至云端',
-      confirmLabel: '推送',
-      cancelLabel: '暂不推送',
-    );
-    _autoPushSheetOpen = false;
-    if (!mounted) return;
-    // 只有点了「推送」才传。点了「暂不推送」，或者点空白/返回键划走，
-    // 在这一屏是同一个意思：这一次不推（不记成失败）。
-    if (choice == DiffSheetResult.confirm) {
-      await widget.app.confirmPendingAutoPush();
-    } else {
-      widget.app.cancelPendingAutoPush();
-    }
-  }
-
-  /// 每次进软件的静默比对发现"两边对不上"时的那一屏（需求⑤）。
-  ///
-  /// 两个按钮**都真的会改数据**（一个把本机推上去、一个拿云端盖掉本机），
-  /// 所以这扇面板**点空白关不掉**（`barrierDismissible: false`）：
-  /// 要退只有返回键 —— 那等于"我还没想好"，一个字节都不动，右上角留一枚黄胶囊。
-  Future<void> _askStartupSync(StartupSyncRequest request) async {
-    if (!mounted) {
-      _startupSheetOpen = false;
-      return;
-    }
-    final choice = await showStoreDiffSheet(
-      context,
-      diff: request.diff,
-      title: '云端和这台手机对不上',
-      baseLabel: '云端数据',
-      targetLabel: '这台手机',
-      confirmLabel: '覆盖云端数据',
-      cancelLabel: '使用云端数据',
-      barrierDismissible: false,
-      note: request.message,
-    );
-    _startupSheetOpen = false;
-    if (!mounted) return;
-    switch (choice) {
-      case DiffSheetResult.confirm:
-        await widget.app.acceptStartupPush();
-      case DiffSheetResult.cancel:
-        await widget.app.acceptStartupPull();
-      case DiffSheetResult.dismissed:
-        widget.app.dismissStartupSync();
-    }
-  }
-
-  /// 连不上 GitHub 时的警告（需求⑤）：说清"照常编辑也行，但这段时间跟云端对不上"。
-  ///
-  /// 点掉之后调 `ackStartupOfflineWarning`：当天不再弹，但右上那枚
-  /// 「GitHub 未连接」的黄胶囊**留着**（下一次同步成功才收）。
-  Future<void> _warnOffline(String reason) async {
-    if (!mounted) {
-      _offlineWarningOpen = false;
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('连不上 GitHub'),
-        content: Text(
-          '${reason.isEmpty ? '没能连上 api.github.com。' : reason}\n\n'
-          '现在照常编辑不受影响，但这段时间的改动跟云端对不上：'
-          '连上之后请回同步页上传一次；这期间不要在另一台设备上同时修改。',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
-    _offlineWarningOpen = false;
-    if (!mounted) return;
-    widget.app.ackStartupOfflineWarning();
   }
 
   /// 同步没完成的原因（点右上角那枚黄/红胶囊看）—— 原话照摆，不去掉细节。
@@ -1029,12 +904,21 @@ class _AppShellState extends State<AppShell> {
   ///
   /// 只在**这里**量一次宽度，不在各页面里各判一次 —— 两个外壳的差别就是
   /// "有没有侧栏"，判断点只能有一个（`test/ui/desktop_shell_test.dart` 守着）。
+  ///
+  /// 分流点也是**挂同步弹窗的地方**：这一层在窗口宽窄变化时不会重建
+  /// （换的是下面那棵子树），所以 `AutoSyncPanels` 挂一次就够 ——
+  /// 两个外壳各挂一份反而会变成两个监听者、同一扇面板弹两遍
+  /// （ADR-095 第 ⑥ 条）。
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    return width >= desktopMinWidth
-        ? DesktopShell(app: widget.app)
-        : _buildMobile(context);
+    return AutoSyncPanels(
+      app: widget.app,
+      shellContext: context,
+      child: width >= desktopMinWidth
+          ? DesktopShell(app: widget.app)
+          : _buildMobile(context),
+    );
   }
 
   /// 手机外壳本体：底部四格 + `PageView` 左右翻页。

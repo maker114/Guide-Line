@@ -85,14 +85,18 @@ class _DesktopShellState extends State<DesktopShell> {
   /// 回收站到期清理的提示关掉没有（与手机外壳同一口径：关掉就是本次运行不再出现）。
   bool _trashNoticeClosed = false;
 
-  @override
-  void initState() {
-    super.initState();
-    // 与手机外壳同一个动作：进软件先**静默**比对一次云端（ADR-093 第 ④ 条）。
-    // 两个外壳各自持有自己的那个"开机顺手起的一趟"，因为切换宽度会整个换壳，
-    // 谁在台前谁负责这一趟。
-    widget.app.startupSyncCheck();
-  }
+  // 这里**不再自己跑开机比对**（ADR-095 第 ⑥ 条）。
+  //
+  // 以前这个 `initState` 会调一次 `startupSyncCheck()`，理由是"谁在台前谁负责
+  // 这一趟"—— 但换壳并不重启进程，于是宽窗口下手机外壳那一趟与这一趟会**同时**
+  // 发出去（连两次网、可能弹两次面板）；更要紧的是**它比出来的结果没人端出来**：
+  // 电脑端原先没有监听 `pendingAutoPushDiff` / `pendingStartupSync` /
+  // `pendingStartupOfflineWarning` 的地方，于是"开机比对发现两边对不上"只留下
+  // 一枚黄胶囊，面板永远不出现，用户想选都没地方选。
+  //
+  // 现在的分工：**跑那一趟与端那三扇窗都在 `AppShell._buildMobile` 外面那一层**
+  // （`AutoSyncPanels`），它在窗口宽窄变化时不重建，跑一次就是一次。
+  // 这个外壳只负责把内容画出来 + 标题栏上那枚指示器。
 
   @override
   Widget build(BuildContext context) {

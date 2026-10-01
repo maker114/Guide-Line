@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/app/auto_sync_state.dart';
@@ -182,8 +183,64 @@ void main() {
       expect(
         app.autoSync.commitSha,
         'commit-written',
-        reason: '胶囊上要显示这一次的提交号（从记账回读，不是猜的）',
+        reason: '胶囊上要显示这一次的提交号（它自己回，不是猜的）',
       );
+    });
+
+    test('点「推上去」但那一趟其实没写远程：绝不许摆绿胶囊报提交号（ADR-095 第 ① 条）', () async {
+      // 第二次判定（`pushGitHubBackup` 内部那一次）会走 noChange —— 它返回
+      // `ok: true` 却一个字节都不写。旧写法这时从记账里回读到 **上一次**的提交码，
+      // 于是界面拿旧号报这一趟的成功。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 1)),
+      );
+      final app = await bootWith(
+        gateway: gateway,
+        local: storeWith(savedAt: now, projects: 2),
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 1,
+          commitSha: 'commit-old',
+        ),
+      );
+      await app.autoSyncAfterHome();
+      expect(app.pendingAutoPushDiff, isNotNull, reason: '先得有那扇面板');
+
+      // 用户还在这扇面板上时，别处把两边弄成了同一份（另一台设备推了同一份、
+      // 或者本地又被拉回过一次）。这里直接把远程换成"和本机一模一样"。
+      gateway.remote = remoteOf(storeWith(savedAt: now + 60000, projects: 2));
+
+      await app.confirmPendingAutoPush();
+
+      expect(gateway.writeCount, 0, reason: '内容没变就不该再提交一次');
+      expect(
+        app.autoSync.phase,
+        isNot(AutoSyncPhase.done),
+        reason: '没写远程就不是"传上去了"，绿胶囊与提交码都不许出现',
+      );
+      expect(app.autoSync.commitSha, isEmpty);
+    });
+
+    test('提交码对得上但内容没变：也不许摆绿胶囊（同一道闸的第二条路）', () async {
+      final same = storeWith(savedAt: now - 60000, projects: 2);
+      final gateway = _FakeGateway(remote: remoteOf(same))
+        ..commit = const RemoteCommit(sha: 'commit-same', message: '上次那次提交');
+      final app = await bootWith(
+        gateway: gateway,
+        local: same,
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: 'commit-same',
+        ),
+      );
+
+      await app.autoSyncAfterHome();
+
+      expect(gateway.writeCount, 0);
+      expect(app.autoSync.phase, AutoSyncPhase.idle);
     });
 
     test('点「先不推」：静默收场，而且不算失败', () async {
@@ -310,6 +367,75 @@ void main() {
         contains('本机当前没有记录'),
         reason: '读坏了也会显示成 0 条，所以只说明、不动手',
       );
+      expect(
+        app.pendingStartupSync,
+        isNull,
+        reason: '编辑路上摆的是"要不要推"，本机空没有可推的',
+      );
+    });
+
+    test('开机比对：摆一扇只给「使用云端数据」的面板（ADR-095 第 ② 条）', () async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 3)),
+      );
+      final app = await boot(gateway);
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+
+      await app.startupSyncCheck();
+
+      final request = app.pendingStartupSync;
+      expect(request, isNotNull, reason: '本机空 + 云端有东西 ⇒ 该问"要不要把云端取回来"');
+      expect(
+        request!.pullOnly,
+        isTrue,
+        reason: '「覆盖云端数据」那一按必然被拒（空的盖不得远程），按钮就不该出现',
+      );
+      expect(request.diff.removed, 3, reason: '云端那三条要摆成"取回来就多出来的"');
+      expect(app.autoSync.phase, AutoSyncPhase.blocked);
+      expect(app.autoSync.label, '没有可上传的记录');
+      expect(gateway.writeCount, 0, reason: '开机这一次绝不自己动数据');
+    });
+
+    test('提交码对得上也不许"直接覆盖"：本机 0 条时先拦下来再谈别的', () async {
+      // 这一条钉的是一个具体的坑：`analyzeSync` 里"提交码对得上 ⇒ 直接覆盖"那一段
+      // 排在 `localEmpty` **前面**（ADR-093 的位置口径），于是"本机 0 条 + 云端还是
+      // 上次那次提交"会被判成 push/trustedOverwrite，直奔推送 —— 而推送又必然拒绝。
+      // 白跑一趟网络、只收到一枚红胶囊，用户看不到那扇能把云端取回来的面板。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 3)),
+      )..commit = const RemoteCommit(sha: 'commit-same', message: '上次那次提交');
+      final app = await boot(gateway);
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      app.storage.writeSyncRecord(
+        SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 3,
+          commitSha: 'commit-same',
+        ),
+      );
+
+      await app.startupSyncCheck();
+
+      expect(gateway.writeCount, 0, reason: '空的绝不能盖掉云端');
+      expect(app.pendingStartupSync, isNotNull, reason: '该摆的是"把云端取回来"那扇');
+      expect(app.pendingStartupSync!.pullOnly, isTrue);
+      expect(app.autoSync.label, '没有可上传的记录');
+    });
+
+    test('点面板上那唯一的按钮：把云端取回来，本机就有记录了', () async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 3)),
+      );
+      final app = await boot(gateway);
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      await app.startupSyncCheck();
+
+      await app.acceptStartupPull();
+
+      expect(app.projectCount, 3, reason: '云端那三条要真的落到本机');
+      expect(gateway.writeCount, 0, reason: '这一步只取不推');
+      expect(app.autoSync.phase, AutoSyncPhase.done);
     });
   });
 
@@ -654,6 +780,149 @@ void main() {
       expect(app.autoSync.phase, AutoSyncPhase.idle, reason: '提交码不该一直挂着');
     });
   });
+
+  // ── 触发点：推开页面 → 真的改过 → 回到主页（ADR-095 第 ⑦ 条） ───────────
+  //
+  // 这一组钉的是**"谁在什么时候叫它干活"**。上面所有用例都是直接喊
+  // `autoSyncAfterHome()` / `startupSyncCheck()` —— 也就是说，"回到主页那一下
+  // 到底会不会喊"从来没被验过；而这一层恰恰是控制器里最绕的地方
+  // （`NavigatorObserver` + 编辑会话深度 + 数据修订号三样凑在一起）。
+  group('触发点：编辑会话怎么变成一次上传', () {
+    /// 把控制器挂进一棵真树里，路由观察者与 App 里挂的是同一个
+    /// （`main.dart` 那行 `navigatorObservers: [controller.editSessionObserver]`）。
+    Future<void> pumpApp(WidgetTester tester, AppController app) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: <NavigatorObserver>[app.editSessionObserver],
+          home: const Scaffold(body: Text('外壳')),
+        ),
+      );
+    }
+
+    /// 推一层进去 / 退一层出来（都用测试自己的时钟推完动画）。
+    ///
+    /// 刻意**不套 `tester.runAsync`**：这棵树里的每一个 await 都只等微任务
+    /// （假远端的方法体是同步的、Token 也是内存里的），`pumpAndSettle` 就够；
+    /// 套上 `runAsync` 反而要把每一个 `navigator` 引用搬进去，白饶一层。
+    Future<NavigatorState> pushPage(WidgetTester tester, String label) async {
+      final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+      navigator.push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => Scaffold(body: Text(label)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return navigator;
+    }
+
+    /// 回到主页那一下会触发一趟 `unawaited(...)` 的自动上传 —— 让它的 await 走完。
+    Future<void> settleAutoSync(WidgetTester tester) async {
+      for (var i = 0; i < 8; i++) {
+        await tester.pump(Duration.zero);
+      }
+    }
+
+    /// 把绿胶囊那枚"停 2 秒自己收场"的计时器跑完。
+    ///
+    /// 不跑完的话用例会挂在 `A Timer is still pending even after the widget tree
+    /// was disposed` 上 —— 那枚计时器属于控制器，而 `testWidgets` 结束时整棵树
+    /// （连同假时钟）就被拆了。真机上不存在这件事：控制器活到进程结束。
+    Future<void> drainDoneLinger(WidgetTester tester) async {
+      await tester.pump(
+        AppController.autoSyncDoneLinger + const Duration(milliseconds: 100),
+      );
+    }
+
+    testWidgets('进页面看一眼、什么都没改就退回：一次网都不连', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 1)),
+      );
+      final app = await bootWith(
+        gateway: gateway,
+        local: storeWith(savedAt: now, projects: 2),
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 1,
+          commitSha: 'commit-old',
+        ),
+      );
+      await pumpApp(tester, app);
+      gateway.readCount = 0;
+      gateway.writeCount = 0;
+
+      final navigator = await pushPage(tester, '编辑页');
+      navigator.pop();
+      await tester.pumpAndSettle();
+      await settleAutoSync(tester);
+
+      expect(gateway.readCount, 0, reason: '没写过盘就别连网（需求①）');
+      expect(gateway.writeCount, 0);
+      expect(app.autoSync.phase, AutoSyncPhase.idle, reason: '连圆环都不该出现');
+    });
+
+    testWidgets('改过一笔再退回：门开着，该问的照问', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 1)),
+      );
+      final app = await bootWith(
+        gateway: gateway,
+        local: storeWith(savedAt: now, projects: 2),
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 1,
+          commitSha: 'commit-old',
+        ),
+      );
+      await pumpApp(tester, app);
+      gateway.readCount = 0;
+      gateway.writeCount = 0;
+
+      final navigator = await pushPage(tester, '编辑页');
+      // "在详情页里改了一笔"：写盘那一笔就是这个 App 里每一次动作的落点。
+      app.storage.save(app.ws.buildStoreFile());
+      navigator.pop();
+      await tester.pumpAndSettle();
+      await settleAutoSync(tester);
+
+      expect(gateway.readCount, greaterThan(0), reason: '改过了就该比一次');
+      expect(gateway.writeCount, 0, reason: '有偏差要先问，不许自己覆盖云端');
+      expect(app.pendingAutoPushDiff, isNotNull, reason: '该把差异摆出来等用户点');
+    });
+
+    testWidgets('推开的页面里再推一层：回到外壳才算离开（深度要配对）', (tester) async {
+      final gateway = _FakeGateway();
+      final app = await bootWith(
+        gateway: gateway,
+        local: storeWith(savedAt: now, projects: 2),
+        record: null,
+      );
+      await pumpApp(tester, app);
+
+      final navigator = await pushPage(tester, '详情');
+      app.storage.save(app.ws.buildStoreFile());
+      gateway.writeCount = 0;
+
+      // 再推一层：这时**还没回到主页**，不该触发上传。
+      await pushPage(tester, '再深一层');
+      await settleAutoSync(tester);
+      expect(gateway.writeCount, 0, reason: '详情页里再推一层不算"回到主页"');
+
+      // 退一层：回到详情页，仍然不算回到主页。
+      navigator.pop();
+      await tester.pumpAndSettle();
+      await settleAutoSync(tester);
+      expect(gateway.writeCount, 0, reason: '退到详情页也没回到外壳');
+
+      // 再退一层：这一次才是"回到主页"，门该开了。
+      navigator.pop();
+      await tester.pumpAndSettle();
+      await settleAutoSync(tester);
+      expect(gateway.writeCount, 1, reason: '回到外壳那一下才触发，而且只触发一次');
+      await drainDoneLinger(tester);
+    });
+  });
 }
 
 class _FakeGateway implements GitHubBackupGateway {
@@ -676,7 +945,13 @@ class _FakeGateway implements GitHubBackupGateway {
   }) async {
     readCount += 1;
     if (failRead) {
-      throw const GitHubBackupException('连不上 GitHub：检查网络或代理设置');
+      // `network: true` 就是"这句错是连不上"的结构化标记（ADR-095 第 ⑤ 条）：
+      // 以前这里只给一句中文，靠 `looksOffline` 认"连不上"三个字，
+      // 改一个词就会把离线说成"这次真的失败"。
+      throw const GitHubBackupException(
+        '连不上 GitHub：检查网络或代理设置',
+        network: true,
+      );
     }
     return remote;
   }
@@ -688,7 +963,10 @@ class _FakeGateway implements GitHubBackupGateway {
   }) async {
     readCount += 1;
     if (failRead) {
-      throw const GitHubBackupException('连不上 GitHub：检查网络或代理设置');
+      throw const GitHubBackupException(
+        '连不上 GitHub：检查网络或代理设置',
+        network: true,
+      );
     }
     return commit;
   }

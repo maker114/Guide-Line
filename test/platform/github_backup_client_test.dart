@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/core/json/store_file.dart';
@@ -194,6 +195,42 @@ void main() {
         ),
       ),
     );
+  });
+
+  group('"是不是连不上"由抛错的地方标（ADR-095 第 ⑤ 条）', () {
+    test('连不上主机：network 标成 true，界面据此画黄胶囊', () async {
+      final gateway = HttpGitHubBackupGateway(
+        client: MockClient(
+          (request) async => throw const SocketException('failed to connect'),
+        ),
+      );
+
+      await expectLater(
+        gateway.readBackup(config: config, token: token),
+        throwsA(
+          isA<GitHubBackupException>()
+              .having((error) => error.network, 'network', isTrue)
+              .having((error) => error.message, 'message', contains('连不上')),
+        ),
+      );
+    });
+
+    test('Token / 地址这类错：network 是 false（那要用户去改，不是等网络）', () async {
+      final gateway = HttpGitHubBackupGateway(
+        client: MockClient(
+          (request) async => http.Response('{"message":"Bad credentials"}', 401),
+        ),
+      );
+
+      await expectLater(
+        gateway.readBackup(config: config, token: token),
+        throwsA(
+          isA<GitHubBackupException>()
+              .having((error) => error.network, 'network', isFalse)
+              .having((error) => error.message, 'message', contains('Token')),
+        ),
+      );
+    });
   });
 
   group('读大文件的超时按体积放宽', () {

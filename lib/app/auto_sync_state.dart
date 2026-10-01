@@ -113,7 +113,11 @@ class AutoSyncState {
 /// 这个说"有一扇面板等着用户选"。分开的理由是**同一时刻两件事都要在**：
 /// 面板摆在屏幕中央等选择，右上角那枚黄胶囊同时说明"现在跟云端对不上"。
 class StartupSyncRequest {
-  const StartupSyncRequest({required this.diff, required this.message});
+  const StartupSyncRequest({
+    required this.diff,
+    required this.message,
+    this.pullOnly = false,
+  });
 
   /// 摆给用户看的差异（面板里那些行）。
   final StoreDiff diff;
@@ -121,7 +125,15 @@ class StartupSyncRequest {
   /// 面板顶上那句"为什么摆这个"。
   final String message;
 
+  /// 这一扇**只给「使用云端数据」一个按钮**（ADR-095 第 ② 条）。
+  ///
+  /// 只有一种情形：**这台手机上 0 条活记录、云端有东西**。那时"用本机覆盖云端"
+  /// 是被明令禁止的动作（读坏了也长成 0 条，不许拿空的盖掉远程），
+  /// 面板上就不该放那个按钮 —— 放了就是先承诺、再拒绝。
+  final bool pullOnly;
+
   @override
   String toString() =>
-      'StartupSyncRequest(${diff.added}+/${diff.removed}-/${diff.modified}~, $message)';
+      'StartupSyncRequest(${diff.added}+/${diff.removed}-/${diff.modified}~, '
+      '${pullOnly ? '只可拉取' : '可推可拉'}, $message)';
 }
