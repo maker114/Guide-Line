@@ -16,24 +16,18 @@ import '../core/rules/completion.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/ui_prefs.dart';
 import '../core/tree/tree_index.dart';
+import 'workspace_checklist.dart';
 import 'workspace_state.dart';
 
-// 状态搬到 `workspace_state.dart` 之后，`Workspace` 对外**仍然要看起来和以前一样**：
-// `AppStorage` 与 `UiPrefs` 以前能从本文件借出去（同库 import 传递），
-// 关掉就会让一批只 `import 'workspace.dart'` 的调用方与测试突然编不过。
-// 这不是新暴露的 API，是**保持原有的可见性**。
+// 状态与共享词汇搬到 `workspace_state.dart`、清单那一块搬到
+// `workspace_checklist.dart` 之后，`Workspace` 对外**仍然要看起来和以前一样**：
+// `AppStorage` / `UiPrefs` / `RuleViolation` 以前都能从本文件借出去，
+// 关掉就会让一批只 `import 'workspace.dart'` 的调用方与测试突然编不过
+// （`RuleViolation` 全仓有 89 处引用）。这不是新暴露的 API，是**保持原有的可见性**。
 export '../core/store/app_storage.dart' show AppStorage, LoadReport;
 export '../core/store/ui_prefs.dart' show UiPrefs;
-
-/// 业务规则被违反（"用户不能这么做"），不是程序错误。
-class RuleViolation implements Exception {
-  const RuleViolation(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
-}
+export 'workspace_checklist.dart' show WorkspaceChecklist;
+export 'workspace_state.dart' show RuleViolation, WorkspaceState;
 
 /// 「并列任务」已经废除：它是当年"框内并排两条线"的做法，与
 /// "一条线就是一件事的脉络"这条主线是两套心智。
@@ -184,12 +178,23 @@ class Workspace {
     );
   }
 
-  /// 共享状态（文档集合 + 偏好 + 存储句柄 + 底层改动通道）。
+  /// 共享状态（文档集合 + 偏好 + 存储句柄 + 底层改动通道 + 落盘）。
   ///
   /// 它是《workspace-拆分-结论》§3 方向 A 的第一步：**先让状态库内可见，
-  /// 业务逻辑才搬得走**。现状是"只有状态搬过去了" —— 本类的 89 个方法
-  /// 一个都还没搬，读起来与迁移前一样长。
+  /// 业务逻辑才搬得走**。现在状态、落盘与「实现清单」那一块都已经搬出去，
+  /// 其余的仍然在本类里，读起来还是很长 —— 搬迁是一轮一块，不是一次做完。
   final WorkspaceState _state;
+
+  /// 实现清单那一块业务（`workspace_checklist.dart`）。
+  ///
+  /// 懒建：本类 89 个方法里只有那 10 个清单方法会用到它，所以不给构造函数加一个
+  /// 每次都要现算的字段 —— 交接成本是每处转发多一个 `_checklist`，
+  /// 比"构造时多一次分配 + 每个构造点都要记得传"更划算。
+  ///
+  /// 传进去的是 `findProject` 这个**函数**，不是 `this`：把整个门面传进去等于
+  /// 把刚切开的耦合又接回去，而且会绕成循环依赖。
+  late final WorkspaceChecklist _checklist =
+      WorkspaceChecklist(_state, (String id) => findProject(id));
 
   Map<DocName, Document> get _docs => _state.documents;
 
@@ -1179,109 +1184,78 @@ class Workspace {
     persist();
   }
 
-  // ---------------------------------------------------------------- 实现清单
+  // ------------------------------------------------------------ 实现清单（已搬到 workspace_checklist.dart）
 
-  /// 把一段正文按行拆成清单条目（**显式动作**，不在读取时自动拆）。
+  /// 下面 10 个方法是**转发**：实体在 `workspace_checklist.dart` 的
+  /// [WorkspaceChecklist] 里，这里只保留同名同签名的一层壳。
   ///
-  /// 只在"清单为空"时由界面调用：把一段中文按行拆开是**不可逆的猜测**
-  /// （用户可能一段就是一条），自动拆等于第一次打开就悄悄改了数据形态。
-  /// 行首的 `-` / `*` / `1.` 这类记号会被去掉，空行丢弃。
-  static List<String> splitImplementationLines(String implementation) {
-    final out = <String>[];
-    for (final rawLine in implementation.split('\n')) {
-      var line = rawLine.trim();
-      if (line.isEmpty) continue;
-      line = line.replaceFirst(RegExp(r'^[-*+]\s+'), '');
-      line = line.replaceFirst(RegExp(r'^\d+[.)]\s+'), '');
-      line = line.trim();
-      if (line.isEmpty) continue;
-      out.add(line);
-    }
-    return out;
-  }
+  /// 为什么要留壳而不是让调用方改叫 `ws.checklist.xxx()`：
+  /// `lib/ui` 与 `lib/app` 上有 228 处调用、`test/` 里有 669 处，
+  /// 改叫法等于把一次零行为改动的搬迁变成一次全仓改名 —— 风险与收益完全不成比例。
+  /// **搬家的判据是"身子在哪儿"，不是"名字长什么样"**：以后要改清单逻辑，
+  /// 去 `workspace_checklist.dart`，不用在这里找。
+  ///
+  /// 库里这几行**不含任何业务规则**，也不该长出规则来。
 
-  ProjectItem addProjectItem(String projectId, String text) {
-    final project = _requireProject(projectId);
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+  static List<String> splitImplementationLines(String implementation) =>
+      WorkspaceChecklist.splitImplementationLines(implementation);
 
-    final item = ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false);
-    _writeItems(project, <ProjectItem>[...project.items, item]);
-    return item;
-  }
+  int splitImplementationIntoItems(String projectId) =>
+      _checklist.splitImplementationIntoItems(projectId);
 
-  void updateProjectItemText(String projectId, String itemId, String text) {
-    final project = _requireProject(projectId);
-    final index = _itemIndex(project, itemId);
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
-    if (project.items[index].text == trimmed) return; // 没变就不写盘
+  int replaceProjectItems(String projectId, List<String> texts) =>
+      _checklist.replaceProjectItems(projectId, texts);
 
-    final next = <ProjectItem>[...project.items];
-    next[index] = next[index].copyWith(text: trimmed);
-    _writeItems(project, next);
-  }
+  ProjectItem addProjectItem(String projectId, String text) =>
+      _checklist.addProjectItem(projectId, text);
 
-  void setProjectItemDone(String projectId, String itemId, bool done) {
-    final project = _requireProject(projectId);
-    final index = _itemIndex(project, itemId);
-    if (project.items[index].done == done) return;
+  void updateProjectItemText(String projectId, String itemId, String text) =>
+      _checklist.updateProjectItemText(projectId, itemId, text);
 
-    final next = <ProjectItem>[...project.items];
-    next[index] = next[index].copyWith(done: done);
-    _writeItems(project, next);
-  }
+  void setProjectItemDone(String projectId, String itemId, bool done) =>
+      _checklist.setProjectItemDone(projectId, itemId, done);
 
-  void removeProjectItem(String projectId, String itemId) {
-    final project = _requireProject(projectId);
-    _itemIndex(project, itemId); // 不存在就抛，避免静默什么都没发生
-    _writeItems(
-      project,
-      project.items.where((i) => i.id != itemId).toList(growable: false),
-    );
-  }
+  void removeProjectItem(String projectId, String itemId) =>
+      _checklist.removeProjectItem(projectId, itemId);
 
   /// 上移 / 下移一条。[delta] 只接受 `-1` 与 `1`；已经在两端时是空操作。
-  void moveProjectItem(String projectId, String itemId, int delta) {
-    if (delta != -1 && delta != 1) {
-      throw const RuleViolation('一次只能上移或下移一位');
-    }
-    final project = _requireProject(projectId);
-    final index = _itemIndex(project, itemId);
-    final target = index + delta;
-    if (target < 0 || target >= project.items.length) return; // 到头了，什么也不做
+  void moveProjectItem(String projectId, String itemId, int delta) =>
+      _checklist.moveProjectItem(projectId, itemId, delta);
 
-    final next = <ProjectItem>[...project.items];
-    final moved = next.removeAt(index);
-    next.insert(target, moved);
-    _writeItems(project, next);
-  }
+  /// 清空清单（**只清清单，不动正文**）。清单本来就空时不落盘。
+  void clearProjectItems(String projectId) => _checklist.clearProjectItems(projectId);
 
-  /// 把正文按行拆成条目。**只在清单为空时允许** —— 否则会把已有条目顶掉。
-  int splitImplementationIntoItems(String projectId) {
-    final project = _requireProject(projectId);
-    if (project.items.isNotEmpty) {
-      throw const RuleViolation('已经有条目了，先把清单清空再拆');
-    }
-    final lines = splitImplementationLines(project.implementation);
-    if (lines.isEmpty) throw const RuleViolation('正文里没有可拆成条目的内容');
-
-    _writeItems(
-      project,
-      <ProjectItem>[
-        for (final line in lines) ProjectItem(id: Ids.uuidV4(), text: line, done: false),
-      ],
-    );
-    return lines.length;
-  }
-
-  /// 清空清单（**只清清单，不动正文**）。
+  /// 把一条清单条目**建成任务**（Q24 的"规划 → 执行的桥"）。
   ///
-  /// 给"拆错了想重来"用：拆完不满意时可以清掉再让 AI 拆一次。
-  void clearProjectItems(String projectId) {
+  /// 落点仍是本类的 [createTask] —— 清单那一块只读清单、只调这一个回调，
+  /// 这就是它对任务侧唯一的接触面（与"清单不参与任何业务判定"那条边界一致）。
+  Task createTaskFromProjectItem({
+    required String projectId,
+    required String itemId,
+    required String eventId,
+  }) =>
+      _checklist.createTaskFromProjectItem(
+        projectId: projectId,
+        itemId: itemId,
+        eventId: eventId,
+        createTask: ({required String eventId, required String title}) =>
+            createTask(eventId: eventId, title: title),
+      );
+  /// 用整理后的正文替换「实现」文本（AI 整理写回走这里）。
+  ///
+  /// **没有跟着清单那一块搬走**：它动的是 `implementation`（正文），
+  /// 不是 `items`（清单）。两者在界面上挨着，但数据上互不牵连 ——
+  /// 按"内聚"而不是"界面上看起来在一起"划边界，才不至于把清单文件撑成第二个大杂烩。
+  void replaceImplementation(String projectId, String text) {
     final project = _requireProject(projectId);
-    if (project.items.isEmpty) return;
-    _writeItems(project, const <ProjectItem>[]);
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) throw const RuleViolation('整理结果不能是空的');
+    if (trimmed == project.implementation) return;
+    _upsert(
+      DocName.projects,
+      project.copyWith(implementation: trimmed, updatedAt: Ids.nowMillis()),
+    );
+    persist();
   }
 
   // ------------------------------------------------------------ 重置（2026-09-28）
@@ -1405,81 +1379,11 @@ class Workspace {
           if (findProject(id) case final Project project) project,
       ];
 
-  /// 把「实现清单」的一条**建成某个事件末尾的一条主线任务**（Q24：规划 → 执行的桥）。
-  ///
-  /// 这是清单与事件之间**唯一**的连接动作，而且是一次性的：
-  ///   · 只读条目的文本，**条目本身一个字都不动**（不删除、也不自动打勾）——
-  ///     清单只是一份笔记，删不删由用户决定（《定义与边界》§2.1 / §2.3）；
-  ///   · 建完**不建立任何联动**：之后勾清单不影响那条任务，反之亦然。
-  ///     这是刻意定的口径，不是还没做完。
-  ///
-  /// 落点就是 [createTask]：标题取条目文本、没有父节点，于是排在事件主线的末尾。
-  Task createTaskFromProjectItem({
-    required String projectId,
-    required String itemId,
-    required String eventId,
-  }) {
-    final project = _requireProject(projectId);
-    final item = project.items[_itemIndex(project, itemId)];
-    return createTask(eventId: eventId, title: item.text);
-  }
-
-  /// 用整理后的正文替换「实现」文本（AI 整理写回走这里）。
-  void replaceImplementation(String projectId, String text) {
-    final project = _requireProject(projectId);
-    final trimmed = text.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('整理结果不能是空的');
-    if (trimmed == project.implementation) return;
-    _upsert(
-      DocName.projects,
-      project.copyWith(implementation: trimmed, updatedAt: Ids.nowMillis()),
-    );
-    persist();
-  }
-
   Project _requireProject(String projectId) {
     final project = findProject(projectId);
     if (project == null || project.deleted) throw const RuleViolation('项目不存在');
     return project;
   }
-
-  int _itemIndex(Project project, String itemId) {
-    final index = project.items.indexWhere((i) => i.id == itemId);
-    if (index < 0) throw const RuleViolation('条目不存在');
-    return index;
-  }
-
-  /// 用给定的这批文本**整体替换**清单条目（AI 拆条目那一路的落点）。
-  ///
-  /// 与 [addProjectItem] 的区别是"替换而不是追加"：AI 拆出来的是**这一份正文的
-  /// 完整分解**，与现有条目并排会出现同一件事两遍。空文本项丢掉、重复的**保留**
-  /// （用户可能真的有两件一样的事，去重是越权）。
-  ///
-  /// 条目一律 `done: false`：拆出来的是"打算怎么做"，不是"已经做完"。
-  int replaceProjectItems(String projectId, List<String> texts) {
-    final project = _requireProject(projectId);
-    final cleaned = <String>[];
-    for (final text in texts) {
-      final trimmed = text.trim();
-      if (trimmed.isEmpty) continue;
-      cleaned.add(trimmed);
-    }
-    if (cleaned.isEmpty) throw const RuleViolation('没有可写入的条目');
-
-    _writeItems(project, <ProjectItem>[
-      for (final text in cleaned) ProjectItem(id: Ids.uuidV4(), text: text, done: false),
-    ]);
-    return cleaned.length;
-  }
-
-  void _writeItems(Project project, List<ProjectItem> items) {
-    _upsert(
-      DocName.projects,
-      project.copyWith(items: items, updatedAt: Ids.nowMillis()),
-    );
-    persist();
-  }
-
   // ---------------------------------------------------------------- 事件
 
   Event createEvent({required String name}) {
@@ -2191,7 +2095,12 @@ class Workspace {
   String get dataDirectoryPath => _state.storage.paths.describe();
 
   /// 当前的完整数据快照（导出用）。
-  StoreFile buildStoreFile() => StoreFile(documents: _docs, savedAt: Ids.nowMillis());
+  ///
+  /// 与下面三个一样，身子已经搬到 `WorkspaceState` —— 它们只做"把这一份状态
+  /// 整份写下去"，属于状态层。**留在这里的同名方法是壳**：`buildStoreFile()`
+  /// 全仓有 4 处外部调用、`persist()` 与快照那对在测试里也有直接调用，
+  /// 改叫法就是一次全仓改名，不值得。
+  StoreFile buildStoreFile() => _state.buildStoreFile();
 
   /// 内存快照 + 回滚。
   ///
@@ -2199,30 +2108,21 @@ class Workspace {
   /// 如果就这么放过，界面会显示一个**磁盘上并不存在**的状态 —— 用户以为存住了，
   /// 下次启动才发现没了。所以写失败必须把内存退回动作前的样子，让两边保持一致。
   ///
-  /// `Document` 是不可变的，`_docs` 是「整份替换」而不是就地改，
-  /// 因此浅拷贝一份 map 就是完整快照。
-  Map<DocName, Document> snapshotInMemory() => Map<DocName, Document>.from(_docs);
+  /// `Document` 是不可变的，文档集合是「整份替换」而不是就地改，
+  /// 因此浅拷贝一份 map 就是完整快照。实现见 `WorkspaceState.snapshotInMemory`。
+  Map<DocName, Document> snapshotInMemory() => _state.snapshotInMemory();
 
-  void rollbackTo(Map<DocName, Document> snapshot) {
-    _docs
-      ..clear()
-      ..addAll(snapshot);
-  }
+  void rollbackTo(Map<DocName, Document> snapshot) => _state.rollbackTo(snapshot);
 
   /// 原子落盘：**整份数据一次写入**（单文件让跨实体变更天然原子）。
-  void persist() {
-    _state.storage.save(buildStoreFile());
-    _state.storage.savePrefs(_prefs);
-  }
+  void persist() => _state.persist();
 
   /// 手动触发一次备份轮转（导入、批量操作前可调用）。
   ///
   /// ⚠️ 走的是**强制**路径（`forceRotate: true`），不是普通 `save`：
   /// 普通保存的轮转按"编辑会话 / 最小间隔"节流（Q3），而这里正是**用户显式
   /// 要求"现在留一份"**的场景 —— 被节流拦下就等于这句承诺落空。
-  void snapshotNow() {
-    _state.storage.save(buildStoreFile(), forceRotate: true);
-  }
+  void snapshotNow() => _state.snapshotNow();
 
   // ---------------------------------------------------------------- 内部
 
