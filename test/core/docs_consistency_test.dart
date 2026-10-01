@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +50,24 @@ void main() {
       changelog.readAsStringSync(),
       contains('## [$version]'),
       reason: '升了版本却没在 CHANGELOG 里开一节；或者反过来，CHANGELOG 记了这一版而 pubspec 没升',
+    );
+  });
+
+  test('README 顶上的「当前例数」与实际用例数一致', () {
+    // 为什么钉它：版本号有四个落点、由测试守着，所以从来没写错过；而"现在有多少例"
+    // 这个数字同样抄在 README 与《构建与发布》《开发节奏》里，**此前没有任何守卫** ——
+    // 2026-10-01 实测发现 README 写着 810，实际早已不是（同一天刚从 807 涨到 811）。
+    // 同一个仓库，同样抄四份，一个有守卫一个没有，差别就出在这里。
+    final readme = File('README.md').readAsStringSync();
+    // 只认 `# 必须全绿（当前 811 例）` 那一处：README 别处可能提到别的数字
+    final declared = RegExp(r'当前 (\d+) 例').firstMatch(readme)?.group(1);
+    expect(declared, isNotNull, reason: 'README 里找不到形如「当前 811 例」的那一处');
+    expect(
+      declared,
+      '${_countTestDeclarations()}',
+      reason: 'README 写的例数与 `test/` 下实际声明的用例数不一致。'
+          '加/删了用例就顺手改 README 那一行 —— 这个数字是给人看工期的，'
+          '写错会让人以为测试变慢或变快了。',
     );
   });
 
@@ -145,4 +164,28 @@ String _readPubspecVersion() {
     throw StateError('pubspec.yaml 里找不到 version: 行');
   }
   return lines.first.substring('version:'.length).trim();
+}
+
+/// `test/` 下声明的用例数：数行首（允许缩进）的 `test(` 与 `testWidgets(`。
+///
+/// 口径说明，免得下一个人以为它数错了：
+///   · 这是**声明条数**，不是 `flutter test` 跑完打印的 `+N`。后者在
+///     `setUpAll` 里批量生成用例时会大于本数，而本仓库没有那种写法；
+///   · `group(` 不是用例，不数；`test/` 之外的 `.dart`（如 `test/support/` 的助手）
+///     一并扫描 —— 那里本来就不该出现用例声明，出现了也该算进总数。
+int _countTestDeclarations() {
+  final pattern = RegExp(r'^\s*(?:test|testWidgets)\(');
+  final root = Directory('test');
+  expect(root.existsSync(), isTrue, reason: 'test/ 路径变了？');
+  var count = 0;
+  for (final entity in root.listSync(recursive: true)) {
+    if (entity is! File || !entity.path.endsWith('.dart')) continue;
+    // 用字节解码并允许坏字节：这个文件会在 Windows 上跑，代码页不该影响"数了几条"
+    final text = utf8.decode(entity.readAsBytesSync(), allowMalformed: true);
+    for (final line in const LineSplitter().convert(text)) {
+      if (pattern.hasMatch(line)) count += 1;
+    }
+  }
+  expect(count, greaterThan(100), reason: '只数到 $count 条？扫描路径或正则大概写错了');
+  return count;
 }
