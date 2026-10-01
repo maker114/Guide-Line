@@ -52,9 +52,23 @@ void main() {
     return tester.getRect(find.byKey(navIndicatorKey)).left - bar.left;
   }
 
-  /// 标题栏里的某个东西（`ShellTitle` 自己的子树，不牵连 `AppBar` 别处）。
+  /// `ShellTitle` 自己的子树 —— **只有标题文字与它的过渡图层**在这里。
+  ///
+  /// 用途是量标题的过渡（`Opacity` / `Transform` 的层数、位移、不透明度），
+  /// 以及"这一页此刻的标题是哪句话"。
+  ///
+  /// **`AppBar` 右侧那些动作入口不在这个子树里**：`title` 与 `actions` 是 `AppBar`
+  /// 的两个并列槽位，`关于` 那个 `TextButton` 挂在 `actions` 上（见
+  /// `lib/ui/app_shell.dart` 的 mobile 分支）。要找它用 [inAppBar]。
   Finder inTitle(Finder matching) =>
       find.descendant(of: find.byType(ShellTitle), matching: matching);
+
+  /// 标题栏**整条**（`AppBar`）里的某个东西：`title` 槽与 `actions` 槽都算在内。
+  ///
+  /// 与 [inTitle] 的分工：**"标题文字"用 `inTitle`，"标题栏上的入口"用这个。**
+  /// 拿 `inTitle` 去找 `actions` 里的东西必然找不到 —— 那是并列，不是后代。
+  Finder inAppBar(Finder matching) =>
+      find.descendant(of: find.byType(AppBar), matching: matching);
 
   double layerOpacity(WidgetTester tester, int index) => tester
       .widget<Opacity>(
@@ -164,8 +178,18 @@ void main() {
     await swipe(tester, 3);
 
     expect(find.text('主题与背景'), findsOneWidget, reason: '更多页的内容出现了');
-    expect(inTitle(find.text('关于')), findsOneWidget,
-        reason: '「关于」只在标题栏右侧出现（更多页正文里也有同名的小节标题，所以必须限定在标题栏子树里找）');
+    // 这条原来写的是 `inTitle(find.text('关于'))`（`ShellTitle` 的子树）—— 而
+    // `关于` 挂在 `AppBar` 的 **actions** 槽上，与 `title` 槽（`ShellTitle`）是并列关系，
+    // 不是后代，所以那个写法恒为 0 命中。改成限定在 `AppBar` 整条里找。
+    //
+    // 为什么要限定子树：更多页正文里也有一个小节标题叫「关于」
+    // （`lib/ui/more/more_tab.dart` 的 `SectionHeader('关于')`），全树找会把它一起算进来。
+    // 它此刻落在 `ListView` 视口之外、没被构建，所以全树找"看起来"也能过 ——
+    // 但这依赖"列表恰好没建到那儿"，不是这条用例想钉的东西。
+    expect(inAppBar(find.text('关于')), findsOneWidget,
+        reason: '标题栏右侧只在更多页出现这个入口');
+    // 连它的容器一起量：`TextButton` 只有一个，说明那一个 `关于` 就是它
+    expect(inAppBar(find.byType(TextButton)), findsOneWidget);
     expect(find.text('速记'), findsOneWidget, reason: '非灵感页才有速记按钮');
   });
 
