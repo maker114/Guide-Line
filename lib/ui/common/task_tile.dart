@@ -35,8 +35,23 @@ class TaskTile extends StatelessWidget {
     final event = app.ws.findEvent(task.eventId);
     final done = task.status == NodeStatus.done;
 
-    // 已完成 / 已搁置的任务不再"报警"，一律走灰
-    final urgency = task.status == NodeStatus.pending ? urgencyOf(task.dueAt) : Urgency.none;
+    // "已搁置"在这里只压**逾期那一档**，不是把整条色阶抹平。
+    //
+    // 2026-10-01 先改成过"muted ⇒ 一律 `Urgency.none`"，**那是错的**：
+    //   · `Tooltip(urgencyLabel(urgency))` 会变成「没有到期日」——
+    //     而这条任务明明有到期日，等于对用户说假话；
+    //   · `groupByUrgency` 只把 **overdue** 那批切进「未计入逾期」，
+    //     muted 线里"3 天后"的任务照样落在「3 天内」组 —— 于是同屏变成
+    //     "组头说 3 天内、行里灰点、tooltip 说没有到期日"，
+    //     把一处矛盾从「已逾期」档搬到了别的档。
+    //
+    // 既有口径（照 `event_tab.dart` 那处写）：**只在 `overdue` 时降级**。
+    // 于是它与分组、与 `Workspace.overdueTasks`（排除已搁置事件）三边一致：
+    // 那条任务不标红、也不再说"没有到期日"。
+    final muted = app.ws.isEventMutedForDue(task.eventId);
+    final urgency = task.status == NodeStatus.pending
+        ? _urgencyForTile(urgencyOf(task.dueAt), muted: muted)
+        : Urgency.none;
     final urgencyColor = UrgencyColors.ofContext(context).of(urgency);
     final labelStyle = theme.textTheme.labelSmall;
 
@@ -106,6 +121,18 @@ class TaskTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 这一行该显示哪一档紧迫度。
+  ///
+  /// 抽成静态纯函数只为一件事：**这条口径只写在一处**。
+  /// （不标 `@visibleForTesting`：那是给公开成员用的，而这里刻意是私有的 ——
+  /// 不为测试扩大 API。它由 `TaskTile` 的 widget 测试覆盖。）
+  static Urgency _urgencyForTile(Urgency raw, {required bool muted}) {
+    // 已搁置的事件不再参与到期统计：[Workspace.overdueTasks] 把它排除在
+    // 「已逾期」之外、`groupByUrgency` 也照同一份 id 集合切分，所以这里**只压逾期**。
+    if (muted && raw == Urgency.overdue) return Urgency.none;
+    return raw;
   }
 
   /// 到期日怎么写：走全应用**唯一出处** `dueLabelOf`（《界面规范》§7）。

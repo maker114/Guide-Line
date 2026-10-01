@@ -5,7 +5,6 @@ import '../../core/ids.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
 import '../../core/models/task.dart';
-import '../../core/rules/cascade.dart';
 import '../common/color_picker.dart';
 import '../common/dialogs.dart';
 import '../common/due_label.dart';
@@ -14,6 +13,7 @@ import '../common/inline_editor.dart';
 import '../common/labels.dart';
 import 'event_detail_page.dart';
 import 'fold_toggle_row.dart';
+import 'task_actions.dart';
 import 'task_fold.dart';
 
 /// 展开 / 收起箭头的旋转时长（与项目页同一个节奏）。
@@ -390,18 +390,11 @@ class _EventCardHeader extends StatelessWidget {
   }
 
   Future<void> _delete(BuildContext context) async {
-    final taskCount = eventDeletionTaskIds(app.ws.allTasks, event.id).length;
-    final ok = await confirmAction(
-      context,
-      title: '删除事件',
-      message: taskCount == 0
-          ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
-          : '「${event.name}」及其整条任务线共 $taskCount 个任务会被一起删除。'
-                '可在「更多 → 归档区 → 回收站」恢复。',
-      confirmLabel: '删除',
-      danger: true,
-    );
-    if (!ok || !context.mounted) return;
+    // 确认框与任务数都走共享实现（`task_actions.dart` 的 `confirmDeleteEvent`）：
+    // 这里原来自己弹一遍，文案与详情页逐字相同、任务数算法却不同 ——
+    // 详见那个函数的文档。
+    if (!await confirmDeleteEvent(context, app, event)) return;
+    if (!context.mounted) return;
     final error = app.run(() => app.ws.deleteEvent(event.id));
     if (error != null && context.mounted) {
       showToast(context, error, error: true);

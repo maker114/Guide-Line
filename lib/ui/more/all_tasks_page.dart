@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/task.dart';
 import '../common/empty_state.dart';
+import '../common/selection.dart';
 import '../common/status_selector.dart';
 import '../common/task_tile.dart';
 import '../common/urgency.dart';
@@ -66,15 +67,17 @@ class _AllTasksPageState extends State<AllTasksPage> {
   }
 
   /// 全选 / 取消全选（只作用于当前可见的那些）。
+  ///
+  /// 判断抽在 `selection.dart` 的 `selectionAfterToggleAll` 里（四处多选共用同一份）。
   void _toggleSelectAll() {
+    final next = selectionAfterToggleAll(
+      visibleIds: _visibleIds,
+      selectedIds: _selectedIds,
+    );
     setState(() {
-      if (_selectedIds.length == _visibleIds.length) {
-        _selectedIds.clear();
-      } else {
-        _selectedIds
-          ..clear()
-          ..addAll(_visibleIds);
-      }
+      _selectedIds
+        ..clear()
+        ..addAll(next);
     });
   }
 
@@ -240,7 +243,15 @@ class _AllTasksPageState extends State<AllTasksPage> {
           (eventId) => app.ws.findEvent(eventId)?.name ?? '事件已删除',
         );
       case TaskGrouping.urgency:
-        groups = groupByUrgency(tasks);
+        // 「已逾期」那一组**只装 `overdueTasks()` 里的那些**（Q19）：
+        // 外壳横幅与「更多」角标报的就是这个集合的长度，三处必须同源。
+        // （2026-10-01 修：这里原先没传，于是已搁置事件下那些"晚了但不再催"的
+        // 任务也会进「已逾期」组 —— 这一组的行数比横幅说的多，
+        // 而用户按横幅去数，数不出来。`upcoming_page.dart` 一直是传的。）
+        groups = groupByUrgency(
+          tasks,
+          overdueTaskIds: app.ws.overdueTasks().map((t) => t.id).toSet(),
+        );
     }
     return flattenTaskGroups(groups, (tone) => colors.of(tone ?? Urgency.none));
   }

@@ -6,6 +6,7 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/common/format.dart';
+import 'package:guideline/ui/common/urgency.dart';
 import 'package:guideline/ui/more/all_tasks_page.dart';
 
 import 'scroll_finders.dart';
@@ -130,6 +131,147 @@ void main() {
     await tester.tap(find.text('按事件'));
     await tester.pumpAndSettle();
     expect(find.text('一件事'), findsWidgets, reason: '按事件分组时组头是事件名');
+  });
+
+  group('逾期的口径必须三处同源（Q19）', () {
+    /// 造两条**都已逾期**的任务：一条在正常事件下，一条在**已搁置**事件下。
+    ///
+    /// 口径出处是 `Workspace.overdueTasks()`：已搁置事件下的任务**不计入逾期**
+    /// （它是"先不做了"，再拉响逾期等于把放下的东西拽回来催一遍）。
+    /// 外壳横幅与「更多」角标报的是那个集合的长度。
+    Future<AppController> seedTwoOverdue(WidgetTester tester) async {
+      final app = await boot();
+      final active = app.ws.createEvent(name: '正常线');
+      final muted = app.ws.createEvent(name: '搁置线');
+      app.ws.createTask(eventId: active.id, title: '正常线的逾期', dueAt: dateOffset(-3));
+      app.ws.createTask(eventId: muted.id, title: '搁置线的逾期', dueAt: dateOffset(-3));
+      app.run(() => app.ws.setEventStatus(muted.id, NodeStatus.ignored));
+      await openAllTasks(tester, app);
+      await tester.tap(find.text('按紧迫度'));
+      await tester.pumpAndSettle();
+      return app;
+    }
+
+    /// 某条任务所在那一行里，**到期日**那个 `Text`（按行定位，不靠文本形状去猜）。
+    ///
+    /// 为什么不用 `find.textContaining('逾期 3 天')` 抓：两条任务的日期文案
+    /// **一模一样**，抓出来分不清是哪一行的 —— 那样断言就成了"碰巧对"。
+    ///
+    /// 为什么还要 `isDueLabel` 这一层：行里**不止一个含"天"字的 `Text`** ——
+    /// 紧迫度那个 `Tooltip` 的内容（「3 天内」/「今天」）也是一个 `Text`，
+    /// 而且就在这一行的子树里。只按"含天"取第一个，取到的可能是 tooltip
+    /// （2026-10-01 就这么错过一次：拿到的是 tooltip 的默认字色）。
+    /// 到期日的形状是「绝对日期（剩余天数）」，**带年份**，据此把它挑出来。
+    bool isDueLabel(Text w) => RegExp(r'\d{4}-\d{2}-\d{2}').hasMatch(w.data ?? '');
+
+    Text dueTextInRow(WidgetTester tester, String title) {
+      final row = find.ancestor(of: find.text(title), matching: find.byType(ListTile));
+      final dues = find.descendant(
+        of: row,
+        matching: find.byWidgetPredicate((w) => w is Text && isDueLabel(w)),
+      );
+      return tester.widget<Text>(dues.first);
+    }
+
+    testWidgets('已搁置事件下的逾期任务**不进「已逾期」组**', (tester) async {
+      final app = await seedTwoOverdue(tester);
+
+      // ① 权威取数只认正常线那一条（横幅与角标报的就是它的长度）
+      expect(
+        app.ws.overdueTasks().map((t) => t.title),
+        <String>['正常线的逾期'],
+        reason: 'overdueTasks() 不含已搁置事件下的任务',
+      );
+
+      // ② 界面必须与它同源：两条任务都在这儿（不隐藏），但一个进「已逾期」、
+      //    另一个进「未计入逾期」—— 于是**组里的行数与横幅对得上**
+      expect(find.text('正常线的逾期'), findsOneWidget);
+      expect(find.text('搁置线的逾期'), findsOneWidget);
+      expect(find.text('已逾期'), findsOneWidget, reason: '组头在');
+      expect(
+        find.text('未计入逾期'),
+        findsOneWidget,
+        reason: '搁置线那条要单独一档；这一条就是修之前会红的断言 —— '
+            '当时 all_tasks_page 没传 overdueTaskIds，它会被塞进「已逾期」组',
+      );
+    });
+
+    testWidgets('已搁置事件下的逾期任务：**日期不标红**，走灰（与组头口径一致）', (tester) async {
+      await seedTwoOverdue(tester);
+      final colors = UrgencyColors.ofContext(
+        tester.element(find.byType(AllTasksPage)),
+      );
+
+      expect(
+        dueTextInRow(tester, '正常线的逾期').style?.color,
+        colors.of(Urgency.overdue),
+        reason: '正常线那条：日期按逾期红',
+      );
+      expect(
+        dueTextInRow(tester, '搁置线的逾期').style?.color,
+        colors.of(Urgency.none),
+        reason: '搁置线那条：**不标红**。`Workspace.overdueTasks` 的文档明写'
+            '这类任务"日期也不标红"，而这一行原先只按日期算紧迫度，于是同屏出现'
+            '"分组头说未计入、行里却红点红日期"',
+      );
+    });
+
+    testWidgets('已搁置事件里的**未逾期**任务：色阶与 tooltip 都不许被抹平', (tester) async {
+      // 这一条钉的是我自己先改错的那一版（2026-10-01）：
+      // 当时写成"muted ⇒ 一律 `Urgency.none`"，于是
+      //   · tooltip 变成「没有到期日」—— 而这条任务明明有到期日，等于说假话；
+      //   · 色阶被整个抹平，而 `groupByUrgency` 只把 **overdue** 那批切进
+      //     「未计入逾期」，muted 线里"3 天后"的任务照样落在「3 天内」组，
+      //     于是同屏变成"组头说 3 天内、行里灰点、tooltip 说没有到期日" ——
+      //     把一处矛盾从「已逾期」档搬到了别的档。
+      // 正确口径（照 `event_tab.dart` 那处）：**只在 overdue 时降级**。
+      final app = await boot();
+      final muted = app.ws.createEvent(name: '搁置线');
+      app.ws.createTask(eventId: muted.id, title: '搁置线的三天后', dueAt: dateOffset(3));
+      app.run(() => app.ws.setEventStatus(muted.id, NodeStatus.ignored));
+
+      await openAllTasks(tester, app);
+      await tester.tap(find.text('按紧迫度'));
+      await tester.pumpAndSettle();
+
+      final colors = UrgencyColors.ofContext(tester.element(find.byType(AllTasksPage)));
+
+      expect(
+        find.text('3 天内'),
+        findsOneWidget,
+        reason: '它**仍在「3 天内」组**（未逾期，不该被切进「未计入逾期」）',
+      );
+      expect(
+        dueTextInRow(tester, '搁置线的三天后').style?.color,
+        colors.of(Urgency.within3),
+        reason: '色阶不许被抹平：未逾期的搁置任务照走它自己那一档',
+      );
+      final row = find.ancestor(
+        of: find.text('搁置线的三天后'),
+        matching: find.byType(ListTile),
+      );
+      // tooltip 的文案在**没弹出时不会渲染成 `Text`** —— 它只存在于
+      // `Tooltip.message` 里。所以要断言那个属性，不能 `find.text`。
+      //
+      // 行里有**三个** Tooltip：状态圆钮（「点按：完成 / 取消…」）、
+      // 紧迫度圆点、日期文字。后两个的 message 才是紧迫度标签 ——
+      // 按"message 是不是某个紧迫度标签"把它挑出来，不靠顺序猜。
+      final labels = Urgency.values.map(urgencyLabel).toSet();
+      final messages = find
+          .descendant(of: row, matching: find.byType(Tooltip))
+          .evaluate()
+          .map((e) => (e.widget as Tooltip).message)
+          .whereType<String>()
+          .where(labels.contains)
+          .toSet();
+      expect(messages, isNotEmpty, reason: '这一行应当有一个说紧迫度的 tooltip');
+      expect(
+        messages,
+        <String>{urgencyLabel(Urgency.within3)},
+        reason: 'tooltip 必须说真话 —— 改成"一律走灰"那一版会让它变成「没有到期日」，'
+            '而这条任务明明有到期日',
+      );
+    });
   });
 
   testWidgets('按事件分组：组内也是未完成 → 已搁置 → 已完成，同档按到期日', (tester) async {
