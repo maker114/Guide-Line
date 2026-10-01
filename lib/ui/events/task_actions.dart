@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
+import '../../core/models/event.dart';
 import '../../core/models/task.dart';
+import '../../core/rules/cascade.dart';
 import '../common/dialogs.dart';
 import '../common/due_sheet.dart';
 import '../common/event_picker.dart';
@@ -11,6 +13,36 @@ import '../common/event_picker.dart';
 /// 新建与重命名不在这里 —— 它们改成了**页面内直接输入**
 /// （主线在任务线末尾、子任务在框内、重命名就在那一行），
 /// 不再弹对话框。留在这里的都是"改完会有副作用、值得问一句"的动作。
+
+/// 问一句"真的要删这条事件吗"，答 `true` 才让调用方去删。
+///
+/// **全应用只有这一份文案**（2026-10-01 合并）：事件列表（`event_tab.dart`）
+/// 与事件详情页（`event_detail_page.dart`）原来各写一遍，标题、两种文案、
+/// 确认词、`danger` **逐字相同** —— 而**任务数的算法不一样**：列表页调
+/// `eventDeletionTaskIds`（cascade 的规格实现），详情页内联了一段
+/// `allTasks.where(eventId 匹配 && !deleted)`。
+/// 两者当时**恰好等价**，所以是"等爆耦合"：cascade 一改（例如把归档任务也算进来），
+/// 两个入口就会报出不同的条数，而用户正是照那个数决定要不要删。
+/// 现在两边都走 [eventDeletionTaskIds]。
+///
+/// 只问、不删：删除本身由调用方做（详情页删完还要 `maybePop`，列表页不用）。
+Future<bool> confirmDeleteEvent(
+  BuildContext context,
+  AppController app,
+  Event event,
+) async {
+  final taskCount = eventDeletionTaskIds(app.ws.allTasks, event.id).length;
+  return confirmAction(
+    context,
+    title: '删除事件',
+    message: taskCount == 0
+        ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
+        : '「${event.name}」及其整条任务线共 $taskCount 个任务会被一起删除。'
+              '可在「更多 → 归档区 → 回收站」恢复。',
+    confirmLabel: '删除',
+    danger: true,
+  );
+}
 
 /// 设置 / 清除到期日。
 ///
