@@ -153,8 +153,34 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 与"下级 1/3"能对不上。
   bool _blocked(Task task) => app.ws.isTaskBlocked(task.id);
 
-  // 下面几个是给同文件里的私有子控件用的：`setState` 是 protected，
-  // 子控件不能直接调，所以在这里开几个语义明确的入口。
+  /// 下面几个是给同文件里的私有子控件用的：`setState` 是 protected，
+  /// 子控件不能直接调，所以在这里开几个语义明确的入口。
+
+  /// 交给三个子控件的**会话值对象**（2026-10-01 解 host 死结）。
+  ///
+  /// 改之前：`_TaskBox` / `_TaskLine` / `_EventHeader` 各自持有一个
+  /// `final _EventDetailPageState host;`，然后直接读**父 State 的私有成员**
+  /// （`host._subtaskParentId`、`host._renamingTaskId`、`host._blocked(...)`）。
+  /// 那让父 State 的私有字段事实上成了子控件的 API：改个字段名编译器不会提醒它们，
+  /// 而这三个控件**永远抽不到别的文件**（`_EventDetailPageState` 是文件私有的）
+  /// —— 这个文件的行数只能涨。
+  ///
+  /// 现在它们只依赖这个值对象：`app` / `eventId` 是只读的，两个"正在进行中"
+  /// 的状态和几个动作从这里拿。**子控件仍然不自己 `setState`**（那是 protected），
+  /// 动作回到父 State 里执行 —— 但依赖的方向从"抓着父 State"变成了"收一个值对象"。
+  late final _EventDetailSession session = _EventDetailSession(
+    app: () => app,
+    eventId: () => eventId,
+    renamingTaskId: () => _renamingTaskId,
+    subtaskParentId: () => _subtaskParentId,
+    isBlocked: _blocked,
+    isInMainLine: isInMainLine,
+    beginRename: beginRename,
+    endRename: endRename,
+    beginSubtask: beginSubtask,
+    moveInLine: moveInLine,
+    createTask: _createTask,
+  );
 
   void beginRename(String taskId) => setState(() => _renamingTaskId = taskId);
 
@@ -323,7 +349,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
             children: <Widget>[
               // 事件自身的状态与进度
-              _EventHeader(host: this, event: event),
+              _EventHeader(session: session, event: event),
               const SizedBox(height: 12),
               if (mainLine.isEmpty)
                 Padding(
@@ -363,7 +389,7 @@ class _EventDetailPageState extends State<EventDetailPage> {
                         // 会整体往上挪，按位置错配就会把它们行内的动画重放一遍（实机反馈）
                         KeyedSubtree(
                           key: ValueKey<String>('node-${mainLine[i].id}'),
-                          child: _TaskBox(host: this, task: mainLine[i]),
+                          child: _TaskBox(session: session, task: mainLine[i]),
                         ),
                       ],
                   ],
@@ -386,20 +412,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
   }
 
   Future<void> _deleteEvent(BuildContext context, Event event) async {
-    final taskCount = app.ws.allTasks
-        .where((t) => t.eventId == event.id && !t.deleted)
-        .length;
-    final ok = await confirmAction(
-      context,
-      title: '删除事件',
-      message: taskCount == 0
-          ? '删除「${event.name}」。可在「更多 → 归档区 → 回收站」恢复。'
-          : '「${event.name}」及其整条任务线共 $taskCount 个任务会被一起删除。'
-                '可在「更多 → 归档区 → 回收站」恢复。',
-      confirmLabel: '删除',
-      danger: true,
-    );
-    if (!ok || !context.mounted) return;
+    // 确认框与任务数都走共享实现（`task_actions.dart` 的 `confirmDeleteEvent`）：
+    // 这里原来自己弹一遍，文案与列表页逐字相同、任务数却用内联的
+    // `allTasks.where(eventId 匹配 && !deleted)` 另算一遍 ——
+    // 与 cascade 的 `eventDeletionTaskIds` 当时恰好等价，属"等爆耦合"。
+    if (!await confirmDeleteEvent(context, app, event)) return;
+    if (!context.mounted) return;
     final error = app.run(() => app.ws.deleteEvent(event.id));
     if (!context.mounted) return;
     if (error != null) {
@@ -417,16 +435,79 @@ class _EventDetailPageState extends State<EventDetailPage> {
 ///
 /// 也**没有**"最近到期 / 接下来做什么"：那一版（「时间与任务」）做完实机反馈不满意，
 /// 整块撤掉了（见 CHANGELOG 1.5.0）。卡里只留"这条线走到哪了"。
-class _EventHeader extends StatelessWidget {
-  const _EventHeader({required this.host, required this.event});
+/// 三个子控件（页头 / 任务框 / 任务行）与父 State 之间的**唯一接口**。
+///
+/// 它存在的理由写在 `_EventDetailPageState.session` 的文档里：在那之前子控件
+/// 各自持有父 State 并直接读它的私有成员，于是"父 State 的私有字段"成了子控件的
+/// API、而子控件永远抽不出这个文件。
+///
+/// 两个"正在进行中"的状态（[renamingTaskId] / [subtaskParentId]）是**取值函数**
+/// 而不是字段：父 State 每次 `setState` 都重建子树，所以子控件每次 build 都要
+/// 拿到**当前**的值 —— 存一份快照会在 rename / 加子任务之后停在旧值上。
+class _EventDetailSession {
+  const _EventDetailSession({
+    required this.app,
+    required this.eventId,
+    required this.renamingTaskId,
+    required this.subtaskParentId,
+    required this.isBlocked,
+    required this.isInMainLine,
+    required this.beginRename,
+    required this.endRename,
+    required this.beginSubtask,
+    required this.moveInLine,
+    required this.createTask,
+  });
 
-  final _EventDetailPageState host;
+  /// 控制器。与下面两个状态一样是**取值函数**，不是字段（2026-10-01 核验改）。
+  ///
+  /// 我第一版写成 `final AppController app`，由 `late final session = ...` 传进来，
+  /// 于是它在 session 创建那一刻被**定死**；而旧代码是每帧读 `host.app`。
+  /// 核验指出这是我自己新埋的坑，而且与我给两个状态用取值函数的理由**自相矛盾**
+  /// —— 同一个"别存快照"的道理对 `app` 一样成立。今天那 5 个构造点都是从
+  /// `MaterialPageRoute` 捕获的稳定值，所以触发不到；但没理由留这个不一致。
+  final AppController Function() app;
+
+  /// 这条事件的 id。同上，取当前值。
+  final String Function() eventId;
+
+  /// 正在原地重命名的任务 id（没有则为 `null`）。
+  final String? Function() renamingTaskId;
+
+  /// 正在为哪个任务录子任务（没有则为 `null`）。
+  final String? Function() subtaskParentId;
+
+  /// 这条任务还有未处理的直接子任务 → 状态按钮显示锁形。
+  final bool Function(Task) isBlocked;
+
+  /// 这条任务是不是链上的节点（`parent_task_id == null`）。
+  final bool Function(Task) isInMainLine;
+
+  final void Function(String taskId) beginRename;
+  final void Function() endRename;
+  final void Function(String taskId) beginSubtask;
+  final void Function(String taskId, {required bool up}) moveInLine;
+
+  /// 新建任务（子任务在框内录）。签名照 `_EventDetailPageState._createTask`。
+  final void Function({
+    required String title,
+    String? parentTaskId,
+    TaskType type,
+  }) createTask;
+}
+
+/// 事件详情页头（进度 / 标识色 / 搁置 / 归档那一行）。
+///
+class _EventHeader extends StatelessWidget {
+  const _EventHeader({required this.session, required this.event});
+
+  final _EventDetailSession session;
   final Event event;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final app = host.app;
+    final app = session.app();
     // 进度**只认一个算法**（与事件列表卡头共用 `checkEventCompletion`）：
     // 分子含"已搁置"、分母排除"已归档"（Q17）
     final completion = app.ws.checkEventCompletion(event.id);
@@ -496,19 +577,19 @@ class _VerticalConnector extends StatelessWidget {
 /// （已废除的框内并列），同样按子任务的样子排在框里 —— 信息不丢，也不再为它
 /// 维护一套并排渲染。
 class _TaskBox extends StatelessWidget {
-  const _TaskBox({required this.host, required this.task});
+  const _TaskBox({required this.session, required this.task});
 
-  final _EventDetailPageState host;
+  final _EventDetailSession session;
   final Task task;
 
   @override
   Widget build(BuildContext context) {
-    final app = host.app;
-    final eventId = host.eventId;
+    final app = session.app();
+    final eventId = session.eventId();
     // 框内的下级：新数据只有子任务；老数据里的 `parallel` 也排在这儿
     final children = app.ws.subtasksOf(task.id, eventId: eventId);
     final theme = Theme.of(context);
-    final addingSubtask = host._subtaskParentId == task.id;
+    final addingSubtask = session.subtaskParentId() == task.id;
     final isDone = task.status != NodeStatus.pending;
 
     // 已完成（含已搁置）的任务**默认折叠**下级：减少视觉噪音。
@@ -532,11 +613,11 @@ class _TaskBox extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           _TaskLine(
-            host: host,
+            session: session,
             task: task,
             indent: 0,
             childSummary: _summarize(children),
-            blocked: host._blocked(task),
+            blocked: session.isBlocked(task),
             collapsible: hasChildren,
             expanded: expanded,
             onToggle: () => app.setExpanded(task.id, expanded: !expanded),
@@ -557,10 +638,10 @@ class _TaskBox extends StatelessWidget {
                   KeyedSubtree(
                     key: ValueKey<String>('child-${child.id}'),
                     child: _TaskLine(
-                      host: host,
+                      session: session,
                       task: child,
                       indent: 1,
-                      blocked: host._blocked(child),
+                      blocked: session.isBlocked(child),
                     ),
                   ),
               ],
@@ -578,7 +659,7 @@ class _TaskBox extends StatelessWidget {
                 hint: '子任务名',
                 leading: Icons.subdirectory_arrow_right,
                 dense: true,
-                onCreate: (title) => host._createTask(
+                onCreate: (title) => session.createTask(
                   title: title,
                   parentTaskId: task.id,
                   type: TaskType.subtask,
@@ -636,7 +717,7 @@ class _CollapsedChildrenHint extends StatelessWidget {
 /// 一行任务（框标题行或框内子任务行）。
 class _TaskLine extends StatelessWidget {
   const _TaskLine({
-    required this.host,
+    required this.session,
     required this.task,
     required this.indent,
     this.childSummary,
@@ -646,7 +727,7 @@ class _TaskLine extends StatelessWidget {
     this.onToggle,
   });
 
-  final _EventDetailPageState host;
+  final _EventDetailSession session;
   final Task task;
   final int indent;
   final String? childSummary;
@@ -661,7 +742,7 @@ class _TaskLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = host.app;
+    final app = session.app();
     final theme = Theme.of(context);
     final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
     final done = task.status == NodeStatus.done;
@@ -686,7 +767,7 @@ class _TaskLine extends StatelessWidget {
           )
         : baseStyle;
 
-    if (host._renamingTaskId == task.id) {
+    if (session.renamingTaskId() == task.id) {
       return Padding(
         padding: EdgeInsets.only(left: 12.0 + indent * 20, right: 12),
         child: InlineTextField(
@@ -696,7 +777,7 @@ class _TaskLine extends StatelessWidget {
           textStyle: theme.textTheme.bodyMedium,
           onSubmitted: (title) =>
               app.run(() => app.ws.updateTask(task.id, title: title)),
-          onEditClosed: host.endRename,
+          onEditClosed: session.endRename,
         ),
       );
     }
@@ -830,14 +911,14 @@ class _TaskLine extends StatelessWidget {
   }
 
   Future<void> _run(BuildContext context, String value) async {
-    final app = host.app;
+    final app = session.app();
     switch (value) {
       // 新建与重命名不再弹对话框，改为把"页内输入框"在这一行附近展开
       case 'sub':
-        host.beginSubtask(task.id);
+        session.beginSubtask(task.id);
         break;
       case 'rename':
-        host.beginRename(task.id);
+        session.beginRename(task.id);
         break;
       case 'moveUp':
         _moveInLine(context, up: true);
@@ -869,11 +950,11 @@ class _TaskLine extends StatelessWidget {
   /// 在链上挪一格。**已经在两端时要说一句**（Q27）——
   /// 静默的空操作在用户那边等于"这个按钮坏了"。
   void _moveInLine(BuildContext context, {required bool up}) {
-    if (!host.app.ws.canMoveTaskWithinLine(task.id, up: up)) {
+    if (!session.app().ws.canMoveTaskWithinLine(task.id, up: up)) {
       showToast(context, up ? '已经是最前面了' : '已经到最后了');
       return;
     }
-    host.moveInLine(task.id, up: up);
+    session.moveInLine(task.id, up: up);
   }
 
   Future<void> _showActions(BuildContext context) async {
@@ -893,7 +974,7 @@ class _TaskLine extends StatelessWidget {
                 style: Theme.of(sheetContext).textTheme.titleMedium,
               ),
             ),
-            for (final action in taskActions(task, inLine: host.isInMainLine(task)))
+            for (final action in taskActions(task, inLine: session.isInMainLine(task)))
               ListTile(
                 leading: Icon(action.icon),
                 title: Text(action.label),
