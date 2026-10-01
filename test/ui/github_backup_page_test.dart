@@ -422,7 +422,7 @@ void main() {
       expect(app.readGitHubSyncRecord(), isNull);
     });
 
-    testWidgets('同步过一次之后：上排是记账里的云端提交码，且只念 7 位', (tester) async {
+    testWidgets('同步过一次之后：两排都是本机指纹，且只念 7 位', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
         commit: RemoteCommit(sha: 'abc1234def5678'),
@@ -437,24 +437,45 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(app.readGitHubSyncRecord()!.commitSha, 'abc1234def5678');
-      // 2026-10-02 改：这条断言原来要求标签里给**完整 40 位**，而那正是缺陷本身 ——
-      // 点阵只有 7 格（静默截断，看着没事），标签却把整串递给读屏软件念。
-      // 所以这条从"帮凶"改成"守卫"：**只认 7 位短码**。
+      // 2026-10-02 改（用户指出"提交码明明不一样，点检查更新却不报错"）：
+      // 第一版上排摆 GitHub 的**提交码**、下排摆本机**内容指纹** —— 两者算法与输入
+      // 都不同，**永远不可能相等**，并排摆成两个"码"却期望可比，是界面在骗人。
+      // 现在两排都摆**同一种指纹**（记账里的 localSha / 此刻现算），
+      // 于是"相不相等"有了确切含义：相等 = 上次上传后本机没改过。
       expect(
-        find.bySemanticsLabel('云端提交码 abc1234'),
+        find.bySemanticsLabel(RegExp(r'^云端那一份的指纹 [0-9a-f]{7}$')),
         findsOneWidget,
-        reason: '点阵是画出来的，读屏只能靠语义标签；位数必须与 7 格一致',
+        reason: '上排 = 上次成功上传时本机那一份的指纹（记账里的 localSha）',
       );
+      expect(
+        find.bySemanticsLabel(RegExp(r'^本机此刻的指纹 [0-9a-f]{7}$')),
+        findsOneWidget,
+        reason: '下排 = 此刻本机这一份的指纹，现算的',
+      );
+      // 只念 7 位：完整 40 位 sha 递给读屏软件是 2.3.0 之前那个缺陷，
+      // 这条守卫留着别删。
       expect(
         find.bySemanticsLabel(RegExp(r'\w{8,}')),
         findsNothing,
         reason: '语义句里出现 8 位以上的连续码，就说明有人把完整 sha 递进来了',
       );
-      // 下排是本机内容码，与上排不是一个东西
+      // 刚拉完，两排应当**相等**（本机刚被云端覆盖过，指纹与记账一致）。
+      final labels = tester
+          .widgetList<Semantics>(find.descendant(
+            of: find.byType(CommitLcd),
+            matching: find.byType(Semantics),
+          ))
+          .map((s) => s.properties.label ?? '')
+          .where((l) => l.contains('指纹'))
+          .toList();
+      expect(labels.length, 2, reason: '正好两排指纹');
+      final codes = labels
+          .map((l) => RegExp(r'[0-9a-f]{7}').stringMatch(l))
+          .toList();
       expect(
-        find.bySemanticsLabel(RegExp(r'^本机内容码 [0-9a-f]{7}$')),
-        findsOneWidget,
-        reason: '下排要摆本机指纹，现算的',
+        codes[0],
+        codes[1],
+        reason: '刚同步完，两排该相等 —— 不等就说明记账的 localSha 写错了',
       );
       handle.dispose();
     });

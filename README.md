@@ -3,7 +3,7 @@
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
 当前形态是 **Android 单机版 + Windows 桌面版**，用 Flutter 写，数据全部留在你自己这台设备上（手机一份、电脑一份，互不通信）。
 
-当前版本 **2.3.1+67** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
+当前版本 **2.3.2+68** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 [它是什么](#它是什么) · [设计原则](#设计原则) · [功能](#功能) · [技术](#技术) · [快速开始](#快速开始) · [开发](#开发) · [文档](#文档)
 

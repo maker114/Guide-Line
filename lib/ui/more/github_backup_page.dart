@@ -357,40 +357,64 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
   /// 记账（读一次，别在 build 里反复读盘）。
   SyncRecord? _record() => app.readGitHubSyncRecord();
 
-  /// 顶上那块点阵屏：**上排云端提交码、下排本机内容码**。
+  /// 顶上那块点阵屏：**上排"云端上的那一份"、下排"这台手机上的一份"**。
   ///
-  /// 两个码**性质不同、不可互判**，所以分成两排而不是"两个并列的号"：
-  ///   · 上排 = 云端那一次上传的**提交码**（`SyncRecord.commitSha`），
-  ///     它答的是"云端现在停在哪一次上传"；
-  ///   · 下排 = 本机这份数据的**内容指纹**（现算），它答的是"我这台是哪一版"。
+  /// ## 为什么两排都是"本机内容指纹"
   ///
-  /// 为什么下排要现算而不是读记账里那个 `localSha`：记账记的是**上次同步那一刻**
-  /// 的指纹，本地一改它就过期了 —— 而用户看这块屏正是想知道"我现在跟云端一样吗"。
-  /// 现算才会在改动之后立刻变，屏上的两个号不再相等这件事本身就是提示。
+  /// 第一版（2.3.0）上排摆 GitHub 的**提交码**、下排摆本机的**内容指纹**。
+  /// 那是个**误导性设计**，用户当场指出来了："提交码明明不一样，点检查更新却不报错。"
+  /// 他没有看错 —— 两个码的性质、算法、输入全都不同，**永远不可能相等**；
+  /// 并排摆两个"码"却期望它们可比，是界面在骗人。
   ///
-  /// ⚠️ 但也**不能反过来靠"两排相等"判断已同步**：上排是 GitHub 的提交码、
-  /// 下排是本地指纹，算法与输入都不同，**本来就永远不相等**。这排屏的作用是
-  /// "各自是谁"，同步与否由下面「上次同步」那行的条数与时间回答。
+  /// 现在两排都摆**同一种指纹**（对本地数据规范化文本算的 SHA-1 前 7 位）：
+  ///   · 上排 = **上次成功上传时**本机那一份的指纹（记账里的 `localSha`）；
+  ///   · 下排 = **此刻**本机这一份的指纹（现算）。
+  ///
+  /// 于是"两排相不相等"有了确切含义：**相等 = 上次上传之后本机没改过；
+  /// 不等 = 本机改过、还没上传**。这正是用户想从这块屏上知道的事。
+  ///
+  /// ⚠️ 它**仍然不能回答"云端有没有被别人改过"** —— 那要看「检查更新」
+  /// （它拿记账里的 `recordCount` 与云端此刻的条数比，见 `analyzeSync`）。
+  /// 两块信息各管一段，屏下面那句 [_commitScreenNote] 把它们讲清楚。
+  ///
+  /// 记账里的 `localSha` 为空（老记账、或 2.3.0 那版写的）时上排**整排暗着** ——
+  /// 不编一个数出来，暗着的屏比一行假字诚实。
   Widget _commitScreen() {
-    final commitSha = _record()?.commitSha ?? '';
-    final localSha = app.localContentSha;
+    final uploadedSha = _record()?.localSha ?? '';
+    final currentSha = app.localContentSha;
     return CommitLcd(
       rows: <CommitLcdRow>[
         CommitLcdRow(
           // 给人看的标识：两排都是七位十六进制，肉眼分不出谁是谁。
           label: '云端',
-          sha: shortSha(commitSha),
-          semanticsLabel: commitSha.isEmpty
-              ? '云端提交码未知，还没同步过'
-              : '云端提交码 ${shortSha(commitSha)}',
+          sha: uploadedSha,
+          semanticsLabel: uploadedSha.isEmpty
+              ? '云端那一份的指纹未知，还没同步过'
+              : '云端那一份的指纹 $uploadedSha',
         ),
         CommitLcdRow(
           label: '本机',
-          sha: localSha,
-          semanticsLabel: '本机内容码 $localSha',
+          sha: currentSha,
+          semanticsLabel: '本机此刻的指纹 $currentSha',
         ),
       ],
     );
+  }
+
+  /// 点阵屏下面那句说明：把"两排是什么、相等/不等各说明什么"讲成人话。
+  ///
+  /// 加它的理由与上面那段一样 —— 只摆两个码、不说它们是什么关系，
+  /// 就是让用户自己去猜（而第一版猜错了）。
+  String _commitScreenNote() {
+    final uploadedSha = _record()?.localSha ?? '';
+    if (uploadedSha.isEmpty) {
+      return '两排都是本机数据的内容指纹。云端那一排还没有数 —— '
+          '同步成功过一次之后才会记下来。';
+    }
+    if (uploadedSha == app.localContentSha) {
+      return '两排一样：上次上传之后，这台手机的数据没有再改过。';
+    }
+    return '两排不一样：上次上传之后，这台手机的数据又改过了，还没上传。';
   }
 
   /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
@@ -418,13 +442,22 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: <Widget>[
-                // 最顶上单开的这一格：**上排云端、下排本机**（2026-10-02 定的两口径）。
-                // 不配标题文字 —— 没有提交号时那一排就是一片暗点，写"未知"
-                // 反而是往界面上摆一句假话（点阵屏自己会说明问题）；
-                // 哪一排是什么，交给读屏软件那句语义说清。
+                // 最顶上单开的这一格：**上排"云端那一份"、下排"本机此刻"**。
+                // 两排都是本机数据的内容指纹（见 [_commitScreen] 的说明）——
+                // 于是"两排相不相等"有确切含义，而不是两个不可比的号摆在一起。
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                   child: _commitScreen(),
+                ),
+                Padding(
+                  // 屏下面那句：两排是什么、相等/不等各说明什么。
+                  // 只摆两个码不说关系，就是让用户自己去猜 —— 第一版正是这么翻车的：
+                  // 用户问"提交码明明不一样，点检查更新为什么不报错"。
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+                  child: Text(
+                    _commitScreenNote(),
+                    style: theme.textTheme.bodySmall,
+                  ),
                 ),
                 SwitchListTile(
                   value: _enabled,
