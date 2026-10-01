@@ -109,8 +109,70 @@ void main() {
     return app;
   }
 
-  group('总开关关着', () {
-    test('一次网都不连，指示器也不出现', () async {
+  group('老记账缺本机指纹时补记（2026-10-02）', () {
+    // 背景：`localSha` 是 2.3.0 才加的字段，而 `analyzeSync` 判成 `noChange`
+    // 时几条早退路径**都不写记账** —— 那些路径恰恰是"两边内容确实是同一份"的证明。
+    // 于是老记账的 `localSha` 永远补不上，点阵屏上排永远空着；用户在真机上撞到：
+    // 提示说"同步成功过一次之后才会记下来"，可他点推送依然没有 ——
+    // 因为推送被**正确地**判成"不需要推送"，而那条路不写记账。
+    test('判成"两边是同一份"时，把本机指纹补进记账，且不动别的时间/条数', () async {
+      // 本机与云端内容一模一样（同一个 projects 数、同一个 savedAt）
+      final same = storeWith(savedAt: now, projects: 2);
+      final gateway = _FakeGateway(remote: remoteOf(same));
+      final app = await bootWith(
+        gateway: gateway,
+        local: same,
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: 'commit-old',
+          // localSha 故意留空：模拟 2.3.0 之前写下的老记账
+        ),
+      );
+      final expected = app.localContentSha;
+
+      await app.autoSyncAfterHome();
+
+      final record = app.readGitHubSyncRecord()!;
+      expect(record.localSha, expected, reason: '补上了本机指纹');
+      expect(
+        record.syncedAt,
+        now - 30000,
+        reason: '这不是一次新的同步，时刻不许动',
+      );
+      expect(record.recordCount, 2, reason: '条数不许动');
+      expect(record.commitSha, 'commit-old', reason: '云端那一次提交没变');
+      expect(gateway.writeCount, 0, reason: '内容相同，绝不该往云端写');
+    });
+
+    test('已经有本机指纹时不重复写盘（不制造无谓的文件改动）', () async {
+      final same = storeWith(savedAt: now, projects: 2);
+      final gateway = _FakeGateway(remote: remoteOf(same));
+      final app = await bootWith(
+        gateway: gateway,
+        local: same,
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: 'commit-old',
+          localSha: 'already',
+        ),
+      );
+
+      final before = app.storage.readSyncRecord()!.localSha;
+      await app.autoSyncAfterHome();
+
+      expect(
+        app.storage.readSyncRecord()!.localSha,
+        before,
+        reason: '已经有值就不动它 —— 乱写会无端改文件、多占一份备份',
+      );
+    });
+  });
+
+  group('总开关关着', () {    test('一次网都不连，指示器也不出现', () async {
       final gateway = _FakeGateway(remote: remoteOf(storeWith(savedAt: now - 60000)));
       final app = await bootWith(
         gateway: gateway,

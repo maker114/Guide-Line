@@ -301,6 +301,12 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
 
     final diff = diffStores(base: local, target: remote.payload!.store);
     if (!diff.hasChanges) {
+      // 这一条分支**证明了"两边内容相同"**，所以顺手把本机指纹补进记账
+      // （见 `AppController.rememberLocalShaIfMissing` 的说明）。
+      // 不补的话：老记账的 `localSha` 永远空着，点阵屏上排永远是暗的 ——
+      // 而用户点了推送也补不上，因为推送会被正确地判成"不需要推送"。
+      // 只读维护：不改 syncedAt、不写云端、不动数据。
+      app.rememberLocalShaIfMissing();
       setState(() => _busy = false);
       _setResult(
         '云端和这台手机是同一份，没有要更新的东西。\n'

@@ -276,6 +276,37 @@ class AppController extends ChangeNotifier {
   /// 上排放的是云端提交码（记账里的 `commitSha`），两者职责不同。
   String get localContentSha => workspace.localContentSha();
 
+  /// 记账里**缺本机指纹**时把它补上（只补这一个键，别的一个字节不动）。
+  ///
+  /// 公开是给「检查更新」用的：它在"两边没有差别"那条分支上也能证明内容相同，
+  /// 而那条分支是用户卡住时最可能点到的地方。**它是只读维护，不是同步** ——
+  /// 不改 `syncedAt`、不写云端、不动数据。
+  ///
+  /// ## 为什么需要它
+  ///
+  /// `localSha` 是 2.3.0 才加的字段，而 **`analyzeSync` 判成 `noChange` 时
+  /// 几条早退路径都不写记账** —— 那些路径恰恰是"两边内容确实是同一份"的证明。
+  /// 于是老记账的 `localSha` 永远补不上，点阵屏上排永远空着（用户在真机上撞到了：
+  /// 提示说"还没有数，同步成功过一次之后才会记下来"，可他点了推送却依然没有 ——
+  /// 因为推送被正确地判定成"不需要推送"，而那条路不写记账）。
+  ///
+  /// ## 为什么在这里写是安全的
+  ///
+  /// 只在**已经判定两边内容相同**的路径上调用。所以"本机此刻的指纹"就等于
+  /// "云端那一份的指纹"，记下来是**陈述一个已知事实**，不是猜。
+  ///
+  /// 三样东西故意不动：`syncedAt`（不是一次新的同步）、`recordCount`、
+  /// `commitSha`/`remoteSha`（云端那一次提交没变）。所以补记之后
+  /// 「上次同步」那行读起来照旧，只是点阵屏上排有了数。
+  void rememberLocalShaIfMissing() {
+    final record = storage.readSyncRecord();
+    if (record == null || record.localSha.isNotEmpty) return;
+    storage.writeSyncRecord(
+      record.copyWith(localSha: workspace.localContentSha()),
+    );
+    notifyListeners();
+  }
+
   /// 「该导出了」的提醒阈值（天）。
   static const int exportReminderDays = 7;
 
@@ -1332,6 +1363,10 @@ class AppController extends ChangeNotifier {
     switch (plan.action) {
       case SyncAction.noChange:
         // 两边本来就一样：没什么可说的，回到静默（不留一个"成功"骗人）。
+        // **但要顺手把本机指纹补进记账**（见 [_rememberLocalShaIfMissing]）：
+        // 这条分支是"内容确实是同一份"的**证明**，而它原来什么都不写 ——
+        // 于是老记账（`localSha` 为空）永远补不上，点阵屏上排永远是空的。
+        rememberLocalShaIfMissing();
         if (announce) _setAutoSync(const AutoSyncState.idle());
         return;
       case SyncAction.push:
@@ -1573,8 +1608,12 @@ class AppController extends ChangeNotifier {
       );
 
       if (plan.action == SyncAction.noChange) {
-        // ⚠️ 这里**什么都没写**：调用方必须看 [PushOutcome.wrote] 再决定要不要说
-        // "传上去了"（ADR-095 第 ① 条）。
+        // ⚠️ 这里**不写"同步成功"的账**：调用方必须看 [PushOutcome.wrote]
+        // 再决定要不要说"传上去了"（ADR-095 第 ① 条）。
+        //
+        // 但**本机指纹要补**：这条分支正是"两边内容确实是同一份"的证明，
+        // 不补的话老记账的 `localSha` 永远空着、点阵屏上排永远是暗的。
+        rememberLocalShaIfMissing();
         return PushOutcome.unchanged('两边是同一份，没有要推的东西。');
       }
       if (plan.action == SyncAction.localEmpty) {
