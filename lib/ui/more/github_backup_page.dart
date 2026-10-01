@@ -377,12 +377,15 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     return CommitLcd(
       rows: <CommitLcdRow>[
         CommitLcdRow(
+          // 给人看的标识：两排都是七位十六进制，肉眼分不出谁是谁。
+          label: '云端',
           sha: shortSha(commitSha),
           semanticsLabel: commitSha.isEmpty
               ? '云端提交码未知，还没同步过'
               : '云端提交码 ${shortSha(commitSha)}',
         ),
         CommitLcdRow(
+          label: '本机',
           sha: localSha,
           semanticsLabel: '本机内容码 $localSha',
         ),

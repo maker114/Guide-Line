@@ -40,6 +40,10 @@ void main() {
   CommitLcdRow row(String sha, [String? label]) =>
       CommitLcdRow(sha: sha, semanticsLabel: label ?? '本机内容码 $sha');
 
+  /// 造一排带**给人看的文字标识**的（"云端" / "本机"）。
+  CommitLcdRow labeledRow(String text, String sha, String semantics) =>
+      CommitLcdRow(sha: sha, semanticsLabel: semantics, label: text);
+
   test('位数与短码对齐：7 位、每格 7×9、格间留 1', () {
     expect(CommitLcd.cellWidth, 7);
     expect(CommitLcd.cellHeight, 9);
@@ -118,6 +122,50 @@ void main() {
         )
         .where((box) => box.height == CommitLcd.rowGap);
     expect(gaps.length, 1, reason: '两排之间正好一条间距');
+  });
+
+  testWidgets('每排的标识用普通文字画出来（云端 / 本机）', (tester) async {
+    // 2026-10-02 用户要求："同时给两个点阵屏加上文字标识谁是云端谁是本地"。
+    //
+    // 为什么标识必须用 `Text`、不能走点阵：点阵的字形表只收了 `0-9a-f`
+    // （见 `CommitLcdGlyphs._glyphs`），**画不了中文** —— 走点阵的话
+    // "云端"会变成七个暗格，等于没有标识。
+    //
+    // 所以这条同时钉两件事：标识真的画出来了，而且**不是**当作点阵字符喂进去的
+    // （喂进去的话画家收到的 chars 里会出现中文字符，那条下面单独断言）。
+    await pumpLcd(tester, <CommitLcdRow>[
+      labeledRow('云端', 'a1b2c3d', '云端提交码 a1b2c3d'),
+      labeledRow('本机', '9f8e7d6', '本机内容码 9f8e7d6'),
+    ]);
+
+    expect(find.text('云端'), findsOneWidget);
+    expect(find.text('本机'), findsOneWidget);
+
+    // 标识**不许**混进点阵：两个画家的 chars 里都只能有十六进制字符或空格。
+    final painters = tester
+        .widgetList<CustomPaint>(
+          find.descendant(
+            of: find.byType(CommitLcd),
+            matching: find.byType(CustomPaint),
+          ),
+        )
+        .where((candidate) => candidate.painter is CommitLcdPainter)
+        .map((candidate) => candidate.painter! as CommitLcdPainter)
+        .toList();
+    expect(painters.length, 2);
+    for (final painter in painters) {
+      expect(
+        painter.chars.every((c) => RegExp(r'^[0-9a-f ]$').hasMatch(c)),
+        isTrue,
+        reason: '点阵只能收十六进制字符与空格；出现别的字符说明标识被喂进了点阵',
+      );
+    }
+  });
+
+  testWidgets('没有标识时不画多余文字（label 为 null）', (tester) async {
+    await pumpLcd(tester, <CommitLcdRow>[row('abc1234')]);
+
+    expect(find.byType(Text), findsNothing, reason: '没给标识就一个字的文字都不该有');
   });
 
   testWidgets('读屏念的是**短码**，不许把 40 位全念出来', (tester) async {

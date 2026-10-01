@@ -1,18 +1,31 @@
 import 'package:flutter/material.dart';
 
-/// 点阵屏上的一排：一个短码 + 它的语义标签。
+/// 点阵屏上的一排：一个**文字标识** + 一个短码 + 语义标签。
+///
+/// [label] 是**给人看的**（"云端" / "本机"），用普通 `Text` 画 ——
+/// 点阵的字形表只收了 `0-9a-f`（见 [CommitLcdGlyphs]），**画不了中文**，
+/// 所以标识不能走点阵，只能另起一行小字。
+/// 为什么要它：两排码都是七位十六进制、肉眼分不出谁是谁 ——
+/// 没有标识时只有读屏软件知道哪排是云端（靠 [semanticsLabel]）。
 ///
 /// [semanticsLabel] 是**给读屏软件**的整句（例如"云端提交码 a1b2c3d"）。
 /// [sha] 只放前 7 位十六进制 —— 这与 [shortSha] 的位数一致，
 /// **调用方必须自己先收口**，别把完整 sha 递进来（那会让读屏软件念 40 个字符）。
 class CommitLcdRow {
-  const CommitLcdRow({required this.sha, required this.semanticsLabel});
+  const CommitLcdRow({
+    required this.sha,
+    required this.semanticsLabel,
+    this.label,
+  });
 
   /// 短码（前 7 位十六进制）。空串 = 这一排整排暗着。
   final String sha;
 
   /// 读屏软件念的那句话。
   final String semanticsLabel;
+
+  /// 摆在点阵上方的小字标识（"云端" / "本机"）。null = 不摆。
+  final String? label;
 }
 
 /// 提交号的 **LCD 点阵屏**（每排 7 格，每格 7×9 点）。
@@ -55,6 +68,9 @@ class CommitLcd extends StatelessWidget {
   /// 排与排之间的间距（px）。
   static const double rowGap = 10;
 
+  /// 标识文字与它那排点阵之间的间距（px）。
+  static const double labelGap = 2;
+
   /// 一行点阵的总列数（画家据此把宽度换算成点的大小）。
   static int columnsFor(int cellCount) =>
       cellCount * cellWidth + (cellCount - 1) * cellGap;
@@ -62,6 +78,7 @@ class CommitLcd extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
     final lines = <Widget>[];
     for (var index = 0; index < rows.length; index++) {
       final row = rows[index];
@@ -71,6 +88,26 @@ class CommitLcd extends StatelessWidget {
         (i) => i < sha.length ? sha[i] : ' ',
       );
       if (index > 0) lines.add(const SizedBox(height: rowGap));
+      // 标识用普通文字，**不走点阵** —— 字形表只收 `0-9a-f`，画不了中文。
+      // 摆在这一排的上方，左对齐；用 `labelSmall` + 次要色，
+      // 让"谁是谁"一眼看得出、又不抢那两个码的位置。
+      if (row.label != null && row.label!.isNotEmpty) {
+        lines.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: labelGap),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                row.label!,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+          ),
+        );
+      }
       lines.add(
         Semantics(
           // 点阵对读屏软件等于空白：这一排是什么意思，只能靠这句话说。
