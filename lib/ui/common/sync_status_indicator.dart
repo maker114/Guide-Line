@@ -296,7 +296,15 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
         animation: Listenable.merge(<Listenable>[_enter, _morph, _spin, _exit]),
         builder: (context, _) {
           final morph = _morph.value;
-          final width = lerpDouble(SyncStatusIndicator._height, targetWidth, morph)!;
+          // 外框宽度用的是**拉伸进度**（不是 morph）—— 与画家同一套公式（见
+          // [stretchProgress] 的说明）：前半段它恒为 0，所以外框保持正方形，
+          // 描边在正圆上把缺口合上；后半段才把矩形拉长成胶囊。
+          // 两者用同一个函数，"描边到哪"与"框多宽"就不会对不齐。
+          final width = lerpDouble(
+            SyncStatusIndicator._height,
+            targetWidth,
+            stretchProgress(morph),
+          )!;
           // 文字在圆环还没拉长之前不出现；拉长到一半开始淡入。
           final textOpacity = morph <= 0.5 ? 0.0 : (morph - 0.5) / 0.5;
           return ClipRect(
@@ -398,12 +406,48 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
   }
 }
 
+/// 胶囊成形的两段进度。**形状的权威定义就在这两个函数里** ——
+/// 画描边的 [_RingPillPainter] 与算外框宽度的 [SyncStatusIndicator] 都用它们，
+/// 这样"描边合口到哪"与"外框多宽"永远是同一条曲线，不会各走各的。
+///
+/// 拆成两段（2026-10-02 按实机反馈改）：用户原话是
+/// "在胶囊出现后会有一点点接缝，你可以试试在由缺口圆环切换为胶囊形的时候
+/// 先将圆环闭合然后再拉伸"。
+///
+/// 改之前宽度与合口是**同时**插值的，于是"合口"那一刻正好落在拉伸途中 ——
+/// 缺口两端在一个正在变形的形状上相遇，接缝就露在那一下。
+///
+///   · 0 → 0.5：只合口，[stretchProgress] 恒为 0（外框还是正方形，即正圆）；
+///   · 0.5 → 1：口已合上，[closeProgress] 恒为 1，只把矩形拉长。
+///
+/// 两段各套 smoothstep（3t² − 2t³，两端导数为 0），起手与收手都不"顿"。
+double _smoothStep(double t) {
+  final x = t.clamp(0.0, 1.0);
+  return x * x * (3 - 2 * x);
+}
+
+/// 合口进度：0 = 还是缺口圆环，1 = 已经闭合成一整圈。**后半段恒为 1**。
+///
+/// 钳位放在**函数入口**：越界的输入直接落到端点值，
+/// 不会因为"除以 0.5 之后才钳"而在边界外跳变。
+double closeProgress(double morph) {
+  if (morph >= 0.5) return 1;
+  return _smoothStep(morph.clamp(0.0, 1.0) / 0.5);
+}
+
+/// 拉伸进度：0 = 正圆，1 = 满宽胶囊。**前半段恒为 0**。
+double stretchProgress(double morph) {
+  if (morph <= 0.5) return 0;
+  return _smoothStep((morph.clamp(0.0, 1.0) - 0.5) / 0.5);
+}
+
 /// 一条描边画两个形状（需求②）。
 ///
 /// 画的是同一个圆角矩形的轮廓，只差两件事：
-///   · 取多长 —— 缺口从 0.72 圈合到整整一圈（[morph] 1 的时候就是胶囊的边）；
+///   · 取多长 —— 缺口从 0.72 圈合到整整一圈（闭合之后就是胶囊的边）；
 ///   · 多大的矩形 —— 外框宽度由 [SyncStatusIndicator] 交给它，圆环态是正方形。
 /// 所以"圆环拉长成胶囊"是同一支笔的连续动作，不是两个控件交接。
+/// 两段进度见 [closeProgress] / [stretchProgress]。
 class _RingPillPainter extends CustomPainter {
   const _RingPillPainter({
     required this.morph,
@@ -420,12 +464,19 @@ class _RingPillPainter extends CustomPainter {
   final Color fill;
   final Color stroke;
 
+  /// 缺口在圆环态时占整圈的比例（剩下一段就是那个缺口）。
+  static const double gapSweep = 0.72;
+
   @override
   void paint(Canvas canvas, Size size) {
     // 往里收半个描边宽：描边是骑在路径上的，不收就会被外框裁掉半条。
     const inset = SyncStatusIndicator._strokeWidth / 2;
-    final width = math.max(0.0, size.width - inset * 2);
+    // 宽度由**拉伸进度**决定，不跟 `morph` 走 —— 这正是"先合口再拉伸"的落点：
+    // 合口那一半里 `grow` 恒为 0，外框就是个正方形。
+    final grow = stretchProgress(morph);
+    final fullWidth = math.max(0.0, size.width - inset * 2);
     final height = math.max(0.0, size.height - inset * 2);
+    final width = lerpDouble(height, fullWidth, grow)!;
     final rect = Rect.fromLTWH(inset, inset, width, height);
     final rrect = RRect.fromRectAndRadius(
       rect,
@@ -439,7 +490,9 @@ class _RingPillPainter extends CustomPainter {
     final metric = (Path()..addRRect(rrect)).computeMetrics().first;
     final total = metric.length;
     if (total <= 0) return;
-    final sweep = total * lerpDouble(0.72, 1, morph)!;
+    // 合口时**不再随 `spin` 漂移**：从当前缺口位置一路补到闭合。
+    // 还在转的话缺口会一边合一边跑，端点反而更难对齐。
+    final sweep = total * lerpDouble(gapSweep, 1, closeProgress(morph))!;
     final begin = total * spin;
     final paint = Paint()
       ..style = PaintingStyle.stroke
@@ -449,7 +502,7 @@ class _RingPillPainter extends CustomPainter {
 
     final head = metric.extractPath(begin, math.min(begin + sweep, total));
     canvas.drawPath(head, paint);
-    // 绕过头了就把剩下的那截补上（合口成胶囊时必然走到这里）。
+    // 绕过头了就把剩下的那截补上（合口时必然走到这里）。
     final overflow = begin + sweep - total;
     if (overflow > 0) canvas.drawPath(metric.extractPath(0, overflow), paint);
   }

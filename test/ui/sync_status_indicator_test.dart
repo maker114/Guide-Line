@@ -348,4 +348,74 @@ void main() {
       reason: '需求⑤要的就是这一句，不随原话变',
     );
   });
+
+  // ------------------------------------------------- 成形分两段：先合口再拉伸
+
+  group('成形分两段：先把圆环合上，再把矩形拉长（2026-10-02）', () {
+    // 背景：用户反馈"在胶囊出现后会有一点点接缝，你可以试试在由缺口圆环切换为
+    // 胶囊形的时候先将圆环闭合然后再拉伸。"
+    //
+    // 改之前宽度与合口**同时**插值，于是"合口"那一刻正好落在拉伸途中 ——
+    // 缺口两端在一个正在变形的形状上相遇，接缝就露在那一下。
+    //
+    // 这一组是**纯几何**，所以直接调那两个函数，不摆控件 —— 它要守的是
+    // "前半段形状不许变"，而不是"某个像素长什么样"。
+
+    test('前半段：拉伸恒为 0（外框一直是正方形，也就是正圆）', () {
+      for (final morph in <double>[0, 0.1, 0.25, 0.4, 0.5]) {
+        expect(
+          stretchProgress(morph),
+          0,
+          reason: 'morph=$morph 时还不该开始拉伸 —— 先让圆环把口合上',
+        );
+      }
+    });
+
+    test('后半段：合口恒为 1（口已闭上，只把矩形拉长）', () {
+      for (final morph in <double>[0.5, 0.6, 0.75, 0.9, 1]) {
+        expect(
+          closeProgress(morph),
+          1,
+          reason: 'morph=$morph 时口必须已经合上，不许一边拉一边还有缺口',
+        );
+      }
+    });
+
+    test('两段各自走到头：0 → 全开，1 → 全合 / 全宽', () {
+      expect(closeProgress(0), 0, reason: '起手是那个缺口圆环');
+      expect(stretchProgress(1), closeTo(1, 1e-9), reason: '收尾是满宽胶囊');
+      expect(closeProgress(1), 1);
+      expect(stretchProgress(0), 0);
+    });
+
+    test('两段都单调不减，而且没有跳变（跳变就是"顿一下"）', () {
+      // 注意别把 previous 初始化成 -1：那样第一个点算出来的 Δ 恒为 1，
+      // 会误报一个"跳变"（这个坑我踩过一次）。用 null 表示"还没有上一个"。
+      double? previousClose;
+      double? previousStretch;
+      for (var i = 0; i <= 40; i++) {
+        final morph = i / 40;
+        final close = closeProgress(morph);
+        final stretch = stretchProgress(morph);
+        if (previousClose != null) {
+          expect(close, greaterThanOrEqualTo(previousClose));
+        }
+        if (previousStretch != null) {
+          expect(stretch, greaterThanOrEqualTo(previousStretch));
+        }
+        expect(
+          ((close - (previousClose ?? close)).abs()),
+          lessThan(0.2),
+          reason: '合口在 morph=$morph 附近跳了一下',
+        );
+        expect(
+          ((stretch - (previousStretch ?? stretch)).abs()),
+          lessThan(0.2),
+          reason: '拉伸在 morph=$morph 附近跳了一下',
+        );
+        previousClose = close;
+        previousStretch = stretch;
+      }
+    });
+  });
 }
