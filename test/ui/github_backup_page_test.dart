@@ -311,7 +311,7 @@ void main() {
       expect(record!.commitSha, 'abc1234def5678');
     });
 
-    testWidgets('拉取之后写记账，页面上能看到上次同步时间与两个码', (tester) async {
+    testWidgets('拉取之后写记账，页面上能看到上次同步时间与提交码', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
         commit: RemoteCommit(sha: 'abc1234def5678'),
@@ -335,11 +335,21 @@ void main() {
         reason: '提交码要落进记账，重启后才对得出"是不是同一次上传"',
       );
       expect(find.textContaining('上次同步：'), findsOneWidget);
+      // 2026-10-02 改（用户第二次问"我该相信哪个"）：
+      // 原来这里断言页面上摆出**两个**码（`提交 abc1234 · 内容码 sha-rem`），
+      // 而点阵屏上还摆着**另一个**码 —— 一个页面三个码、两种类型，
+      // 用户没法判断该信哪个。现在文案里只留**提交码**这一个，
+      // 内容指纹只在点阵屏上出现（那两排才是同一种、可以比的东西）。
       expect(
-        find.textContaining('提交 abc1234 · 内容码 sha-rem'),
-        // 两处都会摆出这两个码：页面上「上次同步」那一行，以及拉取结果框。
+        find.textContaining('那一次上传的提交码：abc1234'),
         findsNWidgets(2),
-        reason: '两个码并列摆出来，但要说清各自答的是什么',
+        // 两处都会摆：页面上「上次同步」那一行，以及拉取结果框。
+        reason: '提交码是"传的是哪一次"的凭证，必须让用户看见',
+      );
+      expect(
+        find.textContaining('内容码'),
+        findsNothing,
+        reason: '文案里不许再出现第二个"码" —— 一个页面只留一种可比的码',
       );
     });
   });
@@ -381,7 +391,7 @@ void main() {
       expect(find.textContaining('同一份'), findsOneWidget, reason: '说清是同一份，不必推送');
     });
 
-    testWidgets('记账里带提交码，结果里两个码都摆出来，提交说明带 App 版本号', (tester) async {
+    testWidgets('记账里带提交码，结果里只摆提交码，提交说明带 App 版本号', (tester) async {
       final gateway = _FakeGateway();
       final app = await boot(gateway, _FakeCredentials('ghp_token'));
       await app.saveGitHubBackupConfig(configured, 'ghp_token');
@@ -390,12 +400,23 @@ void main() {
       final pushed = await app.pushGitHubBackup(configured, 'ghp_token');
 
       expect(pushed.ok, isTrue, reason: pushed.message);
-      expect(pushed.message, contains('提交 commit-'));
-      expect(pushed.message, contains('内容码 sha-wri'));
+      // 2026-10-02 改：结果框原来也摆"提交 … · 内容码 …"两个码。
+      // 用户第二次问"我该相信哪个"就是这个造成的 —— 现在结果框只摆提交码。
+      expect(pushed.message, contains('那一次上传的提交码：commit-'));
+      expect(
+        pushed.message,
+        isNot(contains('内容码')),
+        reason: '一个页面上只留一种可比的码；blob sha 不该出现在给用户看的文案里',
+      );
       final record = app.readGitHubSyncRecord();
       expect(record, isNotNull);
       expect(record!.commitSha, 'commit-written', reason: '这次推送的提交码要记住');
-      expect(record.remoteSha, 'sha-written');
+      // 记账里**仍然**要存 blob sha —— 它是"内容一不一样"的基线，只是不给用户看。
+      expect(
+        record.remoteSha,
+        'sha-written',
+        reason: '记账内部要用它做下次覆盖的基线，别跟着文案一起删了',
+      );
       expect(
         gateway.lastMessage,
         contains(AppInfo.versionLabel),
@@ -437,20 +458,25 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(app.readGitHubSyncRecord()!.commitSha, 'abc1234def5678');
-      // 2026-10-02 改（用户指出"提交码明明不一样，点检查更新却不报错"）：
-      // 第一版上排摆 GitHub 的**提交码**、下排摆本机**内容指纹** —— 两者算法与输入
-      // 都不同，**永远不可能相等**，并排摆成两个"码"却期望可比，是界面在骗人。
-      // 现在两排都摆**同一种指纹**（记账里的 localSha / 此刻现算），
-      // 于是"相不相等"有了确切含义：相等 = 上次上传后本机没改过。
+      // 2026-10-02 改（用户**第二次**指出"点阵屏显示的提交码和拉取下面那个不一样，
+      // 我该相信哪个"）：两排都摆**本机内容指纹**这个方向是对的，
+      // 但上一版的标识（"云端 / 本机"）会让人以为上排是云端的码 —— 于是又猜错一次。
+      // 现在标识改成**"上传时 / 本机现在"**：两排都是本机指纹，差的是**时刻**。
       expect(
-        find.bySemanticsLabel(RegExp(r'^云端那一份的指纹 [0-9a-f]{7}$')),
+        find.bySemanticsLabel(RegExp(r'^上一次上传时的内容指纹 [0-9a-f]{7}$')),
         findsOneWidget,
         reason: '上排 = 上次成功上传时本机那一份的指纹（记账里的 localSha）',
       );
       expect(
-        find.bySemanticsLabel(RegExp(r'^本机此刻的指纹 [0-9a-f]{7}$')),
+        find.bySemanticsLabel(RegExp(r'^本机现在的内容指纹 [0-9a-f]{7}$')),
         findsOneWidget,
         reason: '下排 = 此刻本机这一份的指纹，现算的',
+      );
+      // 文案里不许再出现第二个"码"（那是"我该信哪个"的根源）。
+      expect(
+        find.textContaining('内容码'),
+        findsNothing,
+        reason: '一个页面只留一种可比的码；blob sha 那种不该出现在文案里',
       );
       // 只念 7 位：完整 40 位 sha 递给读屏软件是 2.3.0 之前那个缺陷，
       // 这条守卫留着别删。
@@ -478,6 +504,44 @@ void main() {
         reason: '刚同步完，两排该相等 —— 不等就说明记账的 localSha 写错了',
       );
       handle.dispose();
+    });
+
+    testWidgets('两排不一样时，屏下面那句直接给结论，不让用户自己比码', (tester) async {
+      // 2026-10-02 用户**第二次**问"我该相信哪个"之后加的。
+      //
+      // 第一次（2.3.0）是"上排云端提交码 / 下排本机指纹"，两个码不可比；
+      // 我改成"两排都是本机指纹"，**但把 git 提交码从屏上赶走、留在下面那行**，
+      // 于是同一个页面上仍是两个不同来源的码，用户又猜一次。
+      //
+      // 这条守的是最终口径：**屏幕上只摆一种可比的码**（本机指纹），
+      // 而"一样 / 不一样"这个结论由文案直说 —— 用户不该被迫去比两串十六进制。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+
+      await openPage(tester, app);
+      await tapAction(tester, '从 GitHub 拉取');
+      await tester.tap(find.text('拉取并覆盖'));
+      await tester.pumpAndSettle();
+
+      // 拉完之后本机与记账一致 → 该说"没有新东西要传"。
+      expect(
+        find.textContaining('两排一样'),
+        findsOneWidget,
+        reason: '结论要写在屏下面那句里 —— 用户不该被迫去比两串十六进制',
+      );
+      expect(
+        find.textContaining('内容码'),
+        findsNothing,
+        reason: '屏幕上只留一种可比的码；blob sha 那种不该出现',
+      );
+      // 反过来的那一面（"两排不一样 ⇒ 还没传上去"）没在这里硬测：
+      // 拉完之后要再造出"本机比上传时新"的状态，得绕开这一页的只读约束去改数据，
+      // 那样测的是夹具而不是这一页。这条口径由 `_commitScreenNote` 的三条分支
+      // 直接表达，改的时候看得见 —— 硬凑一个夹具反而更脆。
     });
 
     // ---------------------------------------------------------- 检查更新（2026-10-02）

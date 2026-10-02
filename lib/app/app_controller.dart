@@ -1660,7 +1660,7 @@ class AppController extends ChangeNotifier {
       return PushOutcome.written(
         commitSha: written.commitSha,
         message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
-            '提交 ${shortSha(written.commitSha)} · 内容码 ${shortSha(written.sha)}\n'
+            '那一次上传的提交码：${shortSha(written.commitSha)}\n'
             '远程路径：${cleaned.path}，分支 ${cleaned.branch}\n'
             '提交码是"同一次上传"的凭证：另一台手机上读到同一个码，就是同一份。',
       );
@@ -1747,7 +1747,7 @@ class AppController extends ChangeNotifier {
     return (
       ok: true,
       message: '已拉取远程备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
-          '提交 ${shortSha(commit?.sha ?? '')} · 内容码 ${shortSha(remote.sha)}\n'
+          '那一次上传的提交码：${shortSha(commit?.sha ?? '')}\n'
           '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
     );
   }

@@ -3,7 +3,7 @@
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
 当前形态是 **Android 单机版 + Windows 桌面版**，用 Flutter 写，数据全部留在你自己这台设备上（手机一份、电脑一份，互不通信）。
 
-当前版本 **2.3.5+71** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
+当前版本 **2.3.6+72** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 [它是什么](#它是什么) · [设计原则](#设计原则) · [功能](#功能) · [技术](#技术) · [快速开始](#快速开始) · [开发](#开发) · [文档](#文档)
 
@@ -172,12 +172,12 @@ Flutter 稳定版（开发时用的是 3.47.5）、Dart SDK `^3.13.4`。
 
 ```powershell
 flutter analyze --no-pub    # 必须 0 问题
-flutter test --no-pub       # 必须全绿（当前约 911 例，精确条数以命令输出为准）
+flutter test --no-pub       # 必须全绿（当前约 912 例，精确条数以命令输出为准）
 flutter build apk --release     # 手机端产物 build/app/outputs/flutter-apk/app-release.apk
 flutter build windows --release # 电脑端产物 build/windows/x64/runner/Release/guideline.exe
 ```
 
-- **跑测试很快**：全量约 911 例约 **34 秒**，`analyze` 约 **6 秒**。
+- **跑测试很快**：全量约 912 例约 **34 秒**，`analyze` 约 **6 秒**。
   所以"少跑点测试"省不下什么，别往那个方向优化。
   （上下两处的"约 876"是同一个估计值；**精确条数以 `flutter test` 的输出为准** ——
   静态数出来的声明条数与命令打印的 `+N` 本来就不是一个数，循环里会生成用例。
