@@ -416,13 +416,16 @@ class Workspace {
             !mutedEventIds.contains(t.eventId))
         .toList(growable: false);
     list.sort((a, b) {
+      // 同一格式下的**字典序就是时间序**，加不加时刻都成立（2026-10-02 复核）：
+      //   `'2026-10-03'` < `'2026-10-03 08:30'`（短的是前缀）⇒ 整天排在当天某个钟点之前；
+      //   `'2026-10-03 08:30'` < `'2026-10-03 10:00'`（`'0' < '1'`）。
+      // 所以这里不需要为"精确到分钟"改判据 —— 换成解析再比反而多一次失败路径。
       final byDate = a.dueAt!.compareTo(b.dueAt!);
       if (byDate != 0) return byDate;
       return compareByOrder(a.order, a.id, b.order, b.id);
     });
     return list;
   }
-
   /// 「接下来的任务」用的一览：**还开着的任务** —— 未完成、未归档，
   /// **不管有没有排到期日，也不管所属事件是不是已搁置**。
   ///
@@ -1549,16 +1552,28 @@ class Workspace {
 
   // ---------------------------------------------------------------- 任务
 
+  /// 新建任务。
+  ///
+  /// [afterTaskId] 给了就插在那个**主线节点**的后面（`order` 取两者中点），
+  /// 不给就排到链尾 —— "末尾新建"与"插在某条之后"是同一件事的两个落点，
+  /// 所以走同一条校验 / 退回 / 落盘路径，不另开一份。
+  ///
+  /// 它只对主线节点有意义：**子任务不参与链上顺序**，所以与 `parentTaskId`
+  /// 同时给会被拒，而不是悄悄按其中一边办。
   Task createTask({
     required String eventId,
     required String title,
     String? parentTaskId,
     TaskType type = TaskType.standard,
     String? dueAt,
+    String? afterTaskId,
   }) {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('任务名不能为空');
     if (type == TaskType.parallel) throw const RuleViolation(_parallelGone);
+    if (afterTaskId != null && parentTaskId != null) {
+      throw const RuleViolation('只有主线节点能插到某条之后');
+    }
     _requireValidDate(dueAt, '到期日');
     final event = findEvent(eventId);
     if (event == null || event.deleted) throw const RuleViolation('所属事件不存在');
@@ -1580,6 +1595,11 @@ class Workspace {
     }
 
     final now = Ids.nowMillis();
+    // 顺序是链上唯一的排序信息：排到末尾就是"全局最大 + 一格"，
+    // 插在某条之后就是取那条与它后一个节点的中点。
+    final order = afterTaskId == null
+        ? _nextOrder(_siblingOrders(DocName.tasks, parentTaskId))
+        : _orderAfter(afterTaskId, eventId);
     final task = Task(
       id: Ids.uuidV4(),
       eventId: eventId,
@@ -1589,7 +1609,7 @@ class Workspace {
       dueAt: dueAt,
       status: NodeStatus.pending,
       archived: false,
-      order: _nextOrder(_siblingOrders(DocName.tasks, parentTaskId)),
+      order: order,
       completedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -2150,6 +2170,50 @@ class Workspace {
   void snapshotNow() => _state.snapshotNow();
 
   // ---------------------------------------------------------------- 内部
+
+  /// "插在某个主线节点之后"要用的 `order`（2026-10-03）。
+  ///
+  /// 取锚点与它**后一个节点**的中点即可（网格间距是 `orderStep = 1000`，通常
+  /// 对半砍还有富余）。中点被砍到没有空隙时（`后一个 - 锚点 < 2`）先把这条
+  /// 事件的主线整体按 `orderStep` 重排，再取中点 —— 不重排的话新节点会拿到
+  /// 与锚点**同一个** `order`，排序就退化成看 id，"插在它后面"这句话当场失效。
+  ///
+  /// 三条边界都在这里说清，而不是等界面点了才发现：
+  ///   · 锚点必须存在、且是主线节点（子任务不在链上）；
+  ///   · 锚点必须在**目标事件**里 —— 否则会拿另一条线的位置来定这条线的顺序；
+  ///   · 已归档的锚点不在 [mainLineOf] 里，此时拒绝并说清下一步。
+  int _orderAfter(String anchorTaskId, String eventId) {
+    final anchor = findTask(anchorTaskId);
+    if (anchor == null || anchor.deleted) throw const RuleViolation('任务不存在');
+    if (anchor.parentId != null) throw const RuleViolation('只有主线节点能插到某条之后');
+    if (anchor.eventId != eventId) throw const RuleViolation('锚点任务属于其它事件');
+
+    var line = mainLineOf(eventId);
+    var index = line.indexWhere((each) => each.id == anchorTaskId);
+    if (index < 0) throw const RuleViolation('这个主线节点已归档，先取消归档再插');
+
+    if (index + 1 < line.length && line[index + 1].order - line[index].order < 2) {
+      _renumberMainLine(line);
+      line = mainLineOf(eventId);
+      index = line.indexWhere((each) => each.id == anchorTaskId);
+    }
+    if (index + 1 >= line.length) return line[index].order + orderStep;
+    return line[index].order + (line[index + 1].order - line[index].order) ~/ 2;
+  }
+
+  /// 把一条主线按 `orderStep` 重新编号（只在"中点已经插不进去"时用）。
+  ///
+  /// 只落内存：调用方（`createTask`）随后统一 `persist()`，不留半截状态。
+  void _renumberMainLine(List<Task> line) {
+    final now = Ids.nowMillis();
+    for (var i = 0; i < line.length; i += 1) {
+      final each = line[i];
+      _upsert(
+        DocName.tasks,
+        each.copyWith(order: (i + 1) * orderStep, updatedAt: now),
+      );
+    }
+  }
 
   int _nextOrder(Iterable<int> siblings) {
     var max = 0;

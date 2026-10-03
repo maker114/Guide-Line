@@ -77,6 +77,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 正在为哪个任务录子任务
   String? _subtaskParentId;
 
+  /// 正在为哪个主线节点录"插在它后面"的新任务（没有则为 `null`）
+  String? _insertAfterTaskId;
+
   /// 是否把**自动收起的已完成节点**全部展开（临时状态，不进偏好）。
   ///
   /// 自动收起规则本身见 `task_fold.dart`；这里只负责"我需要时能再看回来"
@@ -136,6 +139,28 @@ class _EventDetailPageState extends State<EventDetailPage> {
     }
   }
 
+  /// 在某个主线节点**后面**插一条新任务（2026-10-03）。
+  ///
+  /// 与链尾那个「新建主线任务」是同一件事的两个落点：那里排到链尾，这里插在
+  /// 指定节点之后（位置由数据层取中点，见 `Workspace._orderAfter`）。
+  ///
+  /// 建完**把输入行收起来**：`InlineComposer` 提交后会保持展开继续录，而这一路
+  /// 的锚点是不动的 —— 接着敲第二条会又插在同一个锚点后面，也就是跑到第一条前面。
+  void _createTaskAfter(String anchorTaskId, String title) {
+    final error = app.run(
+      () => app.ws.createTask(
+        eventId: eventId,
+        title: title,
+        afterTaskId: anchorTaskId,
+      ),
+    );
+    if (error != null) {
+      _toast(error, error: true);
+      return;
+    }
+    setState(() => _insertAfterTaskId = null);
+  }
+
   void _toast(String message, {bool error = false}) {
     if (!mounted) return;
     showToast(context, message, error: error);
@@ -173,13 +198,16 @@ class _EventDetailPageState extends State<EventDetailPage> {
     eventId: () => eventId,
     renamingTaskId: () => _renamingTaskId,
     subtaskParentId: () => _subtaskParentId,
+    insertAfterTaskId: () => _insertAfterTaskId,
     isBlocked: _blocked,
     isInMainLine: isInMainLine,
     beginRename: beginRename,
     endRename: endRename,
     beginSubtask: beginSubtask,
+    beginInsertAfter: beginInsertAfter,
     moveInLine: moveInLine,
     createTask: _createTask,
+    createTaskAfter: _createTaskAfter,
   );
 
   void beginRename(String taskId) => setState(() => _renamingTaskId = taskId);
@@ -187,6 +215,8 @@ class _EventDetailPageState extends State<EventDetailPage> {
   void endRename() => setState(() => _renamingTaskId = null);
 
   void beginSubtask(String taskId) => setState(() => _subtaskParentId = taskId);
+
+  void beginInsertAfter(String taskId) => setState(() => _insertAfterTaskId = taskId);
 
   /// 这条任务是不是**链上的节点**（parent_task_id == null）。
   bool isInMainLine(Task task) => task.parentId == null;
@@ -391,6 +421,23 @@ class _EventDetailPageState extends State<EventDetailPage> {
                           key: ValueKey<String>('node-${mainLine[i].id}'),
                           child: _TaskBox(session: session, task: mainLine[i]),
                         ),
+                        // 「插在它后面」的输入行就地长在这个节点下方（2026-10-03）：
+                        // 与链尾那个「新建主线任务」同一套 `InlineComposer`，
+                        // 只是落点由 `order` 决定，不再只能排到链尾。
+                        AnimatedCollapse(
+                          expanded: _insertAfterTaskId == mainLine[i].id,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: InlineComposer(
+                              label: '插在它后面',
+                              hint: '任务名',
+                              leading: Icons.playlist_add,
+                              dense: true,
+                              onCreate: (title) =>
+                                  _createTaskAfter(mainLine[i].id, title),
+                            ),
+                          ),
+                        ),
                       ],
                   ],
                 ),
@@ -441,22 +488,26 @@ class _EventDetailPageState extends State<EventDetailPage> {
 /// 各自持有父 State 并直接读它的私有成员，于是"父 State 的私有字段"成了子控件的
 /// API、而子控件永远抽不出这个文件。
 ///
-/// 两个"正在进行中"的状态（[renamingTaskId] / [subtaskParentId]）是**取值函数**
-/// 而不是字段：父 State 每次 `setState` 都重建子树，所以子控件每次 build 都要
-/// 拿到**当前**的值 —— 存一份快照会在 rename / 加子任务之后停在旧值上。
+/// 三个"正在进行中"的状态（[renamingTaskId] / [subtaskParentId] /
+/// [insertAfterTaskId]）是**取值函数**而不是字段：父 State 每次 `setState` 都重建
+/// 子树，所以子控件每次 build 都要拿到**当前**的值 —— 存一份快照会在
+/// rename / 加子任务 / 插节点之后停在旧值上。
 class _EventDetailSession {
   const _EventDetailSession({
     required this.app,
     required this.eventId,
     required this.renamingTaskId,
     required this.subtaskParentId,
+    required this.insertAfterTaskId,
     required this.isBlocked,
     required this.isInMainLine,
     required this.beginRename,
     required this.endRename,
     required this.beginSubtask,
+    required this.beginInsertAfter,
     required this.moveInLine,
     required this.createTask,
+    required this.createTaskAfter,
   });
 
   /// 控制器。与下面两个状态一样是**取值函数**，不是字段（2026-10-01 核验改）。
@@ -477,6 +528,9 @@ class _EventDetailSession {
   /// 正在为哪个任务录子任务（没有则为 `null`）。
   final String? Function() subtaskParentId;
 
+  /// 正在为哪个主线节点录"插在它后面"的新任务（没有则为 `null`）。
+  final String? Function() insertAfterTaskId;
+
   /// 这条任务还有未处理的直接子任务 → 状态按钮显示锁形。
   final bool Function(Task) isBlocked;
 
@@ -486,14 +540,20 @@ class _EventDetailSession {
   final void Function(String taskId) beginRename;
   final void Function() endRename;
   final void Function(String taskId) beginSubtask;
+  final void Function(String taskId) beginInsertAfter;
   final void Function(String taskId, {required bool up}) moveInLine;
 
-  /// 新建任务（子任务在框内录）。签名照 `_EventDetailPageState._createTask`。
+  /// 新建任务（子任务在框内录，主线插在某条之后也走这里）。签名照
+  /// `_EventDetailPageState._createTask`。
   final void Function({
     required String title,
     String? parentTaskId,
     TaskType type,
   }) createTask;
+
+  /// 在某个主线节点后面插一条新任务。签名照
+  /// `_EventDetailPageState._createTaskAfter`。
+  final void Function(String anchorTaskId, String title) createTaskAfter;
 }
 
 /// 事件详情页头（进度 / 标识色 / 搁置 / 归档那一行）。
@@ -926,6 +986,9 @@ class _TaskLine extends StatelessWidget {
       case 'moveDown':
         _moveInLine(context, up: false);
         break;
+      case 'insertAfter':
+        session.beginInsertAfter(task.id);
+        break;
       case 'due':
         await setTaskDueAction(context, app, task);
         break;
@@ -1061,8 +1124,9 @@ class _TaskIcon extends StatelessWidget {
 /// 只有链上的节点才谈得上"往上 / 往下挪一格"。子任务不参与顺序。
 ///
 /// 「接后续任务…」「新建后续节点」「断开后续…」三个入口已经删掉 ——
-/// 它们服务的是分叉 / 合流那套建模，现在一条线就是一条链，加节点只有
-/// 末尾那个「新建主线任务」一条路（顺序用上移 / 下移调）。
+/// 它们服务的是分叉 / 合流那套建模，现在一条线就是一条链。
+/// 加节点有两条路：链尾那个「新建主线任务」，与这里的「在后面插一条主线任务」
+/// （2026-10-03，ADR-096）；先后顺序仍然用上移 / 下移调。
 List<TaskAction> taskActions(Task task, {bool inLine = false}) {
   final actions = <TaskAction>[];
   if (task.taskType != TaskType.subtask) {
@@ -1074,6 +1138,11 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
   if (inLine) {
     actions.add(const TaskAction('moveUp', '往上挪一格', Icons.arrow_upward));
     actions.add(const TaskAction('moveDown', '往下挪一格', Icons.arrow_downward));
+    // 「插在它后面」（2026-10-03 / ADR-096）：从前加节点只有链尾一条路，
+    // 想插在中间就得先建到末尾、再一格格往上挪。落点改由数据层取中点决定。
+    actions.add(
+      const TaskAction('insertAfter', '在后面插一条主线任务', Icons.playlist_add),
+    );
   }
   // 到期日**不在这里**（2026-09-28 实机反馈：由行内那颗按钮实现，
   // 删去下拉菜单中的那个）。理由：面板里再放一份就是两个入口做同一件事，

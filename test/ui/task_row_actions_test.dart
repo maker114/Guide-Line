@@ -3,8 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
+import 'package:guideline/core/ids.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/format.dart';
+import 'package:guideline/ui/common/inline_editor.dart';
 
 /// 任务行的入口与"被挡住"的表达（灵感 14 / 15）：
 ///   · 还有未处理子任务时，状态按钮换**锁形**，点它不改变状态、只解释原因；
@@ -60,6 +63,31 @@ void main() {
           int.parse(widget.data!) <= 28,
     );
     return days.first;
+  }
+
+  /// 点开一个 `InlineComposer` 并提交一条。
+  ///
+  /// 输入框用**当前获得焦点的那一个**定位，不用 `.last`：展开过的输入行会留在
+  /// 树里，先后顺序与你想点的那一行并不一致 —— `app_smoke_test` 在那里踩过一次
+  /// （文字输进了另一行、任务根本没建出来）。
+  Future<void> submitInlineComposer(
+    WidgetTester tester,
+    String label,
+    String text,
+  ) async {
+    await tester.tap(find.text(label));
+    await tester.pumpAndSettle();
+
+    final focused = find.byWidgetPredicate(
+      (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+      description: '当前获得焦点的输入框',
+    );
+    expect(focused, findsOneWidget, reason: '点开「$label」后应有一个输入框获得焦点');
+
+    await tester.enterText(focused, text);
+    final composer = find.ancestor(of: focused, matching: find.byType(InlineComposer));
+    await tester.tap(find.descendant(of: composer, matching: find.byTooltip('添加')));
+    await tester.pumpAndSettle();
   }
 
   testWidgets('有未处理子任务时，父任务的状态按钮是锁形', (tester) async {
@@ -130,14 +158,83 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('现在还没有日期'), findsOneWidget, reason: '没设过就说清"还没有"');
     expect(find.text('清除日期'), findsNothing, reason: '没有值就不该出现清除键');
+    // 2026-10-02：没有日期时也不给「选时间…」—— 那一天还不存在，谈几点都早
+    expect(find.text('选时间…'), findsNothing);
 
     await tester.tap(firstTappableDay(tester));
     await tester.pumpAndSettle();
 
     final due = app.ws.liveTasks.single.dueAt;
     expect(due, isNotNull, reason: '选了那一天就该落盘');
-    expect(RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(due!), isTrue);
+    expect(
+      RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(due!),
+      isTrue,
+      reason: '只点日历某天 ⇒ 仍然是纯日期，不凭空补一个时刻',
+    );
     expect(find.byIcon(Icons.event_available_outlined), findsOneWidget, reason: '图标换成"已设"');
+  });
+
+  // ── 截止时间精确到分钟（2026-10-02，用户："允许设定截止时间精确到分钟"）──
+
+  testWidgets('已有日期的面板上能补一个时刻，值变成「YYYY-MM-DD HH:mm」', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    final task = app.ws.liveTasks.single;
+    app.run(() => app.ws.updateTask(task.id, dueAt: '2099-05-01'));
+
+    await openEvent(tester, app);
+    await tester.tap(find.byIcon(Icons.event_available_outlined));
+    await tester.pumpAndSettle();
+
+    // 纯日期的值上，时间键写「选时间…」，而**不该**有「清除时间」
+    // （那会让用户以为这条已经有时刻了）
+    expect(find.text('选时间…'), findsOneWidget);
+    expect(find.text('清除时间'), findsNothing);
+
+    await tester.tap(find.text('选时间…'));
+    await tester.pumpAndSettle();
+    // Material 的时间选择器：表盘是 5 分钟一格（用户口径"只需要 5 分钟"）
+    expect(find.byType(TimePickerDialog), findsOneWidget);
+
+    // 确定键的文案跟 locale 走，**不写死**（写死过一次，不同语言下会找不到）。
+    // 直接问 `MaterialLocalizations` 要它打算显示的那两个字。
+    final l10n = MaterialLocalizations.of(
+      tester.element(find.byType(TimePickerDialog)),
+    );
+    await tester.tap(find.text(l10n.okButtonLabel));
+    await tester.pumpAndSettle();
+
+    final due = app.ws.liveTasks.single.dueAt!;
+    expect(
+      RegExp(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$').hasMatch(due),
+      isTrue,
+      reason: '选完时刻之后落盘的就是带 HH:mm 的值：$due',
+    );
+    expect(Ids.hasTimeOfDay(due), isTrue);
+    expect(parseIsoDateTime(due), isNotNull, reason: '必须能被同一把尺子解析回去');
+  });
+
+  testWidgets('带时刻的值：面板预填那个时刻，也能「清除时间」退回纯日期', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    final task = app.ws.liveTasks.single;
+    app.run(() => app.ws.updateTask(task.id, dueAt: '2099-05-01 14:35'));
+
+    await openEvent(tester, app);
+    await tester.tap(find.byIcon(Icons.event_available_outlined));
+    await tester.pumpAndSettle();
+
+    // 有时刻 ⇒ 键上显示当前时刻、并且多出「清除时间」
+    expect(find.text('时间 14:35'), findsOneWidget);
+    expect(find.text('清除时间'), findsOneWidget);
+    expect(find.textContaining('2099-05-01 14:35'), findsWidgets, reason: '当前值要带时刻');
+
+    await tester.tap(find.text('清除时间'));
+    await tester.pumpAndSettle();
+
+    expect(
+      app.ws.liveTasks.single.dueAt,
+      '2099-05-01',
+      reason: '清除时间只脱掉时刻那一段，日子留着',
+    );
   });
 
   testWidgets('日期面板底部的「清除日期」真的把到期日清掉（实机反馈：设了取消不掉）',
@@ -334,5 +431,59 @@ void main() {
       app.ws.mainLineOf(event.id).map((t) => t.title),
       <String>['第一步', '第二步'],
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 「插在它后面」（2026-10-03 / ADR-096）：从前加节点只有链尾一条路，
+  // 想插在中间只能先建到末尾、再一格格往上挪。
+  // ---------------------------------------------------------------------------
+
+  testWidgets('主线节点的动作面板里有「在后面插一条主线任务」', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    await openEvent(tester, app);
+
+    await tester.tap(find.text('主线任务'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('在后面插一条主线任务'),
+      findsOneWidget,
+      reason: '链上节点才有"它后面"这回事',
+    );
+  });
+
+  testWidgets('子任务行的动作面板里**没有**这一项（子任务不参与链上顺序）', (tester) async {
+    final app = await appWithTask(withSubtask: true);
+    await openEvent(tester, app);
+
+    await tester.tap(find.text('子任务甲'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('在后面插一条主线任务'), findsNothing);
+    expect(find.text('往上挪一格'), findsNothing, reason: '与"往上 / 往下挪一格"同一个条件');
+  });
+
+  testWidgets('点它 → 在该节点下方长出输入行 → 建成后夹在锚点与后一条之间', (tester) async {
+    final app = await appWithTask(withSubtask: false);
+    final event = app.ws.liveEvents.single;
+    app.ws.createTask(eventId: event.id, title: '第二条');
+    await openEvent(tester, app);
+
+    await tester.tap(find.text('主线任务'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('在后面插一条主线任务'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('插在它后面'), findsOneWidget, reason: '输入行就地长在锚点下方');
+
+    await submitInlineComposer(tester, '插在它后面', '夹在中间的一条');
+
+    expect(
+      app.ws.mainLineOf(event.id).map((t) => t.title),
+      <String>['主线任务', '夹在中间的一条', '第二条'],
+      reason: '不是排到末尾 —— "排到末尾"那条路一直都在，这里要的是插在它后面',
+    );
+    expect(find.text('夹在中间的一条'), findsOneWidget, reason: '新节点当场画在任务线上');
+    expect(find.text('插在它后面'), findsNothing, reason: '建完就把输入行收起来');
   });
 }

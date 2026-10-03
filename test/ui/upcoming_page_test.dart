@@ -146,8 +146,34 @@ void main() {
     expect(find.text('那天的任务'), findsOneWidget);
   });
 
-  testWidgets('日历只标"还开着"的任务；没排期的单独提示', (tester) async {
+  testWidgets('带时刻的截止时间（2026-10-03 08:30）也要落在 10-03 那一格上', (tester) async {
+    // 2026-10-02 的坑：日历原来用 `task.dueAt == date` 整串比较，
+    // 而 `'2026-10-03 08:30' != '2026-10-03'` ⇒ 设了钟点的任务
+    // **从日历上整条消失**（不报错、不提示）。这里守的就是"取日那一段"。
     final app = await boot();
+    final event = app.ws.createEvent(name: '一件事');
+    final date = dateOffset(2);
+    app.run(() => app.ws.createTask(
+          eventId: event.id,
+          title: '带时刻的任务',
+          dueAt: '$date 08:30',
+        ));
+
+    await openCalendar(tester, app);
+    await gotoMonthOf(tester, date);
+    expect(find.byKey(calendarDayKey(date)), findsOneWidget);
+
+    await tester.tap(find.byKey(calendarDayKey(date)));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('带时刻的任务'),
+      findsOneWidget,
+      reason: '带 HH:mm 的值必须照样出现在那一天里',
+    );
+  });
+
+  testWidgets('日历只标"还开着"的任务；没排期的单独提示', (tester) async {    final app = await boot();
     final event = app.ws.createEvent(name: '一件事');
     final done = app.ws.createTask(eventId: event.id, title: '做完的', dueAt: dateOffset(1));
     app.run(() => app.ws.setTaskStatus(done.id, NodeStatus.done));
@@ -209,6 +235,31 @@ void main() {
       expect(marks['2026-09-28']!.every((c) => c == fallback), isTrue);
       expect(marks.keys, <String>['2026-09-28'], reason: '没排期的不进日历');
     });
+
+    testWidgets('带钟点的截止时间与纯日期归到同一格（2026-10-03 修）', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '带钟点的');
+      app.run(() => app.ws.setEventColor(event.id, '#78d2ca'));
+      final dated = app.ws.createTask(eventId: event.id, title: '纯日期', dueAt: '2026-09-28');
+      final timed = app.ws.createTask(
+        eventId: event.id,
+        title: '带钟点',
+        dueAt: '2026-09-28 08:30',
+      );
+
+      final marks = taskMarksByDate(
+        <Task>[dated, timed],
+        (task) => app.ws.findEvent(task.eventId)?.color,
+        fallback,
+      );
+
+      expect(
+        marks.keys,
+        <String>['2026-09-28'],
+        reason: '拿整串（2026-09-28 08:30）当键的话格子那一格永远查不到 —— 任务连圆环都没有',
+      );
+      expect(marks['2026-09-28']!.length, 2, reason: '两条任务就是两段弧');
+    });
   });
 
   group('日历格子本身', () {
@@ -223,6 +274,25 @@ void main() {
       final rings = tester.widgetList<DayRing>(find.byType(DayRing));
       final withRing = rings.where((r) => r.colors.isNotEmpty).length;
       expect(withRing, 1, reason: '只有今天那一格有环');
+    });
+
+    testWidgets('设了钟点的那一天照样画圆环（防"纯函数对了、格子没接上"）', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '一件事');
+      app.run(() => app.ws.createTask(
+            eventId: event.id,
+            title: '带钟点的',
+            dueAt: '${dateOffset(0)} 08:30',
+          ));
+
+      await openCalendar(tester, app);
+
+      final rings = tester.widgetList<DayRing>(find.byType(DayRing));
+      expect(
+        rings.where((r) => r.colors.isNotEmpty).length,
+        1,
+        reason: '带钟点的那条也要在它那一天画上环',
+      );
     });
   });
 }

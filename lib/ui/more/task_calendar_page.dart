@@ -130,6 +130,10 @@ class _TaskCalendarPageState extends State<TaskCalendarPage> {
 /// 颜色取任务所属事件的标识色（[colorHexOf] 返回 `#rrggbb`），
 /// 事件没设色就用 [fallback]（中性灰）。
 ///
+/// 归组用的是**日**那一段（[dayPartOf]），与 `tasksOn` 同一把尺子：
+/// 截止时间可以带 `HH:mm`（`2026-09-28 08:30`），拿整串当键就永远查不到
+/// 格子那一格 —— 那样设了钟点的任务连圆环都没有（2026-10-03 修）。
+///
 /// **纯函数**，所以"一天里两条任务 = 两段弧、三条 = 三段"这类规则能直接单测。
 Map<String, List<Color>> taskMarksByDate(
   List<Task> tasks,
@@ -138,9 +142,10 @@ Map<String, List<Color>> taskMarksByDate(
 ) {
   final marks = <String, List<Color>>{};
   for (final task in tasks) {
-    final due = task.dueAt;
-    if (due == null || due.isEmpty) continue;
-    marks.putIfAbsent(due, () => <Color>[]).add(colorOfHex(colorHexOf(task)) ?? fallback);
+    // 坏值 / 没排期的都归到空串，空串永不等于一个真实日期，于是不会混进某一天
+    final day = dayPartOf(task.dueAt);
+    if (day.isEmpty) continue;
+    marks.putIfAbsent(day, () => <Color>[]).add(colorOfHex(colorHexOf(task)) ?? fallback);
   }
   return marks;
 }
@@ -149,9 +154,27 @@ Map<String, List<Color>> taskMarksByDate(
 String todayDateString() => Ids.todayDate();
 
 /// 某天的任务（按任务顺序排好）。
-List<Task> tasksOn(String date, List<Task> tasks) =>
-    tasks.where((task) => task.dueAt == date).toList()
-      ..sort(byOrderOfTask);
+///
+/// ⚠️ 比较用**日**那一半，不能用整串（2026-10-02）：截止时间可以带 `HH:mm`
+/// （`2026-09-28 08:30`），整串与 `2026-09-28` 永不相等 ——
+/// 那样设了钟点的任务会**从日历上整条消失**（不报错、不提示）。
+List<Task> tasksOn(String date, List<Task> tasks) => tasks
+    .where((task) => dayPartOf(task.dueAt) == date)
+    .toList()
+  ..sort(byOrderOfTask);
+
+/// 取日期值里**日**那一段（`2026-09-28 08:30` ⇒ `2026-09-28`；纯日期原样返回）。
+///
+/// 空 / 解析不了时返回空串 —— 调用方拿它与一个真实日期比，空串永不相等，
+/// 于是坏值不会被错当成"某一天的任务"。
+String dayPartOf(String? value) {
+  if (value == null || value.isEmpty) return '';
+  final parsed = parseIsoDateTime(value);
+  if (parsed == null) return '';
+  final month = parsed.month.toString().padLeft(2, '0');
+  final day = parsed.day.toString().padLeft(2, '0');
+  return '${parsed.year}-$month-$day';
+}
 
 /// 日期文案：`2026-09-28` → `9 月 28 日`。
 String monthDayLabel(String date) {

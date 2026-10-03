@@ -1747,6 +1747,128 @@ void main() {
     });
   });
 
+  group('主线节点：插在指定节点之后（ADR-096）', () {
+    /// 这条事件的主线节点标题，按链上顺序。
+    List<String> titles(Workspace each, String eventId) =>
+        each.mainLineOf(eventId).map((t) => t.title).toList();
+
+    test('插到中间：新节点落在锚点之后，其余顺序不变，且从磁盘读回一样', () {
+      final event = ws.createEvent(name: '一条线');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      ws.createTask(eventId: event.id, title: '乙');
+      ws.createTask(eventId: event.id, title: '丙');
+
+      final inserted = ws.createTask(eventId: event.id, title: '甲之后', afterTaskId: a.id);
+
+      expect(titles(ws, event.id), <String>['甲', '甲之后', '乙', '丙']);
+      expect(inserted.parentId, isNull, reason: '插进去的仍是一条主线节点');
+      // 顺序是要写进文件的：换一个实例按同一份盘上数据读回来必须一样
+      expect(
+        titles(Workspace.fromLoad(storage, storage.load()), event.id),
+        <String>['甲', '甲之后', '乙', '丙'],
+      );
+    });
+
+    test('锚点是链尾那个：新节点排在它后面（不覆盖，也不插到别处）', () {
+      final event = ws.createEvent(name: '一条线');
+      ws.createTask(eventId: event.id, title: '甲');
+      final b = ws.createTask(eventId: event.id, title: '乙');
+
+      ws.createTask(eventId: event.id, title: '乙之后', afterTaskId: b.id);
+
+      expect(titles(ws, event.id), <String>['甲', '乙', '乙之后']);
+    });
+
+    test('中点砍到没有空隙时先重编号：连着插很多条也不会撞出同一个 order', () {
+      final event = ws.createEvent(name: '一条线');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      ws.createTask(eventId: event.id, title: '乙');
+
+      // 每次都插在「甲」后面：中点会一路对半砍（1500 → … → 1001），砍到差 1 时
+      // 旧算法给出的 order 会与锚点**相同** —— 排序当场退化成看 id
+      for (var i = 0; i < 12; i += 1) {
+        ws.createTask(eventId: event.id, title: '插 $i', afterTaskId: a.id);
+      }
+
+      final line = ws.mainLineOf(event.id);
+      expect(line.length, 14);
+      expect(line.first.title, '甲', reason: '锚点始终在最前');
+      final orders = line.map((t) => t.order).toList();
+      expect(orders.toSet().length, orders.length, reason: 'order 不许撞车');
+      for (var i = 1; i < orders.length; i += 1) {
+        expect(orders[i], greaterThan(orders[i - 1]), reason: '严格递增才是链上的顺序');
+      }
+    });
+
+    test('锚点是子任务：拒绝（子任务不在链上）', () {
+      final event = ws.createEvent(name: '一件事');
+      final main = ws.createTask(eventId: event.id, title: '主线');
+      final sub = ws.createTask(
+        eventId: event.id,
+        title: '子任务',
+        parentTaskId: main.id,
+        type: TaskType.subtask,
+      );
+
+      expect(
+        () => ws.createTask(eventId: event.id, title: '插在子任务之后', afterTaskId: sub.id),
+        throwsA(isA<RuleViolation>()),
+      );
+    });
+
+    test('锚点属于另一个事件：拒绝，且一个字都不写进去', () {
+      final first = ws.createEvent(name: '甲事件');
+      final second = ws.createEvent(name: '乙事件');
+      final anchor = ws.createTask(eventId: first.id, title: '甲的一条');
+
+      expect(
+        () => ws.createTask(eventId: second.id, title: '想插进去', afterTaskId: anchor.id),
+        throwsA(isA<RuleViolation>()),
+      );
+      expect(ws.mainLineOf(second.id), isEmpty);
+    });
+
+    test('锚点已归档：拒绝（归档节点不在链上）', () {
+      final event = ws.createEvent(name: '一件事');
+      final a = ws.createTask(eventId: event.id, title: '甲');
+      ws.setTaskArchived(a.id, true);
+
+      expect(
+        () => ws.createTask(eventId: event.id, title: '插在归档节点之后', afterTaskId: a.id),
+        throwsA(isA<RuleViolation>()),
+      );
+    });
+
+    test('子任务与锚点同时给：拒绝（子任务不参与链上顺序）', () {
+      final event = ws.createEvent(name: '一件事');
+      final main = ws.createTask(eventId: event.id, title: '主线');
+
+      expect(
+        () => ws.createTask(
+          eventId: event.id,
+          title: '两件事一起说',
+          parentTaskId: main.id,
+          type: TaskType.subtask,
+          afterTaskId: main.id,
+        ),
+        throwsA(isA<RuleViolation>()),
+      );
+    });
+
+    test('往已完成的事件里插一条 → 事件退回 pending（与链尾新建同一口径）', () {
+      final event = ws.createEvent(name: '一件事');
+      final only = ws.createTask(eventId: event.id, title: '唯一一条');
+      ws.setTaskStatus(only.id, NodeStatus.done);
+      ws.setEventStatus(event.id, NodeStatus.done);
+
+      ws.createTask(eventId: event.id, title: '插在它后面', afterTaskId: only.id);
+
+      final reloaded = ws.findEvent(event.id)!;
+      expect(reloaded.status, NodeStatus.pending, reason: '多了一条非终态节点就不再满足完成条件');
+      expect(reloaded.completedAt, isNull);
+    });
+  });
+
   group('事件排序（Q28）', () {
     test('往上 / 往下挪一格 = 交换相邻两个事件的 order，并落盘', () {
       final a = ws.createEvent(name: '甲');
