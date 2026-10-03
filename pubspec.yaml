@@ -17,7 +17,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.6.0+79
+version: 2.7.0+80
 
 environment:
   sdk: ^3.13.4
@@ -45,6 +45,13 @@ dependencies:
   file_picker: ^13.1.0
   http: ^1.6.0
   flutter_secure_storage: ^11.2.0
+  # 本地提醒（ADR-097）。这两个**刻意写死精确版本**，与上面五个的 `^` 不一样：
+  # 它们带原生实现，而插件的 buildscript 自己钉着 Android Gradle Plugin 的版本
+  # （22.0.0 要 AGP 8.11.1，本机原本没有缓存）。放开成 `^` 会让一次 `pub get`
+  # 就换掉整条原生依赖链，而 CI 与真机验证都建立在这一组之上。
+  flutter_local_notifications: 22.0.0
+  # 只为拿到内置的 `tz.UTC`（不读时区数据库），见 `lib/platform/notification_service.dart`。
+  timezone: 0.11.0
 
 dev_dependencies:
   flutter_test:

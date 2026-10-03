@@ -11,6 +11,7 @@ import '../platform/shortcut_channel.dart';
 import 'common/auto_sync_panels.dart';
 import 'common/sync_status_indicator.dart';
 import 'desktop/desktop_shell.dart';
+import 'events/event_detail_page.dart';
 import 'events/event_tab.dart';
 import 'inspiration/inspiration_tab.dart';
 import 'more/more_tab.dart';
@@ -772,6 +773,13 @@ class _AppShellState extends State<AppShell> {
     _pageProgress.value = _index.toDouble();
     _pages.addListener(_syncPageProgress);
     _bindCaptureShortcut();
+    // 提醒（ADR-097）：用户点了通知 ⇒ 落到那条任务所在的事件详情页。
+    //
+    // 为什么挂监听而不是在 build 里顺手查一次：这个状态可能**比本 shell 先到**
+    // （冷启动那次是 `bootstrap` 里从通知里读出来的），所以既要监听后续变化，
+    // 也要在首帧后主动看一次。
+    widget.app.addListener(_openPendingReminderTask);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _openPendingReminderTask());
     // 需求⑤：每次进软件先**静默**比对一次 —— 不摆圆环，两边对不上才弹面板，
     // 连不上就弹一次警告（当天只弹一次）。`unawaited`：这是开机顺手起的一趟，
     // 界面不等它。
@@ -783,11 +791,37 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    widget.app.removeListener(_openPendingReminderTask);
     _pages
       ..removeListener(_syncPageProgress)
       ..dispose();
     _pageProgress.dispose();
     super.dispose();
+  }
+
+  /// 有"待跳任务"就跳到它所在的事件详情页；没有就立刻返回（这个监听者被调用得极频繁）。
+  ///
+  /// 分两步走（先看、帧后再取）是因为这个回调是从 `notifyListeners()` 里来的 ——
+  /// 那一刻正在 build，而 build 期间不许 push 路由。真正的"取走"放在帧后，
+  /// 顺带保证同一条只被消费一次。
+  void _openPendingReminderTask() {
+    if (!mounted || widget.app.pendingReminderTaskId == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final taskId = widget.app.takePendingReminderTaskId();
+      if (taskId == null) return;
+      final task = widget.app.ws.findTask(taskId);
+      // 任务被删了 / 事件没了：只把待跳状态清掉，不报错 ——
+      // 用户点的是**过去某一条**通知，它指向的东西可能已经不在了。
+      if (task == null || task.deleted) return;
+      unawaited(
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => EventDetailPage(app: widget.app, eventId: task.eventId),
+          ),
+        ),
+      );
+    });
   }
 
   /// 同步没完成的原因（点右上角那枚黄/红胶囊看）—— 原话照摆，不去掉细节。

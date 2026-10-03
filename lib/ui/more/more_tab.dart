@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
+import '../../core/rules/reminder_schedule.dart';
 import '../../core/store/github_sync.dart';
 import '../../core/store/ui_prefs.dart';
 import '../../platform/data_directory.dart';
@@ -15,6 +16,7 @@ import 'archive_page.dart';
 import 'backups_page.dart';
 import 'export_page.dart';
 import 'github_backup_page.dart';
+import 'reminder_page.dart';
 import 'search_page.dart';
 import 'upcoming_page.dart';
 
@@ -100,6 +102,13 @@ class _MoreTabState extends State<MoreTab> {
           subtitle: _appearanceSubtitle(),
           page: AppearancePage(app: app),
         ),
+        const SectionHeader('提醒'),
+        _MoreItem(
+          icon: Icons.alarm_outlined,
+          title: '提醒',
+          subtitle: _reminderSubtitle(),
+          page: ReminderPage(app: app),
+        ),
         const SectionHeader('AI'),
         _MoreItem(
           icon: Icons.auto_awesome_outlined,
@@ -166,6 +175,20 @@ class _MoreTabState extends State<MoreTab> {
         : ' · ${themeModeLabel(prefs.themeMode)}';
     final background = prefs.hasBackground ? ' · 有背景图' : '';
     return '$themeName$mode$background';
+  }
+
+  /// 提醒入口的副标题：一眼看出开没开、当前是哪两档。
+  ///
+  /// 只列**开着**的档：关掉的那一档对"它现在会怎么提醒我"没有贡献，
+  /// 摆出来反而要人多读一句才知道它不算数。
+  String _reminderSubtitle() {
+    if (!app.remindersSupported) return '电脑端不做提醒';
+    if (!app.prefs.reminderEnabled) return '已关闭';
+    final on = app.prefs.reminderLeads
+        .where((lead) => lead.enabled)
+        .toList(growable: false);
+    if (on.isEmpty) return '开着，但两档都关掉了';
+    return '提前 ${on.map((lead) => describeLeadMinutes(lead.minutes)).join('、')}';
   }
 
   /// AI 入口的副标题。

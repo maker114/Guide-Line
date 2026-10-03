@@ -23,8 +23,8 @@ import 'package:flutter_test/flutter_test.dart';
 ///   · `package:guideline/` 是工程自己的包（`pubspec.yaml` 的 `name:`），不是依赖；
 ///   · 其余一律算第三方依赖 —— 只能出现在 `lib/platform/` 下。
 ///
-/// 与 `README.md` 里"运行时依赖只有五个"那句是**两件事**：那句说的是 `pubspec.yaml`
-/// 的声明（含模板自带、本工程一处没用的 `cupertino_icons`），
+/// 与 `README.md` 里"pubspec.yaml 声明了几个 / 真在用的是几个"那两句是**两件事**：
+/// 那两句说的是 `pubspec.yaml` 的声明（含模板自带、本工程一处没用的 `cupertino_icons`），
 /// 这里说的是**代码里真的 import 了谁**。
 void main() {
   final files = _dartFiles(Directory('lib'));
@@ -143,6 +143,12 @@ const Map<String, int> _expectedPluginImports = <String, int>{
   'path_provider': 1, // data_directory.dart
   'file_picker': 1, // data_transfer_platform.dart
   'share_plus': 1, // data_transfer_platform.dart
+  // 本地提醒（ADR-097，2026-10-03 加）：`flutter_local_notifications` 是插件、
+  // `timezone` 是它排期要用的纯 Dart 包（只为了拿到 `tz.UTC` 这个内置位置 ——
+  // 不读时区数据库，见 `notification_service.dart` 的说明）。两个都只在
+  // `notification_service.dart` 里 import 一次。
+  'flutter_local_notifications': 1, // notification_service.dart
+  'timezone': 1, // notification_service.dart
 };
 
 List<File> _dartFiles(Directory dir) {

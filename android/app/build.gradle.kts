@@ -37,6 +37,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // ⚠️ 临时探针加（2026-10-03）：`flutter_local_notifications` v10+ **强制**
+        // 要求脱糖 —— 它用 `java.time` 做定时，在 minSdk 24 上不打开就直接编不过
+        // （插件 README 的原话是"即使用不到定时通知也要打开"）。
+        // 正式保留与否，与探针结论一起决定。
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -82,4 +87,10 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// ⚠️ 临时探针加（2026-10-03）：与上面 `isCoreLibraryDesugaringEnabled` 配对的
+// 脱糖库本身。版本跟着 `flutter_local_notifications` README 给的那一版。
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

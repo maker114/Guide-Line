@@ -10,6 +10,8 @@ import '../core/models/ai_config.dart';
 import '../core/models/entity.dart';
 import '../core/models/github_backup_config.dart';
 import '../core/models/project.dart';
+import '../core/models/reminder.dart';
+import '../core/rules/reminder_schedule.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
 import '../core/store/export_codec.dart';
@@ -20,6 +22,7 @@ import '../platform/ai_client.dart';
 import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
 import '../platform/github_backup_client.dart';
+import '../platform/notification_service.dart';
 import 'auto_sync_state.dart';
 
 /// 分享动作的可注入钩子（真机走 [DataTransferPlatform.shareFile]）。
@@ -54,12 +57,18 @@ class AppController extends ChangeNotifier {
     ShareFileHook? shareFile,
     GitHubBackupGateway? gitHubGateway,
     GitHubCredentialStore? gitHubCredentials,
+    bool? remindersSupportedOverride,
   })  : startupWarnings = List<String>.unmodifiable(startupWarnings),
         ai = aiGenerator ?? const HttpAiTextGenerator(),
         credentials = credentialStore ?? const SecureAiCredentialStore(),
         shareFile = shareFile ?? _defaultShareFile,
         gitHub = gitHubGateway ?? HttpGitHubBackupGateway(),
-        gitHubStore = gitHubCredentials ?? const SecureGitHubCredentialStore();
+        gitHubStore = gitHubCredentials ?? const SecureGitHubCredentialStore(),
+        // 默认看平台（电脑端不做提醒）；测试里可以覆盖 —— 与上面那几个注入点
+        // 同一套做法。不覆盖的话，UI 用例跑在宿主机上永远只能看到
+        // "电脑端不做提醒"那一句，开关与两档根本没机会被点到。
+        remindersSupported =
+            remindersSupportedOverride ?? NotificationService.instance.supported;
 
   /// 从磁盘装配（唯一入口）。
   static Future<AppController> bootstrap({
@@ -69,6 +78,7 @@ class AppController extends ChangeNotifier {
     ShareFileHook? shareFile,
     GitHubBackupGateway? gitHubGateway,
     GitHubCredentialStore? gitHubCredentials,
+    bool? remindersSupportedOverride,
   }) async {
     final dir = await DataDirectory.resolve(override: dataDirectoryOverride);
     final storage = AppStorage(AppPaths(dir));
@@ -86,6 +96,7 @@ class AppController extends ChangeNotifier {
       shareFile: shareFile,
       gitHubGateway: gitHubGateway,
       gitHubCredentials: gitHubCredentials,
+      remindersSupportedOverride: remindersSupportedOverride,
     ).._loadBackgroundBytes();
     // 灵感箱空态那句轮换文案**每次启动重抽**（ADR-084）。落进偏好是为了
     // "同一次运行里不再变" —— 界面只读它，不自己抽。
@@ -96,6 +107,9 @@ class AppController extends ChangeNotifier {
       controller._purgeExpiredTrash();
     }
     controller._remindExportAfterIncident(report);
+    // 本地提醒（ADR-097）：接上"点通知回到那条任务"的回调，并按当前数据排一遍。
+    // 不 await —— 排期不该拖慢启动；它失败也只记在 `reminderError` 里。
+    unawaited(controller.startReminders());
     return controller;
   }
 
@@ -119,7 +133,13 @@ class AppController extends ChangeNotifier {
   /// 自动上传 —— 两件事都在 [autoSyncAfterHome] 里，顺序也在那儿，别在这里拆开。
   late final NavigatorObserver editSessionObserver = _EditSessionObserver(
     onEnter: storage.beginEditSession,
-    onLeave: () => unawaited(autoSyncAfterHome()),
+    // 回到外壳这一下同时干三件事，顺序别拆：先落盘（endEditSession 在
+    // autoSyncAfterHome 里），再看要不要自动上传，最后把提醒排期对齐一遍。
+    // 提醒挂在这里是**兜底**：万一将来有哪条编辑路径没经过 `run`，回到外壳也会补上。
+    onLeave: () {
+      unawaited(autoSyncAfterHome());
+      unawaited(refreshReminders());
+    },
   );
 
   /// 启动时清一次回收站（墓碑只留 `trashRetentionDays` 天）。
@@ -417,6 +437,11 @@ class AppController extends ChangeNotifier {
     try {
       action();
       notifyListeners();
+      // 数据变了 ⇒ 提醒排期跟着重算。这是**唯一**的改动网关（界面都走
+      // `app.run(() => app.ws.xxx())`），所以挂在这里就覆盖了全部编辑路径。
+      // 不 await：`run` 是同步的、界面要立刻拿到结果；而排期是幂等的，
+      // 晚几十毫秒生效不影响任何一条提醒的准时性。
+      unawaited(refreshReminders());
       return null;
     } on RuleViolation catch (violation) {
       return violation.message;
@@ -433,6 +458,163 @@ class AppController extends ChangeNotifier {
       return '保存失败，这次改动没有写入磁盘：${error.message}。请检查存储空间后重试。';
     }
   }
+
+  // ------------------------------------------------------------ 本地提醒（ADR-097）
+
+  /// 这台设备能不能提醒。**电脑端不做**（用户 2026-10-03 定），界面靠它决定
+  /// 显不显示那两格设置。
+  ///
+  /// 它是构造时定下来的字段而不是每次现问平台：一个会话里平台不会变，
+  /// 而"现问"会让界面在每帧都可能换一个答案。
+  final bool remindersSupported;
+
+  /// 上一次排期失败的原因（`null` = 没出错）。设置页照它显示一句话。
+  ///
+  /// 为什么不抛给界面：排期是"数据变了顺手做的一件事"，它失败了也不该让
+  /// 用户刚做的那次编辑看起来像失败 —— 那次编辑**确实成功了**。
+  String? reminderError;
+
+  /// 点通知进来、还等着被导航过去的那条任务 id（外壳取走一次即清）。
+  String? pendingReminderTaskId;
+
+  /// 这一会话里**已经补发过**的 `任务 id|到期值`。
+  ///
+  /// 为什么需要它：排期是幂等的、会被反复重算（改个清单勾选也会触发），
+  /// 不记一笔的话同一条"错过窗口"的补发会在每次重算时重弹一遍。
+  final Set<String> _catchUpShown = <String>{};
+
+  /// 这一会话是否真的往系统里排过东西。
+  ///
+  /// 它让"从没打开过提醒"的用户**连插件都不初始化** —— 提醒默认是关的，
+  /// 绝大多数人不会打开，他们不该为这个功能付任何启动开销。
+  bool _hasScheduledReminders = false;
+
+  /// 把重排串成一条链：后一次一定跑在前一次之后，且跑的是**当时的最新数据**。
+  Future<void> _reminderChain = Future<void>.value();
+
+  /// 启动时接一次（`bootstrap` 里调）。
+  Future<void> startReminders() async {
+    final service = NotificationService.instance;
+    if (!service.supported) return;
+    try {
+      await service.initialize(onTap: _onReminderTapped);
+      // 冷启动那一次**拿不到**回调（那时还没有监听者），得主动问一句
+      // "这次启动是不是用户点了通知进来的"。
+      final launchTaskId = await service.takeLaunchPayload();
+      if (launchTaskId != null) {
+        pendingReminderTaskId = launchTaskId;
+        notifyListeners();
+      }
+      await refreshReminders();
+    } catch (error) {
+      reminderError = '$error';
+    }
+  }
+
+  void _onReminderTapped(String taskId) {
+    pendingReminderTaskId = taskId;
+    notifyListeners();
+  }
+
+  /// 外壳取走"该跳去哪条任务"，取走即清（同一条只跳一次）。
+  String? takePendingReminderTaskId() {
+    final id = pendingReminderTaskId;
+    pendingReminderTaskId = null;
+    return id;
+  }
+
+  /// 按当前数据与设置重排一遍提醒。**幂等**，所以可以从任何地方无脑调。
+  Future<void> refreshReminders() {
+    _reminderChain = _reminderChain.then((_) => _refreshRemindersOnce());
+    return _reminderChain;
+  }
+
+  Future<void> _refreshRemindersOnce() async {
+    final service = NotificationService.instance;
+    if (!service.supported) return;
+    try {
+      if (!prefs.reminderEnabled) {
+        // 关掉时只做一次收尾（撤掉之前排下的），之后这条路彻底静默。
+        if (_hasScheduledReminders) {
+          await service.cancelAllPending();
+          _hasScheduledReminders = false;
+        }
+        return;
+      }
+      final now = DateTime.now();
+      final leads = prefs.reminderLeads;
+      final fires = <ReminderFire>[];
+      final catchUps = <ReminderFire>[];
+      for (final task in workspace.openTasks()) {
+        // "放下的线不该继续催"：事件已搁置 ⇒ 线下的任务不排、也不补。
+        // 提醒正是"催"的地方之一，所以与 `Workspace.overdueTasks()` 同一口径
+        // （那一页的理由写在 `openTasks()` 的文档里）。
+        if (workspace.isEventMutedForDue(task.eventId)) continue;
+        final plan = planTaskReminders(
+          taskId: task.id,
+          taskTitle: task.title,
+          eventName: workspace.findEvent(task.eventId)?.name ?? '',
+          dueAt: task.dueAt,
+          open: true,
+          leads: leads,
+          now: now,
+        );
+        fires.addAll(plan.fires);
+        final catchUp = plan.catchUp;
+        if (catchUp != null && _catchUpShown.add('${task.id}|${task.dueAt}')) {
+          catchUps.add(catchUp);
+        }
+      }
+      await service.replaceAll(fires);
+      _hasScheduledReminders = fires.isNotEmpty;
+      // 补发放在重排**之后**：这样"还有 25 分钟到期"那条补发，
+      // 不会比同一条任务排在未来的那一档更早被系统拿去做排序。
+      for (final catchUp in catchUps) {
+        await service.showNow(catchUp);
+      }
+      reminderError = null;
+    } catch (error) {
+      reminderError = '$error';
+    }
+  }
+
+  /// 打开 / 关掉提醒总开关。
+  ///
+  /// 打开时**当场申请通知权限** —— 时机是用户 2026-10-03 定的"进设置页打开开关这一刻"，
+  /// 而不是启动就弹框：权限框只在用户表达出"我要这个"的地方出现。
+  Future<void> setReminderEnabled(bool enabled) async {
+    updatePrefs(prefs.copyWith(reminderEnabled: enabled));
+    if (enabled) {
+      await NotificationService.instance.requestPermission();
+    }
+    await refreshReminders();
+  }
+
+  /// 改某一档的提前量（越界会被夹到 [ReminderLead.minMinutes] ~ [ReminderLead.maxMinutes]）。
+  Future<void> setReminderLeadMinutes(int slot, int minutes) {
+    final value = minutes.clamp(ReminderLead.minMinutes, ReminderLead.maxMinutes);
+    return _updateReminderLead(slot, (lead) => lead.copyWith(minutes: value));
+  }
+
+  /// 单独开 / 关某一档。
+  Future<void> setReminderLeadEnabled(int slot, bool enabled) =>
+      _updateReminderLead(slot, (lead) => lead.copyWith(enabled: enabled));
+
+  Future<void> _updateReminderLead(
+    int slot,
+    ReminderLead Function(ReminderLead) change,
+  ) async {
+    final leads = prefs.reminderLeads;
+    if (slot < 0 || slot >= leads.length) return;
+    final next = List<ReminderLead>.from(leads);
+    next[slot] = change(next[slot]);
+    updatePrefs(prefs.copyWith(reminderLeads: next));
+    await refreshReminders();
+  }
+
+  /// 系统通知权限当前开着没有（设置页显示用）。
+  Future<bool> notificationsAllowed() =>
+      NotificationService.instance.notificationsEnabled();
 
   /// 节点是否展开；[defaultExpanded] 由调用方按节点状态给
   /// （任务框传的是"未完成→展开、已完成→收起"，于是"已完成自动折叠"是算出来的）。

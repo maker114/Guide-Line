@@ -49,6 +49,9 @@ function Send([string]$method, [string]$url, $body, [string]$contentType) {
 
 $notes = 'tool/release-notes.md'
 $releases = @(
+  # v2.7.0 起一个 Release 带**两个附件**（手机 APK + 电脑 zip）—— 用户 2026-10-03 的要求
+  # 是"同步更新 win 版本"，下面那段附件循环因此改成能收数组（见 `$rel.Asset -is [array]`）。
+  @{ Tag = 'v2.7.0'; Name = 'v2.7.0 — 到点提醒（本地通知），Windows 版首次随版本发出'; Section = 'v2.7.0'; Asset = @('dist/guideline-2.7.0.apk', 'dist/guideline-windows-2.7.0.zip') },
   @{ Tag = 'v1.9.3'; Name = 'v1.9.3 — 两条用例不再依赖 Windows 专用命令，CI 首次变绿'; Section = 'v1.9.3'; Asset = 'dist/guideline-1.9.3.apk' },
   @{ Tag = 'v1.5.1'; Name = 'v1.5.1 — 文案去括号，版本号不再漂移'; Section = 'v1.5.1'; Asset = 'dist/guideline-1.5.1.apk' },
   @{ Tag = 'v1.5.0'; Name = 'v1.5.0 — 事件详情页改名 + 速记按钮两处修复'; Section = 'v1.5.0'; Asset = 'dist/guideline-1.5.0.apk' },
@@ -76,15 +79,25 @@ foreach ($rel in $releases) {
     }
   }
 
-  $assetName = [System.IO.Path]::GetFileName($rel.Asset)
-  $already = $release.assets | Where-Object { $_.name -eq $assetName }
-  if ($already) {
-    Write-Output "  附件 $assetName 已存在（$($already.size) 字节），跳过"
-    continue
+  # 附件可以是**一个路径，也可以是一串**（v2.7.0 起一个 Release 同时带 APK 与 Windows zip）。
+  $assets = if ($rel.Asset -is [array]) { $rel.Asset } else { @($rel.Asset) }
+  foreach ($assetPath in $assets) {
+    $assetName = [System.IO.Path]::GetFileName($assetPath)
+    $already = $release.assets | Where-Object { $_.name -eq $assetName }
+    if ($already) {
+      Write-Output "  附件 $assetName 已存在（$($already.size) 字节），跳过"
+      continue
+    }
+    # 内容类型按扩展名给：zip 传成 apk 的 MIME，下载器会照着当安装包处理。
+    $contentType = if ($assetName.EndsWith('.apk')) {
+      'application/vnd.android.package-archive'
+    } else {
+      'application/zip'
+    }
+    $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $assetPath))
+    $uploadUrl = "https://uploads.github.com/repos/maker114/Guide-Line/releases/$($release.id)/assets?name=$assetName"
+    $asset = Invoke-RestMethod -Uri $uploadUrl -Headers $headers -Method Post -ContentType $contentType -Body $bytes
+    Write-Output "  附件上传成功：$($asset.name)（$($asset.size) 字节）→ $($asset.browser_download_url)"
   }
-  $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $rel.Asset))
-  $uploadUrl = "https://uploads.github.com/repos/maker114/Guide-Line/releases/$($release.id)/assets?name=$assetName"
-  $asset = Invoke-RestMethod -Uri $uploadUrl -Headers $headers -Method Post -ContentType 'application/vnd.android.package-archive' -Body $bytes
-  Write-Output "  附件上传成功：$($asset.name)（$($asset.size) 字节）→ $($asset.browser_download_url)"
 }
 Write-Output '全部完成'

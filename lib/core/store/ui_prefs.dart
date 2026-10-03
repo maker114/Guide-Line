@@ -1,4 +1,5 @@
 import '../json/canonical.dart';
+import '../models/reminder.dart';
 
 /// 界面偏好（**不是数据**）：折叠状态、外观、上次打开的页签等。
 ///
@@ -26,6 +27,8 @@ class UiPrefs {
     this.githubBackupRepo = '',
     this.githubBackupBranch = defaultGithubBranch,
     this.githubBackupPath = defaultGithubBackupPath,
+    this.reminderEnabled = false,
+    this.reminderLeads = ReminderLead.defaults,
   });
 
   static const UiPrefs empty = UiPrefs();
@@ -174,6 +177,25 @@ class UiPrefs {
   /// 远程文件路径（**非敏感**）。
   final String githubBackupPath;
 
+  /// 提醒功能的**总开关**（默认**关**，用户 2026-10-03 定）。
+  ///
+  /// 默认关的两个理由：
+  ///   1. 与 README「没有账号、没有服务器、**没有推送**」那句既有承诺一致 ——
+  ///      装完就自己弹东西，是用户没答应过的事；
+  ///   2. 开着才需要申请系统通知权限，而默认开就意味着装完第一件事就是弹权限框。
+  ///
+  /// 关掉只停"排期"，**不清** [reminderLeads] 里配好的两档 ——
+  /// 与 [aiEnabled] / [githubBackupEnabled] 同一条口径。
+  final bool reminderEnabled;
+
+  /// 两档提前量，**长度恒为 [ReminderLead.slotCount]**（缺键 / 坏值 / 多写都会
+  /// 被 [ReminderLead.normalize] 整成两档）。
+  ///
+  /// 为什么与"界面偏好"放一起：它绑的是**这一台设备的通知行为**，
+  /// 所以按现状口径它**不进导出、不进备份**（`ui_prefs.json` 本来就不进），
+  /// 换台设备带过去只会得到一个"开着但没权限"的假象。
+  final List<ReminderLead> reminderLeads;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -218,6 +240,8 @@ class UiPrefs {
     String? githubBackupRepo,
     String? githubBackupBranch,
     String? githubBackupPath,
+    bool? reminderEnabled,
+    List<ReminderLead>? reminderLeads,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -246,6 +270,8 @@ class UiPrefs {
         githubBackupRepo: githubBackupRepo ?? this.githubBackupRepo,
         githubBackupBranch: githubBackupBranch ?? this.githubBackupBranch,
         githubBackupPath: githubBackupPath ?? this.githubBackupPath,
+        reminderEnabled: reminderEnabled ?? this.reminderEnabled,
+        reminderLeads: reminderLeads ?? this.reminderLeads,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -269,6 +295,10 @@ class UiPrefs {
         'githubBackupRepo': githubBackupRepo,
         'githubBackupBranch': githubBackupBranch,
         'githubBackupPath': githubBackupPath,
+        'reminderEnabled': reminderEnabled,
+        'reminderLeads': reminderLeads
+            .map((lead) => lead.toJson())
+            .toList(growable: false),
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -304,6 +334,12 @@ class UiPrefs {
       githubBackupRepo: _readTrimmed(json['githubBackupRepo']),
       githubBackupBranch: _readNonEmpty(json['githubBackupBranch'], defaultGithubBranch),
       githubBackupPath: _readNonEmpty(json['githubBackupPath'], defaultGithubBackupPath),
+      // 提醒：开关**缺键即关**（与 githubBackupEnabled 同一条口径 ——
+      // 老偏好文件里没有它，不该因此凭空开始弹通知）；
+      // 两档缺键则取默认的 60 / 10 分钟，这样用户一打开开关就有可用的默认，
+      // 而不是先看到两格空白。
+      reminderEnabled: json['reminderEnabled'] == true,
+      reminderLeads: ReminderLead.normalize(json['reminderLeads']),
     );
   }
 

@@ -7,6 +7,19 @@
          "连不上"，看不出是权限问题（实测踩过一次）。
          调试时"能连上"会误导人：debug 包有这条权限，release 包没有。 -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- ⚠️ 下面四条是**临时探针**加的（2026-10-03），验完按结论决定去留。
+         探针要回答的是"本地定时通知在这台 HyperOS 上活不活得下来"，
+         而它需要这四样东西：
+           · POST_NOTIFICATIONS    —— Android 13+ 起通知是运行时权限；
+           · USE_EXACT_ALARM       —— 精确闹钟，声明即生效、不弹窗（侧载自用，
+                                      不走 Play 的上架审核，所以这条政策约束不适用）；
+           · SCHEDULE_EXACT_ALARM  —— 上面那条被系统忽略时的退路，可由用户授权；
+           · RECEIVE_BOOT_COMPLETED—— **重启之后重新排期**，这一条正是探针要验的
+                                      那个场景（没有它，重启后定时全丢）。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
@@ -44,6 +57,26 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- ⚠️ 临时探针的两个接收器（2026-10-03 加）。
+             `flutter_local_notifications` **自己不声明**这两个 receiver
+             （插件清单里只有 VIBRATE 与 POST_NOTIFICATIONS），
+             README 明确要求 App 侧声明 —— 少了它们，进程死掉之后
+             到点的通知**永远不会被投递**，而这正是探针要验的那件事。
+               · ScheduledNotificationReceiver     —— 到点那一下由它投递；
+               · ScheduledNotificationBootReceiver —— 开机后把还没到点的重新排上。 -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
