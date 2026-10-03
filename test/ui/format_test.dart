@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:guideline/core/ids.dart';
 import 'package:guideline/ui/common/format.dart';
 
 /// 日期口径：列表与日期选择器都靠它显示，边界必须钉死。
@@ -72,6 +73,65 @@ void main() {
       expect(parseIsoDate('2026-09-23'), DateTime(2026, 9, 23));
       expect(parseIsoDate('2026-1-5'), isNull, reason: '要写成 2026-01-05');
       expect(parseIsoDate('2026-09-23T10:00'), isNull, reason: '只接受日期，不接受时间');
+    });
+
+    // ── 截止时间精确到分钟（2026-10-02）────────────────────────────────
+
+    group('截止时间可以带 HH:mm', () {
+      test('纯日期照旧；带时刻能解析出时分', () {
+        expect(parseIsoDateTime('2026-09-23'), DateTime(2026, 9, 23));
+        expect(
+          parseIsoDateTime('2026-09-23 08:30'),
+          DateTime(2026, 9, 23, 8, 30),
+        );
+        expect(
+          parseIsoDateTime('2026-09-23 23:59'),
+          DateTime(2026, 9, 23, 23, 59),
+        );
+      });
+
+      test('时刻越界或写不全一律拒绝，不靠 tryParse 去猜', () {
+        for (final bad in <String>[
+          '2026-09-23 24:00',
+          '2026-09-23 25:00',
+          '2026-09-23 08:60',
+          '2026-09-23 8:30',
+          '2026-09-23 08',
+          '2026-09-23 08:3',
+          '2026-09-23T08:30',
+          '2026-09-23  08:30',
+          ' 2026-09-23 08:30',
+        ]) {
+          expect(parseIsoDateTime(bad), isNull, reason: '「$bad」不该被接受');
+        }
+      });
+
+      test('带时刻的值，显示时**原样带上时刻**', () {
+        expect(
+          describeDateWithDays('2026-09-23 08:30', now: now),
+          '2026-09-23 08:30（今天）',
+        );
+        expect(describeDate('2026-09-23 08:30', now: now), '今天');
+      });
+
+      test('逾期仍按"天"判（用户口径：保持「已逾期」的口吻）', () {
+        // 当天 00:01 的截止时间**不算逾期** —— 那一天还没过完。
+        expect(isOverdue('2026-09-23 00:01', now: now), isFalse);
+        expect(isOverdue('2026-09-22 23:59', now: now), isTrue);
+      });
+
+      test('组出来的值与解析回去是一对（往返）', () {
+        final day = DateTime(2026, 9, 23);
+        expect(Ids.isoDateTime(day), '2026-09-23');
+        expect(Ids.isoDateTime(day, hour: 8, minute: 5), '2026-09-23 08:05');
+        expect(
+          parseIsoDateTime(Ids.isoDateTime(day, hour: 8, minute: 5)),
+          DateTime(2026, 9, 23, 8, 5),
+        );
+        expect(Ids.hasTimeOfDay('2026-09-23 08:05'), isTrue);
+        expect(Ids.hasTimeOfDay('2026-09-23'), isFalse);
+        expect(Ids.hasTimeOfDay(null), isFalse);
+      });
     });
 
     test('**不做 trim**：前后带空白一律拒绝（别把它悄悄放宽）', () {

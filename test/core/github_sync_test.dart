@@ -405,6 +405,104 @@ void main() {
       expect(message, isNot(contains('·')));
       expect(message, contains('3 条记录'));
     });
+
+    // ── 两行对照（比对界面开头那两行，2026-10-02） ──────────────────────
+
+    test('记录行报四个集合的活记录数、归档数与提交码', () {
+      final store = StoreFile(
+        savedAt: t1,
+        documents: <DocName, Document>{
+          for (final name in DocName.values) name: Document.empty(name),
+          DocName.projects: Document(
+            name: DocName.projects,
+            items: <Entity>[
+              Project(
+                id: 'p1',
+                title: '在做的',
+                purpose: '',
+                implementation: '',
+                date: '2026-09-23',
+                status: NodeStatus.pending,
+                archived: false,
+                parentProjectId: null,
+                order: 1000,
+                completedAt: null,
+                createdAt: t1,
+                updatedAt: t1,
+                deleted: false,
+              ),
+              Project(
+                id: 'p2',
+                title: '已归档的',
+                purpose: '',
+                implementation: '',
+                date: '2026-09-23',
+                status: NodeStatus.pending,
+                archived: true,
+                parentProjectId: null,
+                order: 2000,
+                completedAt: null,
+                createdAt: t1,
+                updatedAt: t1,
+                deleted: false,
+              ),
+              Project(
+                id: 'p3',
+                title: '删掉的',
+                purpose: '',
+                implementation: '',
+                date: '2026-09-23',
+                status: NodeStatus.pending,
+                archived: false,
+                parentProjectId: null,
+                order: 3000,
+                completedAt: null,
+                createdAt: t1,
+                updatedAt: t1,
+                deleted: true,
+              ),
+            ],
+          ),
+        },
+      );
+
+      final line = recordCountLine(
+        sideLabel: '云端',
+        store: store,
+        shortCommit: 'abc1234',
+      );
+
+      expect(line, startsWith('云端：'));
+      expect(
+        line,
+        contains('项目 2'),
+        reason: '墓碑不算活记录，但**已归档仍算活记录** —— 归档数只有单独那一位',
+      );
+      expect(line, contains('已归档 1'));
+      expect(line, contains('提交码 abc1234'));
+    });
+
+    test('提交码进函数前不必自己收口：传整串 sha 也只印 7 位', () {
+      // 2026-10-02 首个实现是调用方传原值，界面上印出了 40 位 ——
+      // 收口放在 `recordCountLine` 里，谁传原值都不会印长串。
+      final line = recordCountLine(
+        sideLabel: '本地',
+        store: StoreFile.empty(),
+        shortCommit: 'ac7583b4e272363c97f1a815e378637461207aa4',
+      );
+      expect(line, contains('提交码 ac7583b'));
+      expect(
+        line,
+        isNot(contains('ac7583b4e272363c')),
+        reason: '不许把 40 位提交码整串印出来',
+      );
+    });
+
+    test('提交码读不到时印占位 -------，不写"未知"、不编数', () {
+      final line = recordCountLine(sideLabel: '云端', store: StoreFile.empty());
+      expect(line, contains('提交码 $unknownCountPlaceholder'));
+      expect(line, isNot(contains('未知')));
+    });
   });
 
   group('需求④：云端提交码对得上就直接覆盖（ADR-093）', () {

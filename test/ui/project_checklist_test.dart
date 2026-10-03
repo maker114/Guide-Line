@@ -201,11 +201,12 @@ void main() {
     await tester.tap(find.text('清除已完成条目…'));
     await tester.pumpAndSettle();
 
-    // 范围与条数必须写出来（这句话涉及"会丢多少东西"）
+    // 2026-10-02 简化后：**只说"动谁"与"多少条"**，排除项（未勾选的不受影响）
+    // 与"删除后无法找回"那两句都撤了 —— 前者是排除法、后者与"不能撤销"重复。
     expect(find.textContaining('2 个项目里'), findsOneWidget);
-    expect(find.textContaining('已勾选'), findsWidgets);
+    expect(find.textContaining('已勾选'), findsOneWidget);
     expect(find.textContaining('2 条'), findsOneWidget);
-    expect(find.textContaining('删除后无法找回'), findsOneWidget);
+    expect(find.textContaining('不能撤销'), findsOneWidget);
 
     await tester.tap(find.text('清除'));
     await tester.pumpAndSettle();
@@ -261,12 +262,18 @@ void main() {
     await tester.tap(find.text('重置所有实现…'));
     await tester.pumpAndSettle();
 
-    // 明确警告（实机反馈要求）：范围、清什么、清单几条、不能撤销、退回只有一次
-    expect(find.textContaining('只会动「清单项目壬」这一个项目'), findsOneWidget);
-    expect(find.textContaining('正文与清单条目会被清空'), findsOneWidget);
-    expect(find.textContaining('共 1 条清单'), findsOneWidget);
+    // 2026-10-02 简化后：确认框压成**一句** —— "会清空谁、共几条、不能撤销"。
+    // "退回只有一次、入口在执行后提示里"搬到了执行之后的提示上（见本例末尾）。
+    expect(
+      find.textContaining('会清空「清单项目壬」的正文与清单（共 1 条）'),
+      findsOneWidget,
+    );
     expect(find.textContaining('不能撤销'), findsOneWidget);
-    expect(find.textContaining('退回上一版'), findsOneWidget);
+    expect(
+      find.textContaining('退回上一版'),
+      findsNothing,
+      reason: '按下去之前不需要知道退回入口在哪 —— 那句话搬到执行后的提示里',
+    );
 
     await tester.tap(find.text('重置'));
     await tester.pumpAndSettle();
@@ -279,6 +286,9 @@ void main() {
       '把这条想法做出来',
       reason: '重置**不碰**「有什么问题 / 思路」—— 那个字段自己删更直接',
     );
+
+    // 执行之后的提示：**一句 + 一个按钮**（原来是一句长话 + 按钮）
+    expect(find.textContaining('已清空 1 个项目'), findsOneWidget);
 
     // 给了一次反悔的入口（SnackBar 上的动作）
     await tester.tap(find.text('退回上一版'));
@@ -310,7 +320,9 @@ void main() {
 
     await tester.tap(find.text('重置下级所有实现…'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('分类自己的「总纲领」不动'), findsOneWidget);
+    // 简化后不再单独说"分类自己的总纲领不动" —— 那句是排除法；
+    // 保留下来的是"动的是它下面几个目标、共几条"，那才是要判断的事。
+    expect(find.textContaining('会清空它下面 1 个目标的正文与清单'), findsOneWidget);
 
     await tester.tap(find.text('重置'));
     await tester.pumpAndSettle();

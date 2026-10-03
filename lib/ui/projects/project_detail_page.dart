@@ -305,11 +305,14 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     final scope = clearDoneScopeOf(project, app);
     if (scope.items == 0) return;
 
+    // 2026-10-02 简化（用户："有关弹窗和文字部分进行简化"）：原来那句把
+    // "未勾选的条目、正文与名字均不受影响"也写进去了 —— 那是**排除法**，
+    // 用户真正要判断的只有一件事："会删掉我多少条"。排除项留给"删除"这类
+    // 真会波及正文的动作去说，这里只说条数。
     final ok = await confirmAction(
       context,
       title: '清除已完成条目',
-      message: '会删除 ${scope.projects} 个项目里「已勾选」的 ${scope.items} 条清单条目。'
-          '未勾选的条目、正文与名字均不受影响；删除后无法找回，清单没有回收站。',
+      message: '会删除 ${scope.projects} 个项目里已勾选的 ${scope.items} 条清单，不能撤销。',
       confirmLabel: '清除',
       danger: true,
     );
@@ -321,7 +324,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       showToast(context, error, error: true);
       return;
     }
-    showToast(context, '已清除 ${scope.items} 条已完成条目');
+    showToast(context, '已清除 ${scope.items} 条');
   }
 
   /// 一次「重置」（2026-09-28 实机反馈：放进 ⋮ 里，注意二次确认、明确警告）。
@@ -336,9 +339,12 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   /// 清空那个字段用编辑框自己删更直接，而菜单里摆一个"会把这一条彻底清干净"的
   /// 项太容易误点。
   ///
-  /// 范围（本级 + 所有**直属**下级）与影响条数都在确认框里说清 —— 这句话涉及
-  /// "会丢多少东西"，必须让用户在按下之前看得见。执行前还会留一份可退回的档
-  /// （一份只值一次反悔），确认之后给一句带「退回上一版」的提示。
+  /// 2026-10-02 简化（用户："有关弹窗和文字部分进行简化"）：确认框原来是一句
+  /// 40 多字的长句（范围 + 不清什么 + 条数 + 不能撤销 + 退回只有一次 + 入口在哪），
+  /// 现在压成一句 —— **句号只留一个**，因为那一句里只有一次"你真的要按下去吗"：
+  ///   `会清空 4 个目标的正文与清单（共 12 条），不能撤销。`
+  /// "退回只有一次、入口在执行后提示里"这两件事**搬到执行之后的提示**上 ——
+  /// 那才是用户需要它们的时候（按下去之前知道了也没用），而提示里本来就要放按钮。
   Future<void> _reset(BuildContext context, Project project) async {
     final impact = app.resetImpactOf(project.id);
     final scope = app.resetScopeOf(project.id);
@@ -347,19 +353,19 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     final affected = isCategory ? impact.projects - 1 : impact.projects;
 
     final title = isCategory ? '重置下级所有实现' : '重置所有实现';
-    const what = '正文与清单条目会被清空';
-    final range = isCategory
-        ? '会动它下面 $affected 个目标的实现；分类自己的「总纲领」不动'
+    // 一句里同时给出"哪些东西动"与"动多少"：只说范围不知道丢多少，
+    // 只说条数不知道动的是谁。两个都在这一句里，不再另起一句。
+    final what = isCategory
+        ? '会清空它下面 $affected 个目标的正文与清单（共 ${impact.items} 条）'
         : (affected <= 1
-            ? '只会动「${project.title}」这一个项目'
-            : '会连同它的 ${affected - 1} 个下级目标一起动，共 $affected 个项目');
+            ? '会清空「${project.title}」的正文与清单（共 ${impact.items} 条）'
+            : '会清空「${project.title}」连同 ${affected - 1} 个下级的正文与清单'
+                '（共 ${impact.items} 条）');
 
     final ok = await confirmAction(
       context,
       title: title,
-      message: '$range，$what，共 ${impact.items} 条清单；'
-          '名字、标识色、日期与归档状态均不变。此操作不能撤销，重置没有回收站，'
-          '退回机会只有一次，入口在执行后提示里的「退回上一版」。',
+      message: '$what，不能撤销。',
       confirmLabel: '重置',
       danger: true,
     );
@@ -380,7 +386,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       showToast(context, error, error: true);
       return;
     }
-    _announceReset(context, title, affected);
+    _announceReset(context, affected);
   }
 
   /// 重置之后的提示：**带上一次反悔的入口**。
@@ -396,7 +402,12 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   ///     （`SnackBarAction` 会让它一直挂着）；而且原来点完按钮还会 `showToast`，
   ///     那是**又排一条**在后面，第一条不消失、第二条永远出不来。
   ///     现在显式给 8 秒（够看清、够点），并且不再往里塞第二条提示。
-  void _announceReset(BuildContext context, String title, int projectCount) {
+  ///
+  /// 2026-10-02 简化：正文从"$title完成：N 个项目已清空。点右侧的「退回上一版」
+  /// 可以还原，仅能使用一次。"压成一句 `已清空 N 个项目 · 退回上一版` ——
+  /// 按钮自己写着"退回上一版"，正文再念一遍是重复；"仅能使用一次"留在这里说
+  /// （这是**唯一**需要它的时刻），但不再单独占一句。
+  void _announceReset(BuildContext context, int projectCount) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
     final scheme = Theme.of(context).colorScheme;
@@ -408,7 +419,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           duration: const Duration(seconds: 8),
           backgroundColor: scheme.surfaceContainerHighest,
           content: Text(
-            '$title完成：$projectCount 个项目已清空。点右侧的「退回上一版」可以还原，仅能使用一次。',
+            '已清空 $projectCount 个项目 · 退回上一版仅能用一次',
             style: TextStyle(color: scheme.onSurface),
           ),
           action: SnackBarAction(

@@ -128,10 +128,19 @@ void main() {
       DiffColors.light.modifiedBackground,
       reason: '黄 = "这次没传，你看一眼"，跟需求③给"修改"加的黄色是同一对',
     );
+    // 2026-10-02：这一条原来用 `find.bySemanticsLabel`，在"这一格改为按帧重建"
+    // （入场动画的修复）之后它匹配不到 —— 但**读屏是读得到的**：
+    // 直接问语义节点，原话一字不差（并会并上可见的那句短话）。所以改成读节点。
+    final semantics = tester.getSemantics(find.byType(SyncStatusIndicator));
     expect(
-      find.bySemanticsLabel('云端有更新：远程比本地新：远程 2026-09-30 09:00（3 条），本地 2026-09-29 20:00（1 条）。'),
-      findsOneWidget,
+      semantics.label,
+      contains('远程比本地新：远程 2026-09-30 09:00（3 条），本地 2026-09-29 20:00（1 条）。'),
       reason: '读屏要把原话读出来，不能只剩"同步有问题"',
+    );
+    expect(
+      semantics.flagsCollection.isButton,
+      isTrue,
+      reason: '黄态可以点开看原因，读屏要把它报成一个按钮',
     );
 
     await tester.tap(find.text('云端有更新'));
@@ -349,6 +358,202 @@ void main() {
     );
   });
 
+  // ------------------------------------- 状态在场内变化：这一条原来没人守
+  //
+  // 背景（2026-10-02 实机取证）：用户在**事件详情页**里拨一个任务的状态，退回主页，
+  // 右上角**没有看到**圆环或绿胶囊。而同一台机器上「GitHub 备份同步」那行的
+  // `上次同步` 时间确实变了两次（12:30 / 12:32）—— 也就是说**推送真的发生了**。
+  //
+  // ⚠️ 这里**不写**"是没画还是没看见"的结论：当时用 `adb` 连拍的那几组帧只能证明
+  // "我采样的那几个时刻它是空的"，其中一组后来还发现**压根没改动数据、也就没跑同步**，
+  // 所以那几帧不能用来判定控件画没画。控件这一侧由下面的用例说话。
+  //
+  // 而上面所有用例都是**直接喂一个静态状态**：`pumpIndicator` 每次都新建控件，
+  // 于是走的是 `initState`（`_shown = widget.state`、`_enter.forward`），
+  // **从来没人走过 `didUpdateWidget`** —— 而真机上那一趟走的正是后者：
+  // 外壳一直挂在树上，控制器把 `autoSync` 从 `idle` 改成 `running`、再改成 `done`。
+  //
+  // 这一组钉的就是那条路：**同一个控件实例**接连收到新状态，它必须真的画出来。
+  group('状态在场内变化（真机上那一趟走的是 didUpdateWidget，不是 initState）', () {
+    /// 同一棵树、只换状态 —— 控件实例被复用，于是必然走 `didUpdateWidget`。
+    Widget shell(AutoSyncState state) => MaterialApp(
+          home: Scaffold(
+            appBar: AppBar(
+              title: const Text('事件'),
+              actions: <Widget>[SyncStatusIndicator(state: state)],
+            ),
+          ),
+        );
+
+    /// 这一格现在画了东西没有：`idle` 时整块是 `SizedBox.shrink()`，尺寸为 0。
+    Size indicatorSize(WidgetTester tester) =>
+        tester.getSize(find.byType(SyncStatusIndicator));
+
+    /// 外层 `Opacity(_enter.value × _exit.value)` 的当前值 —— 它就是"看不看得见"。
+    double opacityOf(WidgetTester tester) => tester
+        .widgetList<Opacity>(
+          find.descendant(
+            of: find.byType(SyncStatusIndicator),
+            matching: find.byType(Opacity),
+          ),
+        )
+        .first
+        .opacity;
+
+    testWidgets('静默 → 在传：第二个状态一到，圆环就得出现', (tester) async {
+      await tester.pumpWidget(shell(const AutoSyncState.idle()));
+      await tester.pump();
+      expect(indicatorSize(tester), Size.zero, reason: '起手是静默，一点位置都不占');
+
+      // 控制器在这一刻把状态改成"在传"（`_setAutoSync(running)` + notifyListeners）。
+      await tester.pumpWidget(shell(const AutoSyncState.running()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(
+        indicatorSize(tester).height,
+        26,
+        reason: '在传那一刻圆环必须出现在标题栏里 —— 这一格高度就是 26',
+      );
+      expect(
+        inIndicator(find.byType(CustomPaint)),
+        findsOneWidget,
+        reason: '圆环是画出来的，没有 CustomPaint 就等于什么都没画',
+      );
+    });
+
+    testWidgets('连做两轮：第二轮照样看得见（用户："第二次啥都看不到"）', (tester) async {
+      // 2026-10-02 真机复现：**第一次同步看得到圆环与绿胶囊，第二次整格什么都不画**。
+      //
+      // 根因：收场时 `_startLeaving()` 把 `_exit`（整格不透明度那一档）反向到了 0，
+      // 而 `_apply()` 只在"退场中途又回来"那条分支里把它复位。于是第二轮
+      // `_enter` 走到 1、`_exit` 还是 0 ⇒ `Opacity(_enter.value × _exit.value)` 恒为 0。
+      // `initState` 只跑一次、且 `_exit` 初值就是 1 —— 所以**第一轮永远是对的**，
+      // 坑只在第二轮及以后暴露。
+      Future<void> cycle(WidgetTester tester, String sha) async {
+        await tester.pumpWidget(shell(const AutoSyncState.running()));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(
+          opacityOf(tester),
+          1.0,
+          reason: '在传时整格必须是不透明的（$sha）',
+        );
+        await tester.pumpWidget(shell(AutoSyncState.done(sha)));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        // 自动收场：状态打回 idle，退场动画走完，这一格让出位置。
+        await tester.pumpWidget(shell(const AutoSyncState.idle()));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(indicatorSize(tester), Size.zero, reason: '收场后要腾出那一格（$sha）');
+      }
+
+      await tester.pumpWidget(shell(const AutoSyncState.idle()));
+      await tester.pump();
+
+      await cycle(tester, 'aaaaaaa'); // 第一轮
+      await cycle(tester, 'bbbbbbb'); // 第二轮 —— 这一轮原来整格透明
+    });
+
+    testWidgets('在传 → 传完：同一格里长成绿胶囊，摆出提交码', (tester) async {
+      await tester.pumpWidget(shell(const AutoSyncState.idle()));
+      await tester.pump();
+
+      await tester.pumpWidget(shell(const AutoSyncState.running()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // 上传回来：`_reportAutoPush` 摆出 done + 这一次的提交码。
+      await tester.pumpWidget(shell(const AutoSyncState.done('abcdef1234567890')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text('abcdef1'), findsOneWidget, reason: '绿胶囊上要摆这一次的短码');
+      expect(
+        indicatorSize(tester).width,
+        greaterThan(26),
+        reason: '胶囊是圆环拉长出来的，比那格正方形宽',
+      );
+    });
+
+    testWidgets('传完 → 控制器两秒后打回静默：这一格要真的让出位置', (tester) async {
+      await tester.pumpWidget(shell(const AutoSyncState.idle()));
+      await tester.pump();
+      await tester.pumpWidget(shell(const AutoSyncState.running()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pumpWidget(shell(const AutoSyncState.done('abcdef1')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('abcdef1'), findsOneWidget);
+
+      // `_hideAutoSyncDone` 到点：状态回到 idle。
+      await tester.pumpWidget(shell(const AutoSyncState.idle()));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        indicatorSize(tester),
+        Size.zero,
+        reason: '收场之后必须腾出那一格，否则标题栏一直空着一块',
+      );
+    });
+  });
+
+  // ------------------------------- 看得见吗：这一格到底有没有画出像素（2026-10-02）
+  //
+  // 这一组是**补一个曾经让 20 条用例全绿的窟窿**。
+  //
+  // 用户实机反馈："在事件详情页拨一个任务、退回主页，右上角没有动画"，
+  // 而同一次操作在「GitHub 备份同步」那行的 `上次同步` 时间**确实变了**
+  // ⇒ 推送成功，只有那枚指示器没露面。
+  //
+  // 根因（`sync_status_indicator.dart` 的 build）：
+  //   `_enter`（入场 180ms）原来只出现在内层 `AnimatedBuilder` 的 `Listenable.merge`
+  //   里，而 merge 包住的只有**胶囊内部**；真正决定可见性的外层
+  //   `Opacity(_enter.value × _exit.value)` 与 `Transform.scale` **不在任何按帧重建的
+  //   builder 里**，全仓唯一 `setState` 的是 `_exit` 的监听（那是上一版为**退场**补的
+  //   同一个坑）。于是 `_enter` 一路走到 1，界面却一次都不重建：
+  //   `Opacity` 钉死在初值 **0**、缩放钉死在 **0.62** ⇒ **整格永远透明**。
+  //
+  // 为什么原来 20 条用例全绿：它们量的是**尺寸、语义节点、颜色函数** ——
+  // 一个透明的东西这三样全都有。所以这里必须**量像素**。
+  group('看得见吗：量像素，不是量尺寸（2026-10-02 补的守卫）', () {
+    Finder outerOpacity() => find.descendant(
+          of: find.byType(SyncStatusIndicator),
+          matching: find.byType(Opacity),
+        );
+
+    testWidgets('入场放完之后，整格的不透明度必须是 1（不是初值 0）', (tester) async {
+      await pumpIndicator(tester, const AutoSyncState.done('abcdef1'));
+
+      final values = tester
+          .widgetList<Opacity>(outerOpacity())
+          .map((o) => o.opacity)
+          .toList();
+      expect(values, isNotEmpty, reason: '连 Opacity 都没有，说明整块没建出来');
+      expect(
+        values.first,
+        1.0,
+        reason: '外层是 Opacity(_enter × _exit)：入场走完之后它必须是 1，'
+            '停在 0 就是"布局占了位置、屏幕上一个像素都没有"',
+      );
+    });
+
+    testWidgets('绿色胶囊真的画出了绿像素（golden 基准，尺寸骗不过它）', (tester) async {
+      // 只截这一格：既避开 debug 角标，也不会被标题栏其余部分干扰。
+      await pumpIndicator(tester, const AutoSyncState.done('abcdef1'));
+
+      await expectLater(
+        find.byType(SyncStatusIndicator),
+        matchesGoldenFile('goldens/sync_indicator_done.png'),
+      );
+    });
+  });
+
   // ------------------------------------------------- 成形分两段：先合口再拉伸
 
   group('成形分两段：先把圆环合上，再把矩形拉长（2026-10-02）', () {
@@ -404,12 +609,12 @@ void main() {
           expect(stretch, greaterThanOrEqualTo(previousStretch));
         }
         expect(
-          ((close - (previousClose ?? close)).abs()),
+          (close - (previousClose ?? close)).abs(),
           lessThan(0.2),
           reason: '合口在 morph=$morph 附近跳了一下',
         );
         expect(
-          ((stretch - (previousStretch ?? stretch)).abs()),
+          (stretch - (previousStretch ?? stretch)).abs(),
           lessThan(0.2),
           reason: '拉伸在 morph=$morph 附近跳了一下',
         );

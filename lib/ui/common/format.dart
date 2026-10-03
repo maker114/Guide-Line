@@ -30,7 +30,7 @@ String formatTimestamp(int millis) {
 ///
 /// 解析不了的字符串**原样返回**（契约里已被降级为 null，这里只是兜底）。
 String describeDate(String? date, {DateTime? now}) {
-  final parsed = parseIsoDate(date);
+  final parsed = parseIsoDateTime(date);
   if (parsed == null) return date ?? '';
 
   final today = now ?? DateTime.now();
@@ -59,19 +59,33 @@ String describeDate(String? date, {DateTime? now}) {
 /// 于是**落盘的日期**与**界面算出来的结论**从同一把尺子来。
 DateTime? parseIsoDate(String? date) => Ids.parseIsoDate(date);
 
+/// 严格解析 `YYYY-MM-DD` 或 `YYYY-MM-DD HH:mm`（2026-10-02，截止时间到分钟）。
+///
+/// 与 [parseIsoDate] 是**薄壳对薄壳**：实现都在 `Ids` 里，界面只做转发。
+/// 只到天的字段（项目日期、事件日期）继续用 [parseIsoDate]；
+/// 截止时间那一路用它，于是"08:30 设没设上"与"落盘写的是什么"同源。
+DateTime? parseIsoDateTime(String? value) => Ids.parseIsoDateTime(value);
+
 /// 「绝对日期 + 剩余天数」一起显示，例如 `2026-09-30（3 天后）`。
 ///
 /// 任务行、日期字段、日期选择器的提示统一走这个口径 ——
 /// 只给相对日会让人不知道到底是几号，只给绝对日期又看不出还剩几天。
+///
+/// 2026-10-02：值可以是 `YYYY-MM-DD HH:mm`（截止时间精确到分钟）。
+/// 带时刻时**原样带上时刻**（`2026-10-03 08:30（明天）`）—— 用户设了钟点就是要看它。
 String describeDateWithDays(String? date, {DateTime? now}) {
   if (date == null || date.isEmpty) return '';
-  if (parseIsoDate(date) == null) return date; // 解析不了就只回原文
+  if (parseIsoDateTime(date) == null) return date; // 解析不了就只回原文
   return '$date（${describeDate(date, now: now)}）';
 }
 
 /// 是否已逾期（到期日严格早于今天）。
+///
+/// **仍然只按"天"判**（用户 2026-10-02 明确："保持『已逾期』的口吻"）：
+/// `2026-10-03 08:30` 在 10-03 当天不算逾期 —— 那一天还没过完，
+/// 而"今天 08:30 已经过了"是另一个口径（分钟级提醒），本轮不做。
 bool isOverdue(String? date, {DateTime? now}) {
-  final parsed = parseIsoDate(date);
+  final parsed = parseIsoDateTime(date);
   if (parsed == null) return false;
   return _daysBetween(parsed, now ?? DateTime.now()) < 0;
 }

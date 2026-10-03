@@ -23,6 +23,20 @@ void main() {
       expect(urgencyOf('2020-01-01', now: now), Urgency.overdue);
     });
 
+    test('带 HH:mm 的截止时间**照样分档**，不因多一段时刻就掉进"没有到期日"', () {
+      // 2026-10-02 的坑：这一处原来用 `Ids.parseIsoDate`，而它只认纯日期 ——
+      // `'2026-09-24 08:30'` 会被判 null、返回 `Urgency.none`，
+      // 于是设了钟点的任务**静默掉进「没有到期日」那一组**（分组、配色一起错）。
+      expect(urgencyOf('2026-09-23 08:30', now: now), Urgency.today);
+      expect(urgencyOf('2026-09-24 08:30', now: now), Urgency.within3);
+      expect(urgencyOf('2026-09-22 23:59', now: now), Urgency.overdue);
+      expect(
+        urgencyOf('2026-09-23 23:59', now: now),
+        Urgency.today,
+        reason: '当天任何时刻都还是「今天」—— 逾期只按天算',
+      );
+    });
+
     test('边界：今天 / 3 天内 / 5 天内 / 7 天内 / 7 天后', () {
       expect(urgencyOf('2026-09-23', now: now), Urgency.today);
       expect(urgencyOf('2026-09-24', now: now), Urgency.within3, reason: '第 1 天');

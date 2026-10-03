@@ -61,6 +61,47 @@ class Ids {
     final day = parsed.day.toString().padLeft(2, '0');
     return '$year-$month-$day' == value ? parsed : null;
   }
+
+  /// 严格解析 `"YYYY-MM-DD"` **或** `"YYYY-MM-DD HH:mm"`（2026-10-02）。
+  ///
+  /// 与 [parseIsoDate] 的分工：那个只认纯日期（`Project.date` 这类"只到天"的字段
+  /// 继续用它）；这个多认一段可选时刻，供 `Task.due_at`（截止时间精确到分钟）。
+  ///
+  /// 时刻那一段**必须成对且成范围**：`2026-10-03 25:00`、`2026-10-03 8:5`、
+  /// `2026-10-03 08` 一律返回 `null` —— 与日期那一段同一条口径：
+  /// 同一个值只能有一种解释，不要靠 `tryParse` 的宽容去猜。
+  ///
+  /// 返回的 `DateTime` 带时分（纯日期输入时是 `00:00`）。
+  static DateTime? parseIsoDateTime(String? value) {
+    if (value == null || value.isEmpty) return null;
+    final match = _isoDateTimePattern.firstMatch(value);
+    if (match == null) return null;
+    final date = parseIsoDate(match.group(1));
+    if (date == null) return null;
+    final hour = int.parse(match.group(2) ?? '0');
+    final minute = int.parse(match.group(3) ?? '0');
+    return DateTime(date.year, date.month, date.day, hour, minute);
+  }
+
+  /// 这个值**带没带时刻**（`"2026-10-03 08:30"` ⇒ true，`"2026-10-03"` ⇒ false）。
+  ///
+  /// 界面靠它决定"要不要把 08:30 一起显示出来"：纯日期的任务不该凭空多出 `00:00`。
+  static bool hasTimeOfDay(String? value) =>
+      value != null && _isoDateTimePattern.firstMatch(value)?.group(2) != null;
+
+  /// 组一个 `"YYYY-MM-DD HH:mm"`（[hour] / [minute] 省略时只到天）。
+  ///
+  /// 与 [parseIsoDateTime] 是**一对**：组出来的东西必须能被它解析回去
+  /// （`test/core/ids_test.dart` 守着这条往返）。
+  static String isoDateTime(DateTime day, {int? hour, int? minute}) {
+    final date = todayDate(day);
+    if (hour == null || minute == null) return date;
+    return '$date ${hour.toString().padLeft(2, '0')}:'
+        '${minute.toString().padLeft(2, '0')}';
+  }
+
+  static final RegExp _isoDateTimePattern =
+      RegExp(r'^(\d{4}-\d{2}-\d{2})(?: ([01]\d|2[0-3]):([0-5]\d))?$');
 }
 
 /// 同一父节点下兄弟排序的间隔（《数据契约》§1）。

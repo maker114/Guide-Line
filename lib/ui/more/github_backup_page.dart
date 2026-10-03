@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
@@ -51,10 +53,41 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
   bool _tokenStored = false;
   String? _result;
 
+  /// 云端此刻那一次提交的短码（2026-10-02 加，用户第 1 条：**进页自动读一次**）。
+  ///
+  /// 为什么进页就读：点阵屏上排要摆"云端提交码"，而它只有在读过云端之后才有 ——
+  /// 此前要点一下「检查更新」才看得到。这一趟是**纯只读 GET**（不动任何数据、
+  /// 不写记账），所以进页顺手做掉是安全的。
+  ///
+  /// 空串 = 还没读到（读取中 / 没配好 / 连不上）⇒ 那一格显示 `-------`。
+  String _cloudCommit = '';
+  bool _cloudLoading = false;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // 进页顺手读一次云端（纯只读）：点阵屏上排的"云端提交码"靠它。
+    unawaited(_refreshCloudCommit());
+  }
+
+  /// 读一次云端，把"云端提交码 + 那一份数据"记下来（**只读，不写任何东西**）。
+  ///
+  /// 三条出口都只是把 `_cloudCommit` 记成"读到 / 读不到"：
+  /// 没配好、Token 空、网络或权限出错 —— 全都落到 `-------`，
+  /// 不弹错误、不打断（用户只是翻到这一页看看，不该被一次自动联网报错拦住）。
+  Future<void> _refreshCloudCommit() async {
+    if (_cloudLoading) return;
+    setState(() => _cloudLoading = true);
+    final draft = await _draft();
+    final preview = await app.previewGitHubPull(draft.config, draft.token);
+    if (!mounted) return;
+    setState(() {
+      _cloudLoading = false;
+      final remote = preview.remote;
+      _cloudCommit =
+          remote == null ? '' : shortSha(preview.commit?.sha ?? '');
+    });
   }
 
   @override
@@ -214,9 +247,28 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     final incoming = _countsText(liveCountsOf(remote.payload!.store));
     final local = app.ws.buildStoreFile();
     final current = _countsText(liveCountsOf(local));
+    // 本机提交码的**原值**（空串 = 还没同步过 ⇒ 对照行显示 `-------`，不写"未知"）。
+    final localCommitRaw = app.readGitHubSyncRecord()?.localCommitSha ?? '';
+    final cloudCommit = shortSha(preview.commit?.sha ?? '');
+    final localCommit = shortSha(localCommitRaw);
 
     final diff = diffStores(base: local, target: remote.payload!.store);
-    if (!diff.hasChanges) {
+    // 2026-10-02（用户口径 A）：**提交码对不上也要弹这扇面板**。
+    //
+    // 此前只看 `diff.hasChanges`（内容差别），于是出现过"点阵屏上两个提交码明明不一样，
+    // 点拉取却说两边一条不差、把动作省掉了" —— 用户原话："从 github 拉取之后发现
+    // 和本地对不上要弹比对界面知道吗"。
+    //
+    // 两个信号是两件事，**哪个不对都得让人看一眼**：
+    //   · 内容不同 ⇒ 拉下来会换掉手上的数据；
+    //   · 提交码不同 ⇒ 云端被动过（别的设备推过、或云端被重新提交过）——
+    //     内容可能恰好一样，但"被动过"这件事本身就得让用户知道。
+    // ⚠️ 判"有没有码"要用**原值**：`shortSha('')` 返回的是"未知"两个字，
+    // 拿它判空会把"还没同步过"误判成"有一个码"，于是白白弹一次面板。
+    final commitChanged = cloudCommit.isNotEmpty &&
+        localCommitRaw.isNotEmpty &&
+        cloudCommit != shortSha(localCommitRaw);
+    if (!diff.hasChanges && !commitChanged) {
       // 内容一模一样：拉回来只是把同一份数据再覆盖一遍，没有任何变化。
       // 仍然让人可以执意拉（比如就想要云端那份的记账与时间戳）。
       final force = await confirmAction(
@@ -231,7 +283,11 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       );
       if (!force) {
         setState(() => _busy = false);
-        _setResult('云端和这台手机的内容相同，没有拉回。');
+        _setResult(
+          '云端和这台手机的内容相同，没有拉回。\n'
+          '${recordCountLine(sideLabel: '云端', store: remote.payload!.store, shortCommit: cloudCommit)}\n'
+          '${recordCountLine(sideLabel: '本地', store: local, shortCommit: localCommit)}',
+        );
         return;
       }
     } else {
@@ -239,11 +295,30 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
         context,
         diff: diff,
         title: '用远程备份覆盖这台手机',
-        baseLabel: '这台手机 · 会被覆盖 · $current',
-        targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
+        // 标签里**不再带条数**（2026-10-02 用户第 3 条）：条数归开头那两行对照管，
+        // 否则同一个数会在同一扇面板里出现两遍。时间留着 —— 那两行里没有它。
+        baseLabel: '这台手机 · 会被覆盖',
+        targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)}',
         confirmLabel: '拉取并覆盖',
         cancelLabel: '取消',
         danger: true,
+        // 开头那两行对照（用户口径）：**云端永远第一行、本地永远第二行**。
+        // ⚠️ 不能交给面板按 base/target 自己算 —— 拉取时 base=本机、推送时 base=云端，
+        // 面板按角色打标签会把顺序弄反（推送那扇会把云端排到第二行）。
+        cloudLine: recordCountLine(
+          sideLabel: '云端',
+          store: remote.payload!.store,
+          shortCommit: cloudCommit,
+        ),
+        localLine: recordCountLine(
+          sideLabel: '本地',
+          store: local,
+          // ⚠️ 必须 shortSha 收口：`recordCountLine` 不做收口，传原值会把 40 位
+          // 提交码整串印在界面上（首个实现就踩了这个，2026-10-02）。
+          shortCommit: localCommit,
+        ),
+        // 时间不能因为改版丢掉：标签不再显示之后，由这一句顶上。
+        footnote: '云端那份的最后修改时间：${formatStamp(remote.savedAt)}',
         note: '${_remoteCommitText(preview.commit)}\n\n'
             '覆盖之前，当前数据会先整体轮转进备份；滚动备份只留 10 份，如需退回请尽快。',
       );
@@ -294,9 +369,11 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
     }
 
     final remote = preview.remote!;
-    final incoming = _countsText(liveCountsOf(remote.payload!.store));
     final local = app.ws.buildStoreFile();
-    final current = _countsText(liveCountsOf(local));
+    final cloudCommit = shortSha(preview.commit?.sha ?? '');
+    final localCommit = shortSha(
+      app.readGitHubSyncRecord()?.localCommitSha ?? '',
+    );
     final commitText = _remoteCommitText(preview.commit);
 
     final diff = diffStores(base: local, target: remote.payload!.store);
@@ -310,8 +387,9 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       setState(() => _busy = false);
       _setResult(
         '云端和这台手机是同一份，没有要更新的东西。\n'
-        '云端：${formatStamp(remote.savedAt)} · $incoming\n'
-        '$commitText',
+        '${recordCountLine(sideLabel: '云端', store: remote.payload!.store, shortCommit: cloudCommit)}\n'
+        '${recordCountLine(sideLabel: '本地', store: local, shortCommit: localCommit)}\n'
+        '云端那份的最后修改时间：${formatStamp(remote.savedAt)}',
       );
       return;
     }
@@ -320,13 +398,24 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
       context,
       diff: diff,
       title: '云端与这台手机的差别',
-      baseLabel: '这台手机 · 现在这样 · $current',
-      targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)} · $incoming',
+      baseLabel: '这台手机 · 现在这样',
+      targetLabel: '云端 · 会拉下来 · ${formatStamp(remote.savedAt)}',
       // 只读的入口**不放确认按钮**：看完就走，要拉请回上一页按「从 GitHub 拉取」。
       // 放一个"知道了"是为了让面板有明确的出口，不是因为这里有危险动作。
       hideConfirm: true,
       cancelLabel: '知道了',
       danger: false,
+      // 开头那两行对照：**云端第一行、本地第二行**（用户口径）。
+      cloudLine: recordCountLine(
+        sideLabel: '云端',
+        store: remote.payload!.store,
+        shortCommit: cloudCommit,
+      ),
+      localLine: recordCountLine(
+        sideLabel: '本地',
+        store: local,
+        shortCommit: localCommit,
+      ),
       note: '$commitText\n\n'
           // 界面是纯文本、不渲染 Markdown —— 这里不许出现 ** 之类的记号
           // （`no_markdown_in_ui_test.dart` 守着这条），否则用户会看到星号本身。
@@ -396,43 +485,40 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
   /// 记账里的 `localSha` 为空（老记账、或 2.3.0 那版写的）时上排**整排暗着** ——
   /// 不编一个数出来，暗着的屏比一行假字诚实。
   Widget _commitScreen() {
-    final uploadedSha = _record()?.localSha ?? '';
-    final currentSha = app.localContentSha;
+    // 2026-10-02 第六版（用户第 1/3 条）：**上排改用进页自动读到的那一次云端提交**。
+    //
+    // 与第五版的区别：那一版上排读的是**记账里**的提交码（"上次同步那一刻云端在哪"），
+    // 而用户要的是"**此刻**云端在哪" —— 别的设备推过一次之后，记账不会自己变，
+    // 于是上排会一直显示旧号、看起来"没人动过"。现在进页先读一次云端
+    // （`_refreshCloudCommit`，只读），拿到什么就摆什么；读不到就显示 `-------`
+    // （用户口径：没有读数就显示 `-------`），**不拿记账里的旧号冒充"此刻的云端"**。
+    final record = _record();
+    final cloudSha = _cloudCommit; // 空串 ⇒ 点阵屏那一排用 `-------`
+    final localRaw = record?.localCommitSha ?? '';
+    final localCommitSha = shortSha(
+      localRaw.isNotEmpty ? localRaw : (record?.commitSha ?? ''),
+    );
     return CommitLcd(
       rows: <CommitLcdRow>[
         CommitLcdRow(
-          // 标识要说清"哪一份"：两排都是内容指纹，差的是**时刻**。
-          label: '上传时',
-          sha: uploadedSha,
-          semanticsLabel: uploadedSha.isEmpty
-              ? '上一次上传时的内容指纹未知，还没同步过'
-              : '上一次上传时的内容指纹 $uploadedSha',
+          label: '云端',
+          sha: cloudSha,
+          // 读不到时**在点阵上**显示 `-------`（用户口径），不是让那几格空着。
+          placeholder: unknownCountPlaceholder,
+          semanticsLabel: cloudSha.isEmpty
+              ? '云端提交码读取中或读不到'
+              : '云端提交码 $cloudSha',
         ),
         CommitLcdRow(
-          label: '本机现在',
-          sha: currentSha,
-          semanticsLabel: '本机现在的内容指纹 $currentSha',
+          label: '本机',
+          sha: localCommitSha,
+          placeholder: unknownCountPlaceholder,
+          semanticsLabel: localCommitSha.isEmpty
+              ? '本机提交码未知，还没同步过'
+              : '本机提交码 $localCommitSha',
         ),
       ],
     );
-  }
-
-  /// 点阵屏下面那句说明：**直接把结论说出来**，不让用户自己去比两个七位码。
-  ///
-  /// 只摆两个码、不说它们是什么关系，就是让用户自己去猜 —— 这个角落已经因此
-  /// 让用户猜错两次了（见 [_commitScreen] 上面那段）。所以这里给的是结论：
-  /// "这台手机有没有新东西没传上去"，一句话说完。
-  String _commitScreenNote() {
-    final uploadedSha = _record()?.localSha ?? '';
-    if (uploadedSha.isEmpty) {
-      return '两排都是这台手机数据的内容指纹（上传时那份 / 现在这份）。'
-          '「上传时」还没有数 —— 同步成功过一次之后才会记下来。';
-    }
-    if (uploadedSha == app.localContentSha) {
-      return '两排一样：这台手机没有新东西要传，云端就是这份。';
-    }
-    return '两排不一样：这台手机改过了、还没传上去。回主页会自动传，'
-        '也可以按下面的「推送到 GitHub」。';
   }
 
   /// 远程此刻那一次提交（读不到时如实写"读不到"，不装作有）。
@@ -460,22 +546,15 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 32),
               children: <Widget>[
-                // 最顶上单开的这一格：**上排"云端那一份"、下排"本机此刻"**。
-                // 两排都是本机数据的内容指纹（见 [_commitScreen] 的说明）——
-                // 于是"两排相不相等"有确切含义，而不是两个不可比的号摆在一起。
+                // 最顶上**只有这一格点阵屏**：上排云端提交码、下排本机提交码。
+                //
+                // 屏下面原来还跟着两块文字（两行条数对照 + 一句解释），
+                // 2026-10-02 按用户要求**全部撤掉** —— 原话："点阵屏下面那些文本怎么还不清理掉"。
+                // 理由：两个码并排、标识写着「云端」「本机」，该说的已经说完；
+                // 下面再堆两行条数和一句长解释，只是把屏幕塞满。
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                   child: _commitScreen(),
-                ),
-                Padding(
-                  // 屏下面那句：两排是什么、相等/不等各说明什么。
-                  // 只摆两个码不说关系，就是让用户自己去猜 —— 第一版正是这么翻车的：
-                  // 用户问"提交码明明不一样，点检查更新为什么不报错"。
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-                  child: Text(
-                    _commitScreenNote(),
-                    style: theme.textTheme.bodySmall,
-                  ),
                 ),
                 SwitchListTile(
                   value: _enabled,

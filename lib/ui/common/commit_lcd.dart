@@ -16,9 +16,10 @@ class CommitLcdRow {
     required this.sha,
     required this.semanticsLabel,
     this.label,
+    this.placeholder = '',
   });
 
-  /// 短码（前 7 位十六进制）。空串 = 这一排整排暗着。
+  /// 短码（前 7 位十六进制）。空串 = 这一排没有码。
   final String sha;
 
   /// 读屏软件念的那句话。
@@ -26,6 +27,13 @@ class CommitLcdRow {
 
   /// 摆在点阵上方的小字标识（"云端" / "本机"）。null = 不摆。
   final String? label;
+
+  /// [sha] 为空时，**点阵上画什么**（2026-10-02 用户口径）。
+  ///
+  /// 用户原话要的是"点阵屏上显示 `-------`" —— 不是屏下面那行文字。
+  /// 空串（默认）⇒ 整排暗着（老口径："一块熄着的屏比一行假字诚实"，见类文档）；
+  /// 传了值 ⇒ 把那几个字符**逐个画在格子里**（只认字形表里有的，例如 `-`）。
+  final String placeholder;
 }
 
 /// 提交号的 **LCD 点阵屏**（每排 7 格，每格 7×9 点）。
@@ -83,9 +91,12 @@ class CommitLcd extends StatelessWidget {
     for (var index = 0; index < rows.length; index++) {
       final row = rows[index];
       final sha = row.sha.trim();
+      // 没有码时：`placeholder` 非空就把它画进格子（用户口径的 `-------`），
+      // 否则维持老口径 —— 整排暗着，不写假字。
+      final shown = sha.isNotEmpty ? sha : row.placeholder.trim();
       final chars = List<String>.generate(
         cellCount,
-        (i) => i < sha.length ? sha[i] : ' ',
+        (i) => i < shown.length ? shown[i] : ' ',
       );
       if (index > 0) lines.add(const SizedBox(height: rowGap));
       // 标识用普通文字，**不走点阵** —— 字形表只收 `0-9a-f`，画不了中文。
@@ -241,5 +252,8 @@ abstract final class CommitLcdGlyphs {
     'd': <int>[0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F],
     'e': <int>[0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E],
     'f': <int>[0x06, 0x09, 0x08, 0x1C, 0x08, 0x08, 0x08],
+    // `-`：只画中段那一横，给"没有读数"的占位用（用户口径的 `-------`）。
+    // 提交码里不会出现它，所以不会与真实短码混淆。
+    '-': <int>[0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00],
   };
 }

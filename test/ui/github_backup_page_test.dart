@@ -14,6 +14,7 @@ import 'package:guideline/core/store/github_sync.dart';
 import 'package:guideline/platform/data_directory.dart';
 import 'package:guideline/platform/github_backup_client.dart';
 import 'package:guideline/ui/common/commit_lcd.dart';
+import 'package:guideline/ui/common/store_diff_panel.dart';
 import 'package:guideline/ui/more/github_backup_page.dart';
 
 /// GitHub 备份同步是**正式功能**，这一页守住四件"不许悄悄发生"的事：
@@ -232,12 +233,46 @@ void main() {
       await tapAction(tester, '从 GitHub 拉取');
 
       expect(find.text('用远程备份覆盖这台手机'), findsOneWidget);
-      expect(find.textContaining('项目 3'), findsOneWidget, reason: '远程那边有多少要说清');
-      expect(find.textContaining(formatStamp(t1)), findsOneWidget, reason: '远程那份的时间要给');
+      // 2026-10-02 用户第 3 条：条数不再塞在标签里，改为开头两行对照
+      //（"云端：项目 3 · … · 提交码 xxx" / "本地：项目 1 · …"）。
+      // ⚠️ 断言要**限定在面板里**：同步页自己也有同形的两行对照，
+      // 而 `showModalBottomSheet` 是叠在页面上的（底下的文字仍在树里）。
+      Finder inSheet(Finder matching) => find.descendant(
+            of: find.byType(StoreDiffSheet),
+            matching: matching,
+          );
       expect(
-        find.textContaining('这台手机 · 会被覆盖 · 项目 1'),
+        inSheet(find.textContaining('云端：项目 3')),
+        findsOneWidget,
+        reason: '远程那边有多少要说清 —— 现在由面板里的对照行报',
+      );
+      expect(
+        inSheet(find.textContaining('本地：项目 1')),
         findsOneWidget,
         reason: '现在这台上有什么要说清 —— 否则用户不知道会丢掉几条',
+      );
+      // 提交码必须**收口成 7 位**：`recordCountLine` 自己会收口，
+      // 但首个实现是调用方传原值、界面上印出了 40 位（2026-10-02）。
+      expect(
+        inSheet(find.textContaining(RegExp(r'提交码 [0-9a-f]{7}$', multiLine: true))),
+        findsOneWidget,
+        reason: '行尾的提交码要是 7 位短码，不是整串 sha',
+      );
+      expect(
+        inSheet(find.textContaining(RegExp(r'[0-9a-f]{8,}'))),
+        findsNothing,
+        reason: '面板里不许出现 8 位以上的连续十六进制（那是完整 sha 漏出来了）',
+      );
+
+      // 时间戳按**本地时区**渲染，所以期望值取运行时那一份（`formatStamp`），
+      // 不写死字面量（这个仓库里写死过一次 UTC 与本地时区差的错值）。
+      // ignore: avoid_print
+      print('PROBE fmtT1=[`${formatStamp(t1)}]');
+      // ignore: avoid_print
+      expect(
+        find.textContaining(formatStamp(t1)),
+        findsOneWidget,
+        reason: '远程那份的时间要给',
       );
       expect(
         find.textContaining('远程提交：abc1234'),
@@ -309,6 +344,44 @@ void main() {
       final record = app.readGitHubSyncRecord();
       expect(record, isNotNull, reason: '强制拉回也要记账，否则下次还会当成"没同步过"');
       expect(record!.commitSha, 'abc1234def5678');
+    });
+
+    testWidgets('内容一样但提交码对不上：照样弹比对面板（用户口径 A）', (tester) async {
+      // 2026-10-02 用户在真机上撞到的形状：点阵屏上两个提交码不一样，
+      // 点「从 GitHub 拉取」却只得到一句"两边一条不差、把动作省掉了"。
+      // 根因是拉取**只看内容**，而"提交码对不上"是另一个信号 —— 云端被动过。
+      // 用户口径：**哪个不对都得让人看一眼**，所以提交码不同也要弹面板。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      // 本机内容与云端**一模一样**，但记账说本机这份对应的是另一次提交。
+      expect(app.applyImport(storeWith(savedAt: t1, projects: 2)), isNull);
+      app.storage.writeSyncRecord(
+        SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: '9999999aaaaaaa',
+          localCommitSha: '9999999aaaaaaa',
+        ),
+      );
+
+      await openPage(tester, app);
+      await tapAction(tester, '从 GitHub 拉取');
+
+      expect(
+        find.text('用远程备份覆盖这台手机'),
+        findsOneWidget,
+        reason: '提交码对不上就得弹比对面板 —— 不许用"内容一条不差"把动作省掉',
+      );
+      expect(find.text('云端和这台手机是同一份'), findsNothing, reason: '不该走"同一份"那支');
+
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+      expect(app.storage.readStoreSavedAt(), isNotNull, reason: '取消不该动数据');
     });
 
     testWidgets('拉取之后写记账，页面上能看到上次同步时间与提交码', (tester) async {
@@ -425,6 +498,60 @@ void main() {
     });
   });
 
+  group('进页自动读一次云端（2026-10-02 用户第 1 条）', () {
+    testWidgets('一进来就联网读一次，读到就把云端提交码摆上屏', (tester) async {
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 3)),
+        commit: RemoteCommit(sha: 'abc1234def5678'),
+      );
+      final app = await boot(gateway, _FakeCredentials('ghp_token'));
+      await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      final readsBefore = gateway.readCount;
+
+      await openPage(tester, app);
+      await tester.pumpAndSettle();
+
+      expect(
+        gateway.readCount,
+        greaterThan(readsBefore),
+        reason: '进页要自己读一次云端 —— 用户不必先点「检查更新」才看得到云端提交码',
+      );
+      expect(
+        find.bySemanticsLabel(RegExp(r'^云端提交码 abc1234$')),
+        findsOneWidget,
+        reason: '读到的那一次提交要摆到点阵屏上排',
+      );
+      // 2026-10-02 用户要求：点阵屏下面那两块文字（条数对照 + 一句解释）**全部撤掉**，
+      // 所以这里只钉点阵屏本身，不再钉屏下的文字。
+      expect(
+        find.textContaining('云端：项目'),
+        findsNothing,
+        reason: '点阵屏下面不该再有条数对照行（用户已要求清理）',
+      );
+    });
+
+    testWidgets('读不到时不编数：云端提交码与条数都显示 -------', (tester) async {
+      // 没配 Token ⇒ `previewGitHubPull` 直接返回错误，这一趟什么都读不到。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: t1, projects: 3)),
+      );
+      final app = await boot(gateway, _FakeCredentials(''));
+      await app.saveGitHubBackupConfig(configured, '');
+
+      await openPage(tester, app);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.bySemanticsLabel('云端提交码读取中或读不到'),
+        findsOneWidget,
+        reason: '读不到就如实说读不到，不拿记账里的旧号冒充',
+      );
+      // 屏下面那两块文字已经按用户要求撤掉，所以这里不再断言屏下的占位行；
+      // "读不到显示 -------" 由 `github_sync_test.dart` 对 `recordCountLine` 的
+      // 单元用例，以及点阵屏自己的占位（`CommitLcdRow.placeholder`）守着。
+    });
+  });
+
   group('页顶那台提交号点阵屏', () {
     testWidgets('一进来就摆在最上面；还没有记账时全暗、不写假文字', (tester) async {
       final app = await boot(_FakeGateway(), _FakeCredentials('ghp_token'));
@@ -443,7 +570,7 @@ void main() {
       expect(app.readGitHubSyncRecord(), isNull);
     });
 
-    testWidgets('同步过一次之后：两排都是本机指纹，且只念 7 位', (tester) async {
+    testWidgets('同步过一次之后：两排都是提交码（云端 / 本机），且只念 7 位', (tester) async {
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
         commit: RemoteCommit(sha: 'abc1234def5678'),
@@ -458,90 +585,105 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(app.readGitHubSyncRecord()!.commitSha, 'abc1234def5678');
-      // 2026-10-02 改（用户**第二次**指出"点阵屏显示的提交码和拉取下面那个不一样，
-      // 我该相信哪个"）：两排都摆**本机内容指纹**这个方向是对的，
-      // 但上一版的标识（"云端 / 本机"）会让人以为上排是云端的码 —— 于是又猜错一次。
-      // 现在标识改成**"上传时 / 本机现在"**：两排都是本机指纹，差的是**时刻**。
       expect(
-        find.bySemanticsLabel(RegExp(r'^上一次上传时的内容指纹 [0-9a-f]{7}$')),
-        findsOneWidget,
-        reason: '上排 = 上次成功上传时本机那一份的指纹（记账里的 localSha）',
+        app.readGitHubSyncRecord()!.localCommitSha,
+        'abc1234def5678',
+        reason: '刚拉完 ⇒ 本机提交码就是这次拉的那一次',
       );
-      expect(
-        find.bySemanticsLabel(RegExp(r'^本机现在的内容指纹 [0-9a-f]{7}$')),
-        findsOneWidget,
-        reason: '下排 = 此刻本机这一份的指纹，现算的',
-      );
-      // 文案里不许再出现第二个"码"（那是"我该信哪个"的根源）。
-      expect(
-        find.textContaining('内容码'),
-        findsNothing,
-        reason: '一个页面只留一种可比的码；blob sha 那种不该出现在文案里',
-      );
-      // 只念 7 位：完整 40 位 sha 递给读屏软件是 2.3.0 之前那个缺陷，
-      // 这条守卫留着别删。
-      expect(
-        find.bySemanticsLabel(RegExp(r'\w{8,}')),
-        findsNothing,
-        reason: '语义句里出现 8 位以上的连续码，就说明有人把完整 sha 递进来了',
-      );
-      // 刚拉完，两排应当**相等**（本机刚被云端覆盖过，指纹与记账一致）。
-      final labels = tester
+      // 2026-10-02 **第五版**（用户原话："上面一个是云端的提交码，下面是本地的提交码"）：
+      // **两排都是提交码**，且**可以直接比** ——
+      // 一样 ⇒ 我手上这份就是云端那份；不一样 ⇒ 别的设备推过。
+      //
+      // 断言方式：直接读点阵屏两排的语义节点（比 `bySemanticsLabel` 的正则稳）。
+      final rowLabels = tester
           .widgetList<Semantics>(find.descendant(
             of: find.byType(CommitLcd),
             matching: find.byType(Semantics),
           ))
           .map((s) => s.properties.label ?? '')
-          .where((l) => l.contains('指纹'))
-          .toList();
-      expect(labels.length, 2, reason: '正好两排指纹');
-      final codes = labels
-          .map((l) => RegExp(r'[0-9a-f]{7}').stringMatch(l))
+          .where((l) => l.isNotEmpty)
           .toList();
       expect(
-        codes[0],
-        codes[1],
-        reason: '刚同步完，两排该相等 —— 不等就说明记账的 localSha 写错了',
+        rowLabels.any((l) => l.startsWith('云端提交码 ')),
+        isTrue,
+        reason: '上排 = 云端提交码（云端此刻是哪一次）',
+      );
+      expect(
+        rowLabels.any((l) => l.startsWith('本机提交码 ')),
+        isTrue,
+        reason: '下排 = 本机提交码（我这份内容对应的是哪一次）',
+      );
+      // 文案里不许出现"内容码"（那是 blob sha 的旧说法，会跟提交码混）。
+      expect(
+        find.textContaining('内容码'),
+        findsNothing,
+        reason: 'blob sha 那种不该出现在文案里',
+      );
+      // 只念 7 位：完整 40 位 sha 递给读屏软件是 2.3.0 之前那个缺陷。
+      for (final l in rowLabels) {
+        final code = RegExp(r'[0-9a-f]{7}$').stringMatch(l);
+        expect(code, isNotNull, reason: '每一排的码都要恰好 7 位：$l');
+      }
+      // 刚拉完，两排都该是这一次提交 —— 不一致说明递错了东西。
+      // ⚠️ 而且是 **7 位短码**：完整提交码递给点阵屏，读屏软件会把它整串念出来
+      // （这条正是 2.3.0 之前那个缺陷，2026-10-02 第四版又踩了一次）。
+      expect(
+        rowLabels.any((l) => l == '云端提交码 abc1234'),
+        isTrue,
+        reason: '上排要摆记账里云端那一次提交（前 7 位）',
+      );
+      expect(
+        rowLabels.any((l) => l == '本机提交码 abc1234'),
+        isTrue,
+        reason: '刚拉完，本机提交码也该是这一次',
+      );
+      expect(
+        rowLabels.any((l) => l.contains('abc1234def5678')),
+        isFalse,
+        reason: '完整提交码不许进语义句 —— 读屏软件会把它整串念出来',
       );
       handle.dispose();
     });
 
-    testWidgets('两排不一样时，屏下面那句直接给结论，不让用户自己比码', (tester) async {
-      // 2026-10-02 用户**第二次**问"我该相信哪个"之后加的。
+    testWidgets('两排一样 / 不一样：点阵屏上直接看得见，不再有屏下解释文字', (tester) async {
+      // 2026-10-02 用户要求把点阵屏下面那两块文字**全部撤掉**
+      //（原话："点阵屏下面那些文本怎么还不清理掉"），
+      // 所以这一段只钉点阵屏本身：两排各摆一个提交码，屏下**不许**再有解释句。
       //
-      // 第一次（2.3.0）是"上排云端提交码 / 下排本机指纹"，两个码不可比；
-      // 我改成"两排都是本机指纹"，**但把 git 提交码从屏上赶走、留在下面那行**，
-      // 于是同一个页面上仍是两个不同来源的码，用户又猜一次。
-      //
-      // 这条守的是最终口径：**屏幕上只摆一种可比的码**（本机指纹），
-      // 而"一样 / 不一样"这个结论由文案直说 —— 用户不该被迫去比两串十六进制。
+      // 夹具把记账造成分叉状态（云端 abc1234，本机 9999999）——
+      // 在真机上这就是"另一台设备推了一次"之后的样子。
       final gateway = _FakeGateway(
         remote: remoteOf(storeWith(savedAt: t1, projects: 2)),
         commit: RemoteCommit(sha: 'abc1234def5678'),
       );
       final app = await boot(gateway, _FakeCredentials('ghp_token'));
       await app.saveGitHubBackupConfig(configured, 'ghp_token');
+      app.storage.writeSyncRecord(
+        SyncRecord(
+          syncedAt: t1,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: 'abc1234def5678',
+          localCommitSha: '9999999aaaaaaa',
+        ),
+      );
 
       await openPage(tester, app);
-      await tapAction(tester, '从 GitHub 拉取');
-      await tester.tap(find.text('拉取并覆盖'));
-      await tester.pumpAndSettle();
 
-      // 拉完之后本机与记账一致 → 该说"没有新东西要传"。
-      expect(
-        find.textContaining('两排一样'),
-        findsOneWidget,
-        reason: '结论要写在屏下面那句里 —— 用户不该被迫去比两串十六进制',
-      );
-      expect(
-        find.textContaining('内容码'),
-        findsNothing,
-        reason: '屏幕上只留一种可比的码；blob sha 那种不该出现',
-      );
-      // 反过来的那一面（"两排不一样 ⇒ 还没传上去"）没在这里硬测：
-      // 拉完之后要再造出"本机比上传时新"的状态，得绕开这一页的只读约束去改数据，
-      // 那样测的是夹具而不是这一页。这条口径由 `_commitScreenNote` 的三条分支
-      // 直接表达，改的时候看得见 —— 硬凑一个夹具反而更脆。
+      final rowLabels = tester
+          .widgetList<Semantics>(find.descendant(
+            of: find.byType(CommitLcd),
+            matching: find.byType(Semantics),
+          ))
+          .map((s) => s.properties.label ?? '')
+          .where((l) => l.isNotEmpty)
+          .toList();
+      expect(rowLabels.any((l) => l == '云端提交码 abc1234'), isTrue,
+          reason: '上排 = 进页读到的云端提交码');
+      expect(rowLabels.any((l) => l == '本机提交码 9999999'), isTrue,
+          reason: '下排 = 本机跟着的那一次');
+      expect(find.textContaining('两排'), findsNothing,
+          reason: '屏下那句解释已经撤掉，不该再有"两排一样 / 不一样"的说法');
     });
 
     // ---------------------------------------------------------- 检查更新（2026-10-02）

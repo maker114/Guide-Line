@@ -20,9 +20,18 @@ const String clearDateValue = '';
 /// │ ┌──────────────────────────┐ │
 /// │ │        日历本体            │ │
 /// │ └──────────────────────────┘ │
-/// │        [清除日期]   [取消]    │
+/// │ [12:30] [清除时间] [清除日期] [取消] │
 /// └──────────────────────────────┘
 /// ```
+///
+/// 2026-10-02：这一版加了**截止时间**（用户："允许设定截止时间精确到分钟"）。
+/// 取值形态从 `YYYY-MM-DD` 扩成 `YYYY-MM-DD HH:mm`：
+///   · 只点日历某天 ⇒ 仍然是**纯日期**（老用法一个字没变，老数据也不动）；
+///   · 再点「选时间…」⇒ 在同一天上补一个 `HH:mm`；
+///   · 已经有时间的值，进面板时会**预填**那个时刻，可以改、也可以「清除时间」退回纯日期。
+///
+/// 时间选择器仍用 Material 那个：**表盘是 5 分钟一格**（用户口径："只需要 5 分钟就行了"），
+/// 一屏点两下就完事，不必自己写一套时分滚轮。
 ///
 /// 为什么不再直接用系统 `showDatePicker`：**它没有"清除"这个出口**。
 /// 从前清除只挂在图标的长按上，而"长按可清除"这句提示本身也写在同一个长按的
@@ -33,7 +42,7 @@ const String clearDateValue = '';
 /// 与"选一天"是同一个界面里的两个平级动作。
 ///
 /// 返回值：
-///   · `YYYY-MM-DD` —— 用户选了这一天；
+///   · `YYYY-MM-DD` 或 `YYYY-MM-DD HH:mm` —— 用户选了这一天（可能带时刻）；
 ///   · [clearDateValue]（空串）—— 用户点了「清除日期」；
 ///   · `null` —— 取消 / 返回键，什么都没变。
 Future<String?> pickDateSheet(
@@ -45,12 +54,14 @@ Future<String?> pickDateSheet(
   DateTime? lastDate,
 }) async {
   final now = DateTime.now();
-  // 归口 `Ids.parseIsoDate`（2026-10-01）：这里原来用 `DateTime.tryParse`。
-  // 它只影响"日历打开时先落在哪一天"，而 `current` 是 `task.dueAt` 这类
-  // 落盘过的领域值（已由 `Canonical.readDate` 卡过日历合法性），所以**行为不变** ——
-  // 归口是为了让"日期算不算数"全应用只剩一处判据，而不是因为这里出过问题。
+  // 归口 `Ids.parseIsoDateTime`（2026-10-02）：这个面板现在也处理带时刻的值，
+  // 用 `parseIsoDate` 会把 `'2026-10-03 08:30'` 判成 null、把日历落回今天。
   final initial = initialDate ??
-      (current == null ? now : (Ids.parseIsoDate(current) ?? now));
+      (current == null ? now : (Ids.parseIsoDateTime(current) ?? now));
+  // 已有值带没带时刻：决定"选时间"键是预填当前时刻还是预填一个常用钟点。
+  final currentTime = current == null
+      ? null
+      : (Ids.hasTimeOfDay(current) ? Ids.parseIsoDateTime(current) : null);
   // 日历**不接受首尾之外的那一天**（`CalendarDatePicker` 会直接断言失败）。
   // 当前值本来就可能落在默认区间之外 —— 老数据里的远期日期、或用户上次选到
   // 边界那一年 —— 所以以它为准把区间撑开，而不是让这一页崩掉。
@@ -108,8 +119,59 @@ Future<String?> pickDateSheet(
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                child: Row(
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 4,
                   children: <Widget>[
+                    // 「选时间…」**只在有日期时给**：没日期就没有"在哪一天几点"可谈。
+                    // 打开时预填已有时刻；没有就落在 09:00（一天里最常见的截止点）。
+                    if (current != null)
+                      TextButton.icon(
+                        onPressed: () async {
+                          final picked = await showTimePicker(
+                            context: sheetContext,
+                            initialTime: TimeOfDay.fromDateTime(
+                              currentTime ??
+                                  DateTime(now.year, now.month, now.day, 9),
+                            ),
+                            // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
+                            // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
+                            // `showTimePicker` 从来不给；表盘的 5 分钟步长是它自己的行为，
+                            // 想要任意分钟只能切到键盘输入模式。
+                            // 所以"5 分钟"不是我们设的，是它本来就有的 ——
+                            // 特意写下来，免得以后有人去传一个不存在的参数。
+                          );
+                          if (picked == null) return;
+                          if (!sheetContext.mounted) return;
+                          final day = Ids.parseIsoDateTime(current) ?? now;
+                          Navigator.of(sheetContext).pop(
+                            Ids.isoDateTime(
+                              day,
+                              hour: picked.hour,
+                              minute: picked.minute,
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.schedule_outlined, size: 18),
+                        label: Text(
+                          currentTime == null
+                              ? '选时间…'
+                              : '时间 ${_hhmm(currentTime)}',
+                        ),
+                      ),
+                    // 「清除时间」只在这一份值**真的带时刻**时给：
+                    // 纯日期的值上摆一个"清除时间"是让人以为它有时间。
+                    if (currentTime != null)
+                      TextButton.icon(
+                        onPressed: () => Navigator.of(sheetContext).pop(
+                          Ids.isoDateTime(
+                            Ids.parseIsoDateTime(current) ?? now,
+                          ),
+                        ),
+                        icon: const Icon(Icons.schedule_send_outlined, size: 18),
+                        label: const Text('清除时间'),
+                      ),
                     // 清除**只在有值时给**：没有日期的东西不该出现一个空的清除键
                     if (current != null)
                       TextButton.icon(
@@ -119,7 +181,6 @@ Future<String?> pickDateSheet(
                         // 名字写全：这是"把日期清掉"，不是"取消这次操作"
                         label: const Text('清除日期'),
                       ),
-                    const Spacer(),
                     TextButton(
                       onPressed: () => Navigator.of(sheetContext).pop(),
                       child: const Text('取消'),
@@ -135,3 +196,8 @@ Future<String?> pickDateSheet(
   );
   return result;
 }
+
+/// `HH:mm`（那个按钮上显示"当前时刻"用；与落盘那一段同一种写法）。
+String _hhmm(DateTime value) =>
+    '${value.hour.toString().padLeft(2, '0')}:'
+    '${value.minute.toString().padLeft(2, '0')}';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/auto_sync_state.dart';
+import '../../core/store/github_sync.dart';
 import '../../core/store/store_diff.dart';
 import 'store_diff_panel.dart';
 
@@ -120,6 +121,7 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
   /// 只在**真有偏差**时才走到这里（没偏差的直接传了，见 `autoSyncAfterHome`）——
   /// 弹一次能看清楚的改动清单，比让用户事后去 GitHub 上猜自己推了什么强。
   Future<void> _askAutoPush(StoreDiff diff) async {
+    final meta = widget.app.pendingAutoPushMeta;
     final choice = await showStoreDiffSheet(
       widget.shellContext,
       diff: diff,
@@ -128,6 +130,23 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
       targetLabel: '这台手机，将推送至云端',
       confirmLabel: '推送',
       cancelLabel: '暂不推送',
+      // 两行对照：**云端第一行、本地第二行**（用户口径）。
+      // ⚠️ 这扇面板的方向是"推"，`baseStore` 是云端 —— 不能交给面板按角色打标签，
+      // 那会把云端排到第二行，与固定读法相反。
+      cloudLine: (meta?.cloudStore == null || meta?.localStore == null)
+          ? null
+          : recordCountLine(
+              sideLabel: '云端',
+              store: meta!.cloudStore!,
+              shortCommit: meta.cloudCommit,
+            ),
+      localLine: (meta?.cloudStore == null || meta?.localStore == null)
+          ? null
+          : recordCountLine(
+              sideLabel: '本地',
+              store: meta!.localStore!,
+              shortCommit: meta.localCommit,
+            ),
     );
     if (!mounted) return;
     // 只有点了「推送」才传。点了「暂不推送」，或者点空白/返回键划走，
@@ -160,6 +179,21 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
       barrierDismissible: false,
       hideConfirm: request.pullOnly,
       note: request.message,
+      // 两行对照：**云端第一行、本地第二行**（用户口径）。
+      cloudLine: request.cloudStore == null || request.localStore == null
+          ? null
+          : recordCountLine(
+              sideLabel: '云端',
+              store: request.cloudStore!,
+              shortCommit: request.cloudCommit,
+            ),
+      localLine: request.cloudStore == null || request.localStore == null
+          ? null
+          : recordCountLine(
+              sideLabel: '本地',
+              store: request.localStore!,
+              shortCommit: request.localCommit,
+            ),
     );
     if (!mounted) return;
     switch (choice) {

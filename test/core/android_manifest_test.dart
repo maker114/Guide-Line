@@ -48,4 +48,21 @@ void main() {
       reason: '两个变体清单都不在，这条用例等于什么都没查 —— 路径变了？',
     );
   });
+
+  test('主清单把方向锁成竖屏（用户口径：取消横屏、禁止翻转）', () {
+    // 2026-10-02 用户要求"取消手机的横屏模式(禁止翻转)"。
+    //
+    // 为什么锁在**清单**而不是 Flutter 层：`configChanges` 里已经声明了
+    // `orientation`，系统会把方向变化交给 App 自己处理 ——
+    // 也就是说**不锁的话它会真的跟着手机翻**。锁在清单上是唯一一处
+    // 能真正阻止旋转的地方（`SystemChrome.setPreferredOrientations` 只是
+    // 请求，且要等 Dart 起来之后才生效，冷启动那一帧仍会横过来）。
+    final text =
+        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+    expect(
+      text,
+      contains('android:screenOrientation="portrait"'),
+      reason: '没有这一条，手机转过来界面就跟着横过去',
+    );
+  });
 }

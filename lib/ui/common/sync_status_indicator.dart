@@ -200,6 +200,18 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
       return;
     }
 
+    // ⚠️ **新一轮露面必须把退场进度拉回 1**（2026-10-02 修，用户报"第一次看得到、
+    // 第二次什么都看不到"）。
+    //
+    // 上一次收场时 `_startLeaving()` 把 `_exit` 反向到了 **0**，而除了上面那条
+    // "退场中途又回来"的分支，**没有任何地方把它复位**。于是第二次同步走的是：
+    //   `_enter.forward(from: 0)` → `_enter` 走到 1，
+    //   可 `_exit` 还停在 0 ⇒ 外层 `Opacity(_enter.value × _exit.value)` **恒为 0**
+    //   ⇒ 整格永远透明：圆环没有、绿胶囊也没有。
+    // 这正是"第一次有、第二次没有"的形状 —— `initState` 只跑一次，
+    // 而 `_exit` 的初值恰好是 1，所以第一轮永远是对的。
+    if (_exit.value < 1) _exit.value = 1;
+
     final wasRunning = _shown.isRunning;
     setState(() => _shown = next);
     if (!_enter.isCompleted) _enter.forward(from: 0);
@@ -360,19 +372,39 @@ class _SyncStatusIndicatorState extends State<SyncStatusIndicator>
           )
         : pill;
 
+    // ⚠️ 这一层必须**自己**按帧重建（2026-10-02 第二次修，P0）。
+    //
+    // 原来 `_enter` 只出现在下面那个 `AnimatedBuilder` 的 `Listenable.merge` 里，
+    // 而 merge 包住的**只有胶囊内部**；外面这两个真正决定"看不看得见"的控件
+    // （`Opacity` 与 `Transform.scale`）读的是 `_enter.value`，却不在任何按帧重建的
+    // builder 里。全仓唯一会 `setState` 的是 `_exit` 的监听（见 [_onExitTick]，
+    // 那是上一版为**退场**补的同一个坑）—— 入场这一半漏了。
+    //
+    // 后果：`_enter` 从 0 走到 1 的 180ms 里界面一次都不重建，`Opacity` 钉死在初值 0、
+    // 缩放钉死在 0.62 ⇒ **整格永远透明**。而状态从 running 变到 done 时
+    // `_apply` 里 `!_enter.isCompleted` 为假、也不 `setState`，所以它不会被纠正。
+    // 实机与 golden 都验过：那一格占据 110x26 的布局位置、语义节点也在，
+    // 但**一个像素都不画**（golden 与"AppBar 里什么都不放"逐像素相同）。
+    //
+    // 包法：把整块（含 `Padding`）放进 `AnimatedBuilder`，只订阅 `_enter` ——
+    // 逐帧重建的范围收在这一格内，不牵动标题栏其余部分。
     return Semantics(
       button: tappable,
       label: _semanticsLabel(_shown, text),
-      child: Padding(
-        // 贴着标题栏右边缘不好看，也不好在窄屏上点到（用户口径：圆环原来偏右）。
-        padding: const EdgeInsets.only(right: 10),
-        child: Opacity(
-          opacity: (_enter.value * _exit.value).clamp(0.0, 1.0),
-          child: Transform.scale(
-            // 出现时从 0.62 弹到 1，消失时缩到 0.86 —— 两头都不"啪"。
-            scale: lerpDouble(0.62, 1, _enter.value)! *
-                lerpDouble(0.86, 1, _exit.value)!,
-            child: body,
+      child: AnimatedBuilder(
+        animation: _enter,
+        builder: (context, child) => Padding(
+          // 贴着标题栏右边缘不好看，也不好在窄屏上点到（用户口径：圆环原来偏右）。
+          padding: const EdgeInsets.only(right: 10),
+          child: Opacity(
+            // 入场放完之后这里是 1；停在 0 就是"占了位置、一个像素都没有"。
+            opacity: (_enter.value * _exit.value).clamp(0.0, 1.0),
+            child: Transform.scale(
+              // 出现时从 0.62 弹到 1，消失时缩到 0.86 —— 两头都不"啪"。
+              scale: lerpDouble(0.62, 1, _enter.value)! *
+                  lerpDouble(0.86, 1, _exit.value)!,
+              child: body,
+            ),
           ),
         ),
       ),

@@ -307,6 +307,32 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 把「本机提交码」对齐到**刚刚读到的那一次云端提交**。
+  ///
+  /// 为什么必须有它（2026-10-02 用户："为什么本机提交码不会刷新"）：
+  /// 本机不是 git 仓库，它这份内容对应的那一次提交**只能从"读到的云端提交"里得知**。
+  /// 而下面这几条出口都**读了云端却没有写任何东西**：
+  ///   · `noChange` —— 两边内容本来就一样，不提交、不写记账；
+  ///   · `push` 分支里 `diffStores` 说内容没变 —— 同理空转；
+  ///   · 推送被 `trustedOverwrite` 直接放行之前的那一次读取。
+  /// 它们一个都不更新本机提交码，于是点阵屏下排会**永远停在旧号上** ——
+  /// 内容明明已经跟着云端走了，显示却说"我还停在很久以前那一次"。
+  ///
+  /// 补记的是**已知事实**：这一刻本机内容与 [remoteCommitSha] 那一次一致
+  /// （内容闸门刚刚证明过），所以记下来不是猜。
+  ///
+  /// 只动 `localCommitSha` 一个字段：`syncedAt` / `recordCount` / `commitSha`
+  /// 一律不动 —— 这不是一次新的同步，只是把"我跟着哪一次"补准。
+  void rememberLocalCommitIfChanged(String remoteCommitSha) {
+    final record = storage.readSyncRecord();
+    if (record == null) return;
+    if (record.localCommitSha == remoteCommitSha) return;
+    storage.writeSyncRecord(
+      record.copyWith(localCommitSha: remoteCommitSha),
+    );
+    notifyListeners();
+  }
+
   /// 「该导出了」的提醒阈值（天）。
   static const int exportReminderDays = 7;
 
@@ -1175,6 +1201,19 @@ class AppController extends ChangeNotifier {
   /// 「比对 → 该推的推 / 有偏差才问」这一整条流程，在没有界面的测试里也能跑完。
   StoreDiff? pendingAutoPushDiff;
 
+  /// 面板开头那两行对照要用的材料（2026-10-02 加）。
+  ///
+  /// 与 [pendingAutoPushDiff] 一起摆出来 —— 分成两个字段而不是把它包成一个新类型，
+  /// 是因为 `pendingAutoPushDiff` 的类型被九个用例与外壳读着，动它会牵一大片；
+  /// 这里多一个字段的代价是"两处都要清"，所以下面清待办的地方都成对清。
+  ///
+  /// 记的是**这一趟比对时**两边各自的：云端那份数据与提交码、本机那份数据与提交码。
+  /// 为 null ⇒ 面板退回原来的图例写法（不硬凑一行假数）。
+  AutoPushRequest? _pendingAutoPushMeta;
+
+  /// 差异面板开头那两行对照要用的材料（[pendingAutoPushDiff] 非 null 时通常也有）。
+  AutoPushRequest? get pendingAutoPushMeta => _pendingAutoPushMeta;
+
   /// 启动那次**静默比对**（需求⑤）攒下的待办：非 null ⇒ 外壳摆差异面板。
   ///
   /// 与 [pendingAutoPushDiff] 分开，是因为问的不是同一件事：那个问"这一次改的要推
@@ -1191,6 +1230,27 @@ class AppController extends ChangeNotifier {
   Timer? _autoHideTimer;
 
   /// 绿胶囊停多久自己消失。纯计时、不联网，所以在没有界面的测试里也等得起。
+  ///
+  /// **回到 2 秒（2026-10-02 晚）**。这一档当天被来回改过三次，留个记录免得再绕：
+  ///
+  /// ```
+  /// 2 秒  → 4 秒  → 10 秒  → 2 秒（现在）
+  /// ```
+  ///
+  /// 中间那两次加长是在**误判期间**做的：当时用户报"看不到同步动画"，我把原因归到
+  /// "绿胶囊活得太短"，于是先加到 4、再加到 10。**那是错的** —— 真正的原因是
+  /// `sync_status_indicator.dart` 的 `_exit` 在收场时被反向到 0 后再没复位，
+  /// 导致**第二轮及以后整格恒透明**（详见 CHANGELOG 的 `## [2.4.1]`）。
+  /// 那一处修好之后，2 秒这个原值就够用了，不必为了"看得见"而拉长它。
+  ///
+  /// 真机（正式包）实测的时序，留作以后调这一档的依据 ——
+  /// 圆环那一段（网络往返）本来就是 5 秒上下，**2 秒说的是"变绿之后再停多久"**：
+  ///
+  /// ```
+  /// 离开详情页 → 指示器开始转（圆环）      +24 ms
+  /// 网络往返回来 → 才变绿（带提交码）       +5.0 s
+  /// 绿胶囊自动消失                          +7.0 s
+  /// ```
   static const Duration autoSyncDoneLinger = Duration(seconds: 2);
 
   void _setAutoSync(AutoSyncState next) {
@@ -1301,7 +1361,6 @@ class AppController extends ChangeNotifier {
 
   Future<void> _autoSyncOnceLocked({required bool announce}) async {
     // 已经摆着一个待确认的差异时，不再叠第二次比对。
-    if (pendingAutoPushDiff != null || pendingStartupSync != null) return;
 
     final saved = await readGitHubBackupConfig();
     // 总开关关着 = 别动网（含"我改主意了"）：连指示器都不出现。
@@ -1350,6 +1409,10 @@ class AppController extends ChangeNotifier {
               '这台手机上一个字都还没有。可以先把云端那份取回来，'
               '取回之后两边就是同一份了。',
           pullOnly: true,
+          cloudStore: remoteStore,
+          localStore: local,
+          cloudCommit: shortSha(check.remoteCommit?.sha ?? ''),
+          localCommit: shortSha(storage.readSyncRecord()?.localCommitSha ?? ''),
         );
       }
       _setAutoSync(
@@ -1367,6 +1430,10 @@ class AppController extends ChangeNotifier {
         // 这条分支是"内容确实是同一份"的**证明**，而它原来什么都不写 ——
         // 于是老记账（`localSha` 为空）永远补不上，点阵屏上排永远是空的。
         rememberLocalShaIfMissing();
+        // **本机提交码同理要对齐到刚读到的这次提交**（2026-10-02）：
+        // 内容与云端一致这件事刚刚被证明过，那时本机跟着的就是这一次 ——
+        // 不补的话下排会永远停在旧号上（用户："为什么本机提交码不会刷新"）。
+        rememberLocalCommitIfChanged(check.remoteCommit?.sha ?? '');
         if (announce) _setAutoSync(const AutoSyncState.idle());
         return;
       case SyncAction.push:
@@ -1382,18 +1449,37 @@ class AppController extends ChangeNotifier {
         final diff = diffStores(base: remoteStore, target: local);
         if (!diff.hasChanges) {
           // 推上去只是把同一份内容再提交一次，没意义（ADR-091）。
+          // **但本机跟着的是哪一次要对齐到刚读到的那一次**（2026-10-02）：
+          // 这一条也是"内容与云端一致"的证明，不补的话下排永远停在旧号上。
+          rememberLocalShaIfMissing();
+          rememberLocalCommitIfChanged(check.remoteCommit?.sha ?? '');
           if (announce) _setAutoSync(const AutoSyncState.idle());
           return;
         }
         if (plan.trustedOverwrite) {
           // 需求④：云端还是上次同步留下的那一次提交 ⇒ 这中间没有第三方动过云端，
           // 本机这份直接覆盖上去 —— 不摆面板、不追问。
+          //
+          // 覆盖之前先把"本机跟着的是哪一次"对齐到**读到的那一次**（2026-10-02）：
+          // 推送记录里会把它写成"推之前云端那一次"，而对齐之前那一次可能是**旧的**
+          // （记账久未更新时）—— 不对齐就会把下排写成更早的号。
+          rememberLocalCommitIfChanged(check.remoteCommit?.sha ?? '');
           await _pushAutoSync(saved.config, saved.token);
           return;
         }
         if (announce) {
           // 有偏差才问（用户口径：与云端比对后上传，出现偏差才弹差异面板）。
           pendingAutoPushDiff = diff;
+          _pendingAutoPushMeta = AutoPushRequest(
+            diff: diff,
+            cloudStore: remoteStore,
+            localStore: local,
+            // 云端此刻那一次提交（`check.remoteCommit`）、本机手上这份对应的那一次。
+            cloudCommit: shortSha(check.remoteCommit?.sha ?? ''),
+            localCommit: shortSha(
+              storage.readSyncRecord()?.localCommitSha ?? '',
+            ),
+          );
         } else {
           // 开机这一次：提交码对不上、本机又有改动 ⇒ 摆面板让用户选"用哪一边"
           // （需求④⑤）。这扇面板的两个按钮都会改数据，所以点空白关不掉。
@@ -1401,6 +1487,10 @@ class AppController extends ChangeNotifier {
             diff: diff,
             message: '云端数据已经不是上次同步过的那一次提交，提交码对不上，'
                 '这台手机上也有改动。请选择保留哪一边的数据。',
+            cloudStore: remoteStore,
+            localStore: local,
+            cloudCommit: shortSha(check.remoteCommit?.sha ?? ''),
+            localCommit: shortSha(storage.readSyncRecord()?.localCommitSha ?? ''),
           );
         }
         // 停在"等你决定"：黄胶囊把这件事摆在右上角（需求：不传也要说一声）。
@@ -1423,6 +1513,10 @@ class AppController extends ChangeNotifier {
             message: plan.action == SyncAction.pull
                 ? '云端数据比这台手机新，提交码对不上。请选择保留哪一边的数据。'
                 : '云端和这台手机都改过，提交码对不上。请选择保留哪一边的数据。',
+            cloudStore: remoteForChoice,
+            localStore: local,
+            cloudCommit: shortSha(check.remoteCommit?.sha ?? ''),
+            localCommit: shortSha(storage.readSyncRecord()?.localCommitSha ?? ''),
           );
         }
         // 编辑路上（announce）刻意**不替用户拉**：拉下来会覆盖手上这份，
@@ -1450,6 +1544,7 @@ class AppController extends ChangeNotifier {
   Future<void> confirmPendingAutoPush() async {
     if (pendingAutoPushDiff == null) return;
     pendingAutoPushDiff = null;
+    _pendingAutoPushMeta = null;
     _setAutoSync(const AutoSyncState.running());
     final saved = await readGitHubBackupConfig();
     await _pushAutoSync(saved.config, saved.token);
@@ -1459,6 +1554,7 @@ class AppController extends ChangeNotifier {
   void cancelPendingAutoPush() {
     if (pendingAutoPushDiff == null) return;
     pendingAutoPushDiff = null;
+    _pendingAutoPushMeta = null;
     _setAutoSync(const AutoSyncState.idle());
   }
 
@@ -1614,6 +1710,9 @@ class AppController extends ChangeNotifier {
         // 但**本机指纹要补**：这条分支正是"两边内容确实是同一份"的证明，
         // 不补的话老记账的 `localSha` 永远空着、点阵屏上排永远是暗的。
         rememberLocalShaIfMissing();
+        // **本机提交码同理**（2026-10-02 用户："为什么本机提交码不会刷新"）：
+        // 手动推送走到这条出口时，本机跟着的就是刚读到的这一次云端提交。
+        rememberLocalCommitIfChanged(remoteCommit?.sha ?? '');
         return PushOutcome.unchanged('两边是同一份，没有要推的东西。');
       }
       if (plan.action == SyncAction.localEmpty) {
@@ -1654,6 +1753,23 @@ class AppController extends ChangeNotifier {
           commitSha: written.commitSha,
           // 同一刻本机这一份的指纹：点阵屏下排要摆它。
           localSha: workspace.localContentSha(),
+          // **本机提交码** = **刚写上去的那一次提交**（2026-10-02 修正，用户口径）。
+          //
+          // 原来写的是"推之前云端那一次"（`remoteCommit`），理由是"那样别的设备推过之后
+          // 两排就会不一样"。**那个语义是错的**：本机每次推送都在往前写，
+          // 于是下排**永远差一代** —— 用户在真机上连做 5 轮勾选，5 轮全是
+          // `commitSha=<刚推的>` 而 `localCommitSha=<上一代>`，点阵屏上两排常年"对不上"，
+          // 看起来就像"本机提交码不会刷新"。
+          //
+          // 正确语义：`localCommitSha` 回答"**我手上这份内容在云端对应哪一次提交**"。
+          // 刚推完 ⇒ 云端那一次就是刚写上去的这一次 ⇒ 两排**本来就该一样**。
+          // 两个码不一样只会在一种情形出现：**云端被别的设备推着往前走了** ——
+          // 那正是这两排要回答的事，而且那时它是真的不一样。
+          //
+          // 读不到写回结果时（空仓库 / 响应里没有 sha）退回原值，不编一个数出来。
+          localCommitSha: written.commitSha.isNotEmpty
+              ? written.commitSha
+              : (storage.readSyncRecord()?.localCommitSha ?? ''),
         ),
       );
       notifyListeners();
@@ -1741,6 +1857,8 @@ class AppController extends ChangeNotifier {
         commitSha: commit?.sha ?? '',
         // 拉取之后两端内容一致，本机指纹就在这一刻记下。
         localSha: workspace.localContentSha(),
+        // 本机提交码 = 这次拉的是哪一次提交（拉完两者就是同一次）。
+        localCommitSha: commit?.sha ?? '',
       ),
     );
     notifyListeners();

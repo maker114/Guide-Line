@@ -1,3 +1,4 @@
+import '../core/json/store_file.dart';
 import '../core/store/store_diff.dart';
 
 /// 「回到主页自动同步」的状态机（handoff #87c57e，2026-09-30 扩成六态）。
@@ -117,6 +118,10 @@ class StartupSyncRequest {
     required this.diff,
     required this.message,
     this.pullOnly = false,
+    this.cloudStore,
+    this.localStore,
+    this.cloudCommit = '',
+    this.localCommit = '',
   });
 
   /// 摆给用户看的差异（面板里那些行）。
@@ -132,8 +137,40 @@ class StartupSyncRequest {
   /// 面板上就不该放那个按钮 —— 放了就是先承诺、再拒绝。
   final bool pullOnly;
 
+  /// 面板开头那两行对照要用的两份数据（2026-10-02 加）。
+  ///
+  /// `cloudStore` 是**读到的那一份云端数据**（`check.remote.payload.store`）——
+  /// 只有真正读过云端的地方才拿得到，所以由这里带下来，面板不自己联网。
+  /// 为 null ⇒ 那一行退回原来的图例写法。
+  final StoreFile? cloudStore;
+  final StoreFile? localStore;
+
+  /// 两边的提交码（前 7 位；空串 = 读不到 ⇒ 显示 `-------`）。
+  final String cloudCommit;
+  final String localCommit;
+
   @override
   String toString() =>
       'StartupSyncRequest(${diff.added}+/${diff.removed}-/${diff.modified}~, '
       '${pullOnly ? '只可拉取' : '可推可拉'}, $message)';
+}
+
+/// 「回到主页自动同步」停在"要不要把这份推上去"时攒下的待办。
+///
+/// 与 `StoreDiff` 分开是因为面板开头那两行对照还要**两边的条数与提交码**，
+/// 而那些只有真正跑过比对的地方才有（见 [AppController.pendingAutoPushDiff]）。
+class AutoPushRequest {
+  const AutoPushRequest({
+    required this.diff,
+    required this.cloudStore,
+    required this.localStore,
+    this.cloudCommit = '',
+    this.localCommit = '',
+  });
+
+  final StoreDiff diff;
+  final StoreFile? cloudStore;
+  final StoreFile? localStore;
+  final String cloudCommit;
+  final String localCommit;
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/json/store_file.dart';
 import '../../core/store/store_diff.dart';
 import 'diff_colors.dart';
 import 'labels.dart';
@@ -34,6 +35,13 @@ Future<DiffSheetResult> showStoreDiffSheet(
   bool barrierDismissible = true,
   String? note,
   bool hideConfirm = false,
+  StoreFile? baseStore,
+  StoreFile? targetStore,
+  String baseCommit = '',
+  String targetCommit = '',
+  String? cloudLine,
+  String? localLine,
+  String? footnote,
 }) async {
   final result = await showModalBottomSheet<DiffSheetResult>(
     context: context,
@@ -52,6 +60,13 @@ Future<DiffSheetResult> showStoreDiffSheet(
       danger: danger,
       note: note,
       hideConfirm: hideConfirm,
+      baseStore: baseStore,
+      targetStore: targetStore,
+      baseCommit: baseCommit,
+      targetCommit: targetCommit,
+      cloudLine: cloudLine,
+      localLine: localLine,
+      footnote: footnote,
     ),
   );
   // 没点按钮就关掉 = "我还没想好"，与点了「暂不推送」不是一回事：
@@ -84,7 +99,45 @@ class StoreDiffSheet extends StatelessWidget {
     this.danger = false,
     this.note,
     this.hideConfirm = false,
+    this.baseStore,
+    this.targetStore,
+    this.baseCommit = '',
+    this.targetCommit = '',
+    this.cloudLine,
+    this.localLine,
+    this.footnote,
   });
+
+  /// 两边的数据文件（2026-10-02 加）：给了就在标题下面摆**两行对照**。
+  ///
+  /// 为什么放在这里而不是各自算：那两行要报的是"云端 / 本地各有几条活记录、
+  /// 几条归档、提交码是哪个"，其中**云端的数只有读过云端的地方才有**。
+  /// 调用方本来就已经拿到两边了（`StartupSyncRequest.diff` 的 base/target 就是
+  /// 那两份数据），所以让它顺手递进来，比面板自己再联网读一次干净。
+  final StoreFile? baseStore;
+  final StoreFile? targetStore;
+
+  /// 两边的提交码（前 7 位；空串 = 读不到 ⇒ 那两行显示 `-------`）。
+  final String baseCommit;
+  final String targetCommit;
+
+  /// 开头那两行对照（2026-10-02 用户口径）：**云端永远是第一行、本地永远是第二行**。
+  ///
+  /// 为什么不在这里自己从 `baseStore` / `targetStore` 算：那两份数据的角色
+  /// 随场景翻转（推送时 base=云端，拉取时 base=本机）——
+  /// 面板自己按 base/target 打标签，**推送那扇就会把云端排到第二行**，
+  /// 与"云端在上、本地在下"的固定读法相反。所以由调用方给**已经写好的两行文字**，
+  /// 顺序与标签都在调用处定死（它们本来就已经拿着那两份数据）。
+  final String? cloudLine;
+  final String? localLine;
+
+  /// 摆在两行对照**下面**的一句补充（2026-10-02 加）。
+  ///
+  /// 为什么需要它：给了 [baseStore] / [targetStore] 之后，[baseLabel] / [targetLabel]
+  /// 按设计不再显示（那是退回用的图例），于是它们原来带的**时间戳**就丢了 ——
+  /// "云端那份最后改于什么时候"是判断"要不要拉"的重要一条，不能因为改版丢掉。
+  /// 所以由调用方把那一句（例如"云端那份的最后修改时间：…"）单独递进来。
+  final String? footnote;
 
   final StoreDiff diff;
   final String title;
@@ -131,23 +184,39 @@ class StoreDiffSheet extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  _Legend(
-                    background: colors.backgroundOf(DiffSide.previous),
-                    foreground: colors.foregroundOf(DiffSide.previous),
-                    text: baseLabel,
-                  ),
-                  const SizedBox(height: 4),
-                  _Legend(
-                    background: colors.backgroundOf(DiffSide.next),
-                    foreground: colors.foregroundOf(DiffSide.next),
-                    text: targetLabel,
-                  ),
-                  if (diff.modified > 0) ...<Widget>[
+                  // 2026-10-02（用户口径）：**不再解释三种颜色**，开头直接摆两行对照 ——
+                  //   云端：项目 12 · 灵感 9 · 事件 4 · 任务 23 · 已归档 7 · 提交码 a2dd62b
+                  //   本地：项目 12 · 灵感 9 · 事件 4 · 任务 23 · 已归档 7 · 提交码 a2dd62b
+                  // 颜色仍然照用（行还是绿/红/黄），只是不再花两行去讲它们是什么意思 ——
+                  // "哪块颜色是哪一边"由这两行的**先后顺序**（云端在前、本地在后）说明。
+                  if (cloudLine != null) _CountLine(line: cloudLine!),
+                  if (localLine != null) ...<Widget>[
+                    const SizedBox(height: 2),
+                    _CountLine(line: localLine!),
+                  ],
+                  if (cloudLine == null &&
+                      localLine == null &&
+                      baseStore == null &&
+                      targetStore == null) ...<Widget>[
+                    // 没给两行对照时退回原来的两句（"哪一边是哪一边"仍然要说清）。
+                    _Legend(
+                      background: colors.backgroundOf(DiffSide.previous),
+                      foreground: colors.foregroundOf(DiffSide.previous),
+                      text: baseLabel,
+                    ),
                     const SizedBox(height: 4),
                     _Legend(
-                      background: colors.modifiedBackground,
-                      foreground: colors.modifiedForeground,
-                      text: '黄色成对出现：上一行是旧内容，下一行是新内容。',
+                      background: colors.backgroundOf(DiffSide.next),
+                      foreground: colors.foregroundOf(DiffSide.next),
+                      text: targetLabel,
+                    ),
+                  ],
+                  if (footnote != null && footnote!.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      footnote!,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                     ),
                   ],
                   const SizedBox(height: 10),
@@ -212,6 +281,29 @@ class StoreDiffSheet extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 一行"云端：项目 12 · 灵感 9 · 事件 4 · 任务 23 · 已归档 7 · 提交码 a2dd62b"。
+///
+/// 与 [_Legend] 的区别：那个是"一块颜色 + 它代表哪一边"（已经不用了，用户口径：
+/// **不再解释三种颜色**），这个是**两边的实际条数与提交码**，一行说完。
+class _CountLine extends StatelessWidget {
+  const _CountLine({required this.line});
+
+  final String line;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      line,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: theme.colorScheme.onSurface,
+        // 这一行信息密度高（六个段），等宽字在窄屏上更好逐段对读。
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
       ),
     );
   }

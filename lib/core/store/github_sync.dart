@@ -86,6 +86,7 @@ class SyncRecord {
     required this.recordCount,
     this.commitSha = '',
     this.localSha = '',
+    this.localCommitSha = '',
     this.offlineWarnedOn = '',
   });
 
@@ -121,6 +122,18 @@ class SyncRecord {
   ///     同一个性质：最坏是点阵屏下排暗着，数据一个字都不少。
   final String localSha;
 
+  /// 上次同步时**本机当前内容**对应的那一次云端提交码。
+  ///
+  /// 与 [commitSha] 的关系：那个记的是"**云端**此刻是哪一次提交"，
+  /// 这个记的是"**本机**手上这份内容是从哪一次提交来的"。本机不是 git 仓库，
+  /// 唯一能拿到的"本机提交码"就是**本机内容与云端一致的那一次提交** ——
+  /// 所以推送成功之后两者相同；两边分叉时（云端被别人改过）才会不同。
+  ///
+  /// 2026-10-02（`2.3.9`）加：用户要"上面云端提交码、下面本地提交码"，
+  /// 而此前记账里只有云端那一个，本机这一侧只能拿内容指纹顶替。
+  /// 空串 = 这条记账建于加这个字段之前，**未知**。
+  final String localCommitSha;
+
   /// 「GitHub 未连接」那条警告**当天已经弹过一次**的日期（`YYYY-MM-DD`）。
   ///
   /// 空串 = 还没弹过。需求⑤要的是"连不上就警告"，而每次启动都弹一遍在断网的
@@ -141,6 +154,7 @@ class SyncRecord {
       if (sha.isEmpty || syncedAt <= 0 || count < 0) return null;
       final commit = root['commitSha'];
       final local = root['localSha'];
+      final localCommit = root['localCommitSha'];
       final warned = root['offlineWarnedOn'];
       return SyncRecord(
         syncedAt: syncedAt,
@@ -148,6 +162,7 @@ class SyncRecord {
         recordCount: count,
         commitSha: commit is String ? commit : '',
         localSha: local is String ? local : '',
+        localCommitSha: localCommit is String ? localCommit : '',
         offlineWarnedOn: warned is String ? warned : '',
       );
     } catch (_) {
@@ -163,6 +178,7 @@ class SyncRecord {
         // 未知就不写出去：与"空值不写出"的契约口径一致。
         if (commitSha.isNotEmpty) 'commitSha': commitSha,
         if (localSha.isNotEmpty) 'localSha': localSha,
+        if (localCommitSha.isNotEmpty) 'localCommitSha': localCommitSha,
         if (offlineWarnedOn.isNotEmpty) 'offlineWarnedOn': offlineWarnedOn,
       });
 
@@ -172,6 +188,7 @@ class SyncRecord {
     int? recordCount,
     String? commitSha,
     String? localSha,
+    String? localCommitSha,
     String? offlineWarnedOn,
   }) =>
       SyncRecord(
@@ -180,6 +197,7 @@ class SyncRecord {
         recordCount: recordCount ?? this.recordCount,
         commitSha: commitSha ?? this.commitSha,
         localSha: localSha ?? this.localSha,
+        localCommitSha: localCommitSha ?? this.localCommitSha,
         offlineWarnedOn: offlineWarnedOn ?? this.offlineWarnedOn,
       );
 }
@@ -376,6 +394,70 @@ Map<DocName, int> liveCountsOf(StoreFile store) => <DocName, int>{
       for (final name in DocName.values)
         name: store.documentOf(name).items.where((item) => !item.deleted).length,
     };
+
+/// 把一份数据文件里的**已归档**记录按集合拆开。
+///
+/// 与 [liveCountsOf] 对称：那一份数"活记录"，这一份数"归档区的"。墓碑
+/// （`deleted`）两边都不数 —— 用户看到的"我手上有多少条"不含已删除的。
+///
+/// ⚠️ 只有 [EntityNode] 才有 `archived`（灵感是 [Entity]，没有归档这一态），
+/// 所以这里按类型判断，不是所有集合都一定有归档数。
+Map<DocName, int> archivedCountsOf(StoreFile store) => <DocName, int>{
+      for (final name in DocName.values)
+        name: store
+            .documentOf(name)
+            .items
+            .whereType<EntityNode>()
+            .where((node) => !node.deleted && node.archived)
+            .length,
+    };
+
+/// 四个集合在界面上的中文名（"项目 / 灵感 / 事件 / 任务"）。
+///
+/// 与 `StoreDiff` 里那份分类名同一套词；分开两处是因为那一份是 `private`
+/// （它只服务差异面板的行文案），而这一份要给"计数行"用。
+String docKindLabel(DocName name) => switch (name) {
+      DocName.projects => '项目',
+      DocName.inspirations => '灵感',
+      DocName.events => '事件',
+      DocName.tasks => '任务',
+    };
+
+/// 界面上"读不到数"时显示的占位（用户口径：没有读数就显示 `-------`）。
+///
+/// 为什么不用"未知"两个字：[点阵屏那一带](../../ui/more/github_backup_page.dart)
+/// 有条口径 —— **一块暗着的屏比一行假字诚实**；这里同理，
+/// 一串短横既占了位（版面不跳），又不会被误读成一个真数。
+const String unknownCountPlaceholder = '-------';
+
+/// 一行"云端：项目 12 · 灵感 9 · 事件 4 · 任务 23 · 已归档 7 · 提交码 a2dd62b"。
+///
+/// 这是比对界面（弹窗差异面板 / 同步页检查更新）**开头那两行**的唯一实现 ——
+/// 两处共用一个函数，是因为它们曾经各写一份、然后各漂一处（"同一个数在两页不一样"
+/// 那类缺陷的根都在这种双份实现上）。
+///
+/// [shortCommit] 传空串 ⇒ 提交码那一格用 [unknownCountPlaceholder] 顶上。
+/// 四个计数与归档数都取自 [store] 与 [liveCountsOf] / [archivedCountsOf]，
+/// **与推送用的是同一份数据**（`buildStoreFile()` 的产物），所以"屏上报的数"
+/// 与"这次要传的内容"永远是同一件事。
+String recordCountLine({
+  required String sideLabel,
+  required StoreFile store,
+  String shortCommit = '',
+}) {
+  final live = liveCountsOf(store);
+  final archived = archivedCountsOf(store);
+  // ⚠️ 这里**自己收口**成 7 位：调用方很容易顺手把记账里那串 40 位原值传进来，
+  // 于是在界面上印出一整串十六进制（2026-10-02 首个实现就踩了这个）。
+  // 收口放在函数里 ⇒ 谁传原值都不会印出长串，调用方不必记得这件事。
+  final commit = shortCommit.isEmpty ? '' : shortSha(shortCommit);
+  final parts = <String>[
+    for (final name in DocName.values) '${docKindLabel(name)} ${live[name] ?? 0}',
+    '已归档 ${archived.values.fold(0, (sum, n) => sum + n)}',
+    '提交码 ${commit.isEmpty ? unknownCountPlaceholder : commit}',
+  ];
+  return '$sideLabel：${parts.join(' · ')}';
+}
 
 /// 判定"现在该做什么"。
 ///

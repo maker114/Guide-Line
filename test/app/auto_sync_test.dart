@@ -146,6 +146,72 @@ void main() {
       expect(gateway.writeCount, 0, reason: '内容相同，绝不该往云端写');
     });
 
+    test('判定"两边是同一份"时，把本机提交码也刷到刚读到的那一次（2026-10-02）', () async {
+      // 用户原话："为什么本机提交码不会刷新"。
+      // 本机不是 git 仓库，"本机跟着哪一次提交"只能从**读到的云端提交**得知；
+      // 而这条出口读了云端却什么都不写（不提交、不记账）——
+      // 于是下排永远停在旧号上，内容明明已经跟着云端走了。
+      final same = storeWith(savedAt: now, projects: 2);
+      final gateway = _FakeGateway(remote: remoteOf(same))
+        ..commit = const RemoteCommit(sha: 'commit-old', message: '上次那次提交');
+      final app = await bootWith(
+        gateway: gateway,
+        local: same,
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 2,
+          commitSha: 'commit-old',
+          localCommitSha: 'stale999',
+        ),
+      );
+
+      await app.autoSyncAfterHome();
+
+      expect(app.readGitHubSyncRecord()!.localCommitSha, 'commit-old',
+          reason: '本机跟着的就是刚读到的这一次提交 —— 下排必须跟着刷新');
+      expect(gateway.writeCount, 0, reason: '内容相同，绝不该往云端写');
+    });
+
+    test('推送成功后：本机提交码 = 刚写上去的那一次（不是"推之前那一次"）', () async {
+      // 2026-10-02 真机 5 连击查出来的缺陷：推送把 `localCommitSha` 写成
+      // **推之前**云端那一次（`remoteCommit`），于是本机每推一次、下排就落后一代，
+      // 点阵屏上两排**永远"对不上"** —— 用户看到的就是"本机提交码不会刷新"。
+      //
+      // 正确语义：`localCommitSha` 回答"我手上这份内容在云端对应哪一次提交"。
+      // 刚推完 ⇒ 云端那一次就是**刚写上去的这一次** ⇒ 两排本来就该一样。
+      final gateway = _FakeGateway(
+        remote: remoteOf(storeWith(savedAt: now - 60000, projects: 1)),
+      )..commit = const RemoteCommit(sha: 'commit-old', message: '推之前云端那一次');
+      final app = await bootWith(
+        gateway: gateway,
+        local: storeWith(savedAt: now, projects: 3),
+        record: SyncRecord(
+          syncedAt: now - 30000,
+          remoteSha: 'sha-remote',
+          recordCount: 1,
+          // 提交码对得上 ⇒ `trustedOverwrite` 直接放行，不摆面板。
+          commitSha: 'commit-old',
+          localCommitSha: 'commit-old',
+        ),
+      );
+
+      await app.autoSyncAfterHome();
+
+      final record = app.readGitHubSyncRecord()!;
+      expect(record.commitSha, isNotEmpty);
+      expect(
+        record.localCommitSha,
+        record.commitSha,
+        reason: '刚推完：本机这份内容在云端就是刚写上去的那一次 —— 两排必须一致',
+      );
+      expect(
+        record.localCommitSha,
+        isNot('commit-old'),
+        reason: '写成"推之前那一次"就是那个缺陷本身',
+      );
+    });
+
     test('已经有本机指纹时不重复写盘（不制造无谓的文件改动）', () async {
       final same = storeWith(savedAt: now, projects: 2);
       final gateway = _FakeGateway(remote: remoteOf(same));

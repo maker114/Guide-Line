@@ -27,9 +27,14 @@ enum Urgency {
 /// 而同屏的 `isOverdue`、`Workspace.overdueTasks()` 都说它不逾期。
 /// 落盘入口（`Canonical.readDate`）现在会拒掉这种值，所以当前触发不到；
 /// 但归口之后**即使有脏值从别的路径进来，三处的结论也不会再分叉**。
+///
+/// 2026-10-02：换成 [Ids.parseIsoDateTime] —— 截止时间可以带 `HH:mm`，
+/// 而 `parseIsoDate` 只认纯日期，带时刻的值会被它判 `null`、
+/// 于是这条任务**静默掉进「没有到期日」**（分档、配色、分组一起错）。
+/// 分档仍然只按"天"算（用户口径：保持「已逾期」的口吻）。
 Urgency urgencyOf(String? dueAt, {DateTime? now}) {
   if (dueAt == null || dueAt.isEmpty) return Urgency.none;
-  final parsed = Ids.parseIsoDate(dueAt);
+  final parsed = Ids.parseIsoDateTime(dueAt);
   if (parsed == null) return Urgency.none;
 
   final days = _daysBetween(parsed, now ?? DateTime.now());
