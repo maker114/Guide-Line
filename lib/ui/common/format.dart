@@ -26,16 +26,21 @@ String formatTimestamp(int millis) {
   return '${d.year}-${_two(d.month)}-${_two(d.day)} ${_two(d.hour)}:${_two(d.minute)}';
 }
 
-/// 日期标签：`YYYY-MM-DD` → 「今天 / 明天 / 逾期 N 天 / N 天后 / M月D日」。
+/// 日期标签：`YYYY-MM-DD` → 「今天 / 明天 / 逾期 N 天 / N 天后」。
 ///
 /// 解析不了的字符串**原样返回**（契约里已被降级为 null，这里只是兜底）。
 String describeDate(String? date, {DateTime? now}) {
   final parsed = parseIsoDateTime(date);
   if (parsed == null) return date ?? '';
 
-  final today = now ?? DateTime.now();
-  final diff = _daysBetween(parsed, today);
-  if (diff == 0) return '今天';
+  final current = now ?? DateTime.now();
+  final diff = _daysBetween(parsed, current);
+  if (diff == 0) {
+    // **今天只给相对说法**（用户 2026-10-03）：不摆绝对日期与时刻。
+    // 带时刻且已经过了 ⇒ 说「逾期」（用户挑的词），与 `isOverdue` / `urgencyOf`
+    // 同一把尺子；只有日期、或今天的时刻还没到 ⇒ 「今天」。
+    return _todayPassed(parsed, date, current) ? '逾期' : '今天';
+  }
   if (diff == 1) return '明天';
   if (diff == -1) return '昨天';
   if (diff < 0) return '逾期 ${-diff} 天';
@@ -73,22 +78,55 @@ DateTime? parseIsoDateTime(String? value) => Ids.parseIsoDateTime(value);
 ///
 /// 2026-10-02：值可以是 `YYYY-MM-DD HH:mm`（截止时间精确到分钟）。
 /// 带时刻时**原样带上时刻**（`2026-10-03 08:30（明天）`）—— 用户设了钟点就是要看它。
+///
+/// 2026-10-03（用户）：**到期日是今天的，不摆绝对日期与时刻**，只给「今天」/「逾期」。
+/// 摆出 `2026-10-03 08:30` 在这时候是噪音 —— 今天的事只需要判断"过没过点"。
+/// 其余日子照旧给「绝对 + 相对」。
 String describeDateWithDays(String? date, {DateTime? now}) {
   if (date == null || date.isEmpty) return '';
-  if (parseIsoDateTime(date) == null) return date; // 解析不了就只回原文
-  return '$date（${describeDate(date, now: now)}）';
+  final parsed = parseIsoDateTime(date);
+  if (parsed == null) return date; // 解析不了就只回原文
+  final current = now ?? DateTime.now();
+  if (_daysBetween(parsed, current) == 0) return describeDate(date, now: current);
+  return '$date（${describeDate(date, now: current)}）';
 }
 
-/// 是否已逾期（到期日严格早于今天）。
+/// 是否已逾期。
 ///
-/// **仍然只按"天"判**（用户 2026-10-02 明确："保持『已逾期』的口吻"）：
-/// `2026-10-03 08:30` 在 10-03 当天不算逾期 —— 那一天还没过完，
-/// 而"今天 08:30 已经过了"是另一个口径（分钟级提醒），本轮不做。
+/// 2026-10-03 改口径（用户）：**带时刻的按绝对时刻判，到点即逾期** ——
+/// 今天 08:30 的任务在 09:00 就是逾期（原先要到明天才算）。
+/// **只有日期的不动**：它没有"具体时间点"，仍按天，明天才算逾期。
 bool isOverdue(String? date, {DateTime? now}) {
   final parsed = parseIsoDateTime(date);
   if (parsed == null) return false;
-  return _daysBetween(parsed, now ?? DateTime.now()) < 0;
+  final current = now ?? DateTime.now();
+  if (_todayPassed(parsed, date, current)) return true;
+  return _daysBetween(parsed, current) < 0;
 }
+
+/// 「今天 + 带时刻 + 时刻已经过了」。
+///
+/// 单独抽出来是因为三处（[describeDate] / [isOverdue] / `urgencyOf`）都要问
+/// 同一个问题 —— 而这个功能上出过的毛病，几乎全是"同一件事几处各写一遍"。
+bool _todayPassed(DateTime parsed, String? raw, DateTime current) =>
+    Ids.hasTimeOfDay(raw) && !parsed.isAfter(current);
+
+/// **任务行该不该标红** —— 逾期高亮在界面上的唯一判据。
+///
+/// 三个条件缺一不可，而它们分属三层信息：任务自己（有没有过点、是不是终态）、
+/// 以及它所属的**事件**（是不是已搁置）。
+///
+/// 为什么要收成一个函数：这三条原本在**列表页**与**事件详情页**各写了一遍，
+/// 而详情页那处漏了 `muted` —— 于是同一条任务在详情页是红的、在列表和
+/// 逾期横幅里却不算逾期（2026-10-03 发现并修）。这与 Q19 当年收口
+/// `overdueTasks()` 是同一个教训：**同一件事写两遍，迟早只剩一遍是对的**。
+bool isTaskRowOverdue(
+  String? dueAt, {
+  required bool pending,
+  required bool muted,
+  DateTime? now,
+}) =>
+    !muted && pending && isOverdue(dueAt, now: now);
 
 /// 按**日历天**求差，避开夏令时导致的 23/25 小时偏差。
 int _daysBetween(DateTime a, DateTime b) => DateTime.utc(

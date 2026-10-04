@@ -8,6 +8,7 @@ import 'package:guideline/core/models/task.dart';
 import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/common/format.dart';
 import 'package:guideline/ui/more/task_calendar_page.dart';
+import 'package:guideline/ui/more/task_grouping.dart';
 import 'package:guideline/ui/more/upcoming_page.dart';
 
 /// 「接下来的任务」（实机反馈：由原来的「到期」改过来）：
@@ -72,8 +73,20 @@ void main() {
     await openUpcoming(tester, app);
 
     // 分档依次是：已逾期 → 今天 → 没有到期日
+    //
+    // ⚠️ 「今天」必须**限定在分组头里**找：2026-10-03 起，到期日是今天的任务行
+    // 自己也显示「今天」（不再摆 `2026-10-03 08:30`），裸 `find.text('今天')`
+    // 会同时命中分组头与那一行。`已逾期` 不会撞 —— 任务行那一侧说的是
+    // 「逾期」/「逾期 N 天」，与分组头的标签不是同一个词。
     final overdueY = tester.getRect(find.text('已逾期')).top;
-    final todayY = tester.getRect(find.text('今天')).top;
+    final todayY = tester
+        .getRect(
+          find.descendant(
+            of: find.byType(TaskGroupHeader),
+            matching: find.text('今天'),
+          ),
+        )
+        .top;
     final noneY = tester.getRect(find.text('没有到期日')).top;
     expect(overdueY, lessThan(todayY));
     expect(todayY, lessThan(noneY));

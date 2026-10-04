@@ -45,8 +45,18 @@ void main() {
   group('describeDateWithDays：绝对日期 + 剩余天数', () {
     test('两者一起给，格式是「YYYY-MM-DD（相对日）」', () {
       expect(describeDateWithDays('2026-09-30', now: now), '2026-09-30（7 天后）');
-      expect(describeDateWithDays('2026-09-23', now: now), '2026-09-23（今天）');
       expect(describeDateWithDays('2026-09-20', now: now), '2026-09-20（逾期 3 天）');
+    });
+
+    test('到期日是今天 ⇒ **不摆绝对日期与时刻**，只给「今天」/「逾期」（用户 2026-10-03）', () {
+      expect(describeDateWithDays('2026-09-23', now: now), '今天');
+      // 今天带时刻、还没到点：同样是「今天」，不摆 `2026-09-23 08:30`
+      expect(describeDateWithDays('2026-09-23 08:30', now: now), '今天');
+      // 今天带时刻、已经过了：说「逾期」（用户挑的词）
+      expect(
+        describeDateWithDays('2026-09-23 08:30', now: DateTime(2026, 9, 23, 9)),
+        '逾期',
+      );
     });
 
     test('没有日期时给空串（调用方自己决定显示「未设置」）', () {
@@ -106,18 +116,30 @@ void main() {
         }
       });
 
-      test('带时刻的值，显示时**原样带上时刻**', () {
+      test('带时刻的值，显示时**原样带上时刻**（今天那一档除外）', () {
         expect(
-          describeDateWithDays('2026-09-23 08:30', now: now),
-          '2026-09-23 08:30（今天）',
+          describeDateWithDays('2026-09-24 08:30', now: now),
+          '2026-09-24 08:30（明天）',
         );
+        expect(describeDate('2026-09-24 08:30', now: now), '明天');
+        // 今天是例外：只给「今天」/「逾期」，不摆那串绝对日期与时刻
+        expect(describeDateWithDays('2026-09-23 08:30', now: now), '今天');
         expect(describeDate('2026-09-23 08:30', now: now), '今天');
       });
 
-      test('逾期仍按"天"判（用户口径：保持「已逾期」的口吻）', () {
-        // 当天 00:01 的截止时间**不算逾期** —— 那一天还没过完。
-        expect(isOverdue('2026-09-23 00:01', now: now), isFalse);
-        expect(isOverdue('2026-09-22 23:59', now: now), isTrue);
+      test('带时刻的按**绝对时刻**判：到点即逾期（用户 2026-10-03）', () {
+        final noon = DateTime(2026, 9, 23, 12);
+        // 今天 08:30 在中午就是逾期了 —— 原先要到明天才算
+        expect(isOverdue('2026-09-23 08:30', now: noon), isTrue);
+        // 还没到点：不算
+        expect(isOverdue('2026-09-23 08:30', now: DateTime(2026, 9, 23, 8)), isFalse);
+        // 正好到点 ⇒ 逾期（与提醒功能"到点不再提醒"是同一个界）
+        expect(
+          isOverdue('2026-09-23 08:30', now: DateTime(2026, 9, 23, 8, 30)),
+          isTrue,
+        );
+        // 昨天的任何时刻都已经过了
+        expect(isOverdue('2026-09-22 23:59', now: noon), isTrue);
       });
 
       test('组出来的值与解析回去是一对（往返）', () {
@@ -159,8 +181,49 @@ void main() {
     });
   });
 
+  group('isTaskRowOverdue：任务行该不该标红（唯一判据）', () {
+    // 这一条是给**事件详情页那处漂移**补的守卫：三条件里"事件是否已搁置"
+    // 原本只在列表页写了，详情页漏了 —— 同一条任务两处结论不同。
+    final noon = DateTime(2026, 9, 23, 12);
+
+    test('过点了 + 还没做完 + 事件没搁置 ⇒ 标红', () {
+      expect(
+        isTaskRowOverdue('2026-09-23 08:30', pending: true, muted: false, now: noon),
+        isTrue,
+      );
+    });
+
+    test('事件已搁置 ⇒ 不标红（详情页原先漏的就是这一条）', () {
+      expect(
+        isTaskRowOverdue('2026-09-23 08:30', pending: true, muted: true, now: noon),
+        isFalse,
+      );
+    });
+
+    test('已完成 / 已搁置的任务 ⇒ 不标红', () {
+      expect(
+        isTaskRowOverdue('2026-09-23 08:30', pending: false, muted: false, now: noon),
+        isFalse,
+      );
+    });
+
+    test('还没到点 ⇒ 不标红', () {
+      expect(
+        isTaskRowOverdue('2026-09-23 23:59', pending: true, muted: false, now: noon),
+        isFalse,
+      );
+    });
+
+    test('只有日期、且是今天 ⇒ 不标红（纯日期仍按天）', () {
+      expect(
+        isTaskRowOverdue('2026-09-23', pending: true, muted: false, now: noon),
+        isFalse,
+      );
+    });
+  });
+
   group('isOverdue 与 dateOffset', () {
-    test('逾期严格早于今天，今天不算逾期', () {
+    test('只有日期的：严格早于今天才算，今天不算逾期', () {
       expect(isOverdue('2026-09-22', now: now), isTrue);
       expect(isOverdue('2026-09-23', now: now), isFalse);
       expect(isOverdue('2026-09-24', now: now), isFalse);

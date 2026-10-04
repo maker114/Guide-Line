@@ -2139,6 +2139,38 @@ void main() {
       );
     });
 
+    test('带时刻的按**绝对时刻**判：今天 08:30 在中午就算逾期（用户 2026-10-03）', () {
+      final event = ws.createEvent(name: '事件');
+      final withTime =
+          ws.createTask(eventId: event.id, title: '今天八点半', dueAt: '2026-09-23 08:30');
+      final pureToday =
+          ws.createTask(eventId: event.id, title: '只有日期', dueAt: '2026-09-23');
+
+      // 还没到点：两条都不算
+      expect(ws.overdueTasks(now: DateTime(2026, 9, 23, 8)), isEmpty);
+
+      // 正好到点就是逾期 —— 与提醒功能里"到点不再提醒"是同一个界
+      expect(
+        ws.overdueTasks(now: DateTime(2026, 9, 23, 8, 30)).map((t) => t.id).toList(),
+        <String>[withTime.id],
+      );
+
+      // 中午：带时刻的那条已经逾期；**只有日期的那条仍旧不算**（明天才算）
+      final noon = ws.overdueTasks(now: DateTime(2026, 9, 23, 12));
+      expect(noon.map((t) => t.id).toList(), <String>[withTime.id]);
+      expect(
+        noon.map((t) => t.id),
+        isNot(contains(pureToday.id)),
+        reason: '纯日期没有"具体时间点"，给它编一个钟点是编出来的信息',
+      );
+
+      // 当天最后一分钟也一样：纯日期那条到 23:59 都还不算逾期
+      expect(
+        ws.overdueTasks(now: DateTime(2026, 9, 23, 23, 59)).map((t) => t.id),
+        isNot(contains(pureToday.id)),
+      );
+    });
+
     test('已搁置的事件不再计入「逾期」（实机反馈：放下的东西不该继续催）', () {
       final dropped = ws.createEvent(name: '先不做了');
       final droppedTask =

@@ -33,8 +33,26 @@ void main() {
       expect(
         urgencyOf('2026-09-23 23:59', now: now),
         Urgency.today,
-        reason: '当天任何时刻都还是「今天」—— 逾期只按天算',
+        reason: '还没到点的仍是「今天」（`now` 取的是当天 00:00）',
       );
+    });
+
+    test('带时刻且**已经过了** ⇒ overdue（用户 2026-10-03 改的口径）', () {
+      final noon = DateTime(2026, 9, 23, 12);
+      // 今天 08:30 在中午已经逾期 —— 原先算「今天」
+      expect(urgencyOf('2026-09-23 08:30', now: noon), Urgency.overdue);
+      // 正好到点也是逾期（与 `isOverdue` 同一个界）
+      expect(
+        urgencyOf('2026-09-23 08:30', now: DateTime(2026, 9, 23, 8, 30)),
+        Urgency.overdue,
+      );
+      // 还没到点仍是「今天」
+      expect(
+        urgencyOf('2026-09-23 08:30', now: DateTime(2026, 9, 23, 8)),
+        Urgency.today,
+      );
+      // **只有日期的不动**：今天到期仍是「今天」，明天才算逾期
+      expect(urgencyOf('2026-09-23', now: noon), Urgency.today);
     });
 
     test('边界：今天 / 3 天内 / 5 天内 / 7 天内 / 7 天后', () {

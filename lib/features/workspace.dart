@@ -387,7 +387,16 @@ class Workspace {
 
   /// **已逾期**的权威取数（Q19）：这是"我还欠着什么"里**已经晚了**的那一部分。
   ///
-  /// 口径：**未完成（`pending`）+ 未归档 + 有到期日 + 到期日早于今天**。
+  /// 口径：**未完成（`pending`）+ 未归档 + 有到期日 + 已经过了那个时间点**。
+  ///
+  /// "过了时间点"分两种（2026-10-03 用户口径）：
+  ///   · **带时刻**（`2026-10-03 08:30`）⇒ 比**绝对时刻**，到点即逾期；
+  ///   · **只有日期**（`2026-10-03`）⇒ 仍旧按**天**，明天才算逾期 ——
+  ///     纯日期没有"具体时间点"可言，给它编一个钟点（比如当晚 18:00）是编出来的信息。
+  /// 这与提醒功能的边界正好一致（那边也只认带时刻的）。
+  ///
+  /// `now` 只给用例用：不传就是"此刻"。收成参数是因为"今天 08:30 有没有过"
+  /// 这件事完全取决于现在几点，而用例不能随运行时刻飘。
   ///
   /// 三处必须同源 —— 外壳的逾期横幅、底部「更多」的角标、以及点进去的
   /// 「接下来的任务」页里「已逾期」那一组的行数：它们**只有这一个函数**。
@@ -402,8 +411,22 @@ class Workspace {
   ///
   /// 反过来说：**"这一页要不要显示搁置线的任务"始终是"要"**（[openTasks] 不排除），
   /// 这份函数只回答"哪几条算逾期"。
-  List<Task> overdueTasks() {
-    final today = Ids.todayDate();
+  List<Task> overdueTasks({DateTime? now}) {
+    final current = now ?? DateTime.now();
+    final today = Ids.todayDate(current);
+
+    // 一个"到期值"算不算已经过了。带时刻比绝对时刻，只有日期比天。
+    bool past(String due) {
+      if (!Ids.hasTimeOfDay(due)) {
+        // 纯日期：同一格式下**字典序就是时间序**，所以这里不需要解析 ——
+        // 今天到期的不算逾期（它是 urgency.dart 的「今天」那一档）。
+        return due.compareTo(today) < 0;
+      }
+      final parsed = Ids.parseIsoDateTime(due);
+      if (parsed == null) return false;
+      return !parsed.isAfter(current);
+    }
+
     final mutedEventIds = _mutedEventIds();
     final list = liveTasks
         .where((t) =>
@@ -411,8 +434,7 @@ class Workspace {
             t.status == NodeStatus.pending &&
             t.dueAt != null &&
             t.dueAt!.isNotEmpty &&
-            // 严格早于今天：今天到期的不算"逾期"（它是"今天"，urgency.dart 的另一档）
-            t.dueAt!.compareTo(today) < 0 &&
+            past(t.dueAt!) &&
             !mutedEventIds.contains(t.eventId))
         .toList(growable: false);
     list.sort((a, b) {

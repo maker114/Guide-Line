@@ -31,13 +31,19 @@ enum Urgency {
 /// 2026-10-02：换成 [Ids.parseIsoDateTime] —— 截止时间可以带 `HH:mm`，
 /// 而 `parseIsoDate` 只认纯日期，带时刻的值会被它判 `null`、
 /// 于是这条任务**静默掉进「没有到期日」**（分档、配色、分组一起错）。
-/// 分档仍然只按"天"算（用户口径：保持「已逾期」的口吻）。
+///
+/// 2026-10-03 改口径（用户）：**带时刻的按绝对时刻判，到点即逾期** ——
+/// 今天 08:30 的任务在 09:00 就是 `overdue`（原先算「今天」）。
+/// **只有日期的不动**：它没有"具体时间点"，仍按天，明天才算逾期。
 Urgency urgencyOf(String? dueAt, {DateTime? now}) {
   if (dueAt == null || dueAt.isEmpty) return Urgency.none;
   final parsed = Ids.parseIsoDateTime(dueAt);
   if (parsed == null) return Urgency.none;
 
-  final days = _daysBetween(parsed, now ?? DateTime.now());
+  final current = now ?? DateTime.now();
+  if (Ids.hasTimeOfDay(dueAt) && !parsed.isAfter(current)) return Urgency.overdue;
+
+  final days = _daysBetween(parsed, current);
   if (days < 0) return Urgency.overdue;
   if (days == 0) return Urgency.today;
   if (days <= 3) return Urgency.within3;

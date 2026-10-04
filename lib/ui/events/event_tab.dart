@@ -426,9 +426,14 @@ class _EventTaskRow extends StatelessWidget {
     // 这一行有缩进与状态图标，余量按 240 估。
     final due = dueLabelOf(context, task.dueAt, reservedWidth: 240);
     // **已搁置的任务不标红**：与事件详情页、任务行一致 ——
-    // 一边说"不再催"，一边画个红日期是自相矛盾的
-    final overdue =
-        !muted && isOverdue(task.dueAt) && task.status == NodeStatus.pending;
+    // 一边说"不再催"，一边画个红日期是自相矛盾的。
+    // 判据收在 `isTaskRowOverdue` 一处：详情页那处原先漏了 `muted`，
+    // 于是同一条任务两处结论不同（2026-10-03 修）。
+    final overdue = isTaskRowOverdue(
+      task.dueAt,
+      pending: task.status == NodeStatus.pending,
+      muted: muted,
+    );
     final done = task.status != NodeStatus.pending;
 
     return ListTile(

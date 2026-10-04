@@ -804,7 +804,14 @@ class _TaskLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = session.app();
     final theme = Theme.of(context);
-    final overdue = isOverdue(task.dueAt) && task.status == NodeStatus.pending;
+    // 逾期高亮与列表页、横幅**同一把尺子**：判据收在 `isTaskRowOverdue` 一处
+    // （`isOverdue` + 状态 + **事件是否已搁置**）。这里原先漏了最后那条，
+    // 于是同一条任务在详情页是红的、在列表和横幅里不算逾期（2026-10-03 修）。
+    final overdue = isTaskRowOverdue(
+      task.dueAt,
+      pending: task.status == NodeStatus.pending,
+      muted: app.ws.isEventMutedForDue(task.eventId),
+    );
     final done = task.status == NodeStatus.done;
     final summary = childSummary;
     // 到期日走全应用统一口径（`dueLabelOf`）：默认"绝对日期 + 剩余天数"，
