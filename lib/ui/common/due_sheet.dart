@@ -159,16 +159,28 @@ Future<String?> pickDateSheet(
                           // `alwaysUse24HourFormat: true` 已撤掉。
                           //
                           // 同一句要求的后半（"当选择下午的时候用 24 小时制表示"）：
-                          // **下午那半圈按 24 小时计数标 13–23**，而表盘仍是 12 格几何。
-                          // 靠给这一个选择器换一份 `MaterialLocalizations`（只覆盖
-                          // `formatHour`）实现 —— 不能改 `alwaysUse24HourFormat`，
-                          // 那个开关会同时把表盘变成"24 格两圈"。
-                          builder: (pickerContext, child) => Localizations.override(
-                            context: pickerContext,
-                            delegates: const <LocalizationsDelegate<dynamic>>[
-                              Pm24HourZhDelegate(),
-                            ],
-                            child: child ?? const SizedBox.shrink(),
+                          // **整块表盘按 24 小时标**（0–23）。
+                          //
+                          // 2026-10-06 试过两次才对，过程留在这：
+                          //   1. 只换 `MaterialLocalizations`（下面那层 `Localizations.override`）
+                          //      ⇒ **只有表头变了**（"3" → "15"），**表盘那圈数字没变**：
+                          //      SDK 里表盘的字取的是**格位**（1–12），不带"上午/下午"，
+                          //      所以按 `hour >= 12` 判不出来。
+                          //   2. 必须同时给 `alwaysUse24HourFormat: true` —— 表盘的 24 小时
+                          //      分支才会把 0–23 标出来（SDK `time_picker.dart:1532/1544`）。
+                          // 表盘几何因此从"一圈 12 格"变成"两圈 0–23"：Flutter 只提供这两档，
+                          // **没有"12 格几何 + 下午标 13–23"**；真要那个形状只能自己画表盘。
+                          builder: (pickerContext, child) => MediaQuery(
+                            data: MediaQuery.of(pickerContext)
+                                .copyWith(alwaysUse24HourFormat: true),
+                            child: Localizations.override(
+                              context: pickerContext,
+                              delegates:
+                                  const <LocalizationsDelegate<dynamic>>[
+                                Pm24HourZhDelegate(),
+                              ],
+                              child: child ?? const SizedBox.shrink(),
+                            ),
                           ),
                           // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
                           // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
