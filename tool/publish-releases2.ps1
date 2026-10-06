@@ -51,9 +51,9 @@ $notes = 'tool/release-notes.md'
 $releases = @(
   # 一个 Release 带**两个附件**（手机 APK + 电脑 zip）—— 用户 2026-10-03 的要求
   # 是"同步更新 win 版本"，下面那段附件循环因此改成能收数组（见 `$rel.Asset -is [array]`）。
-  # 2026-10-06：条目从 v2.7.0 换成 **v2.7.4** —— 2.7.0~2.7.3 从没发出去过，
-  # 与其补四个 Release，不如一次发**当前版本**（正文里把这几版讲的事一起带上）。
-  @{ Tag = 'v2.7.4'; Name = 'v2.7.4 — 到点提醒（本地通知），Windows 版首次随版本发出'; Section = 'v2.7.4'; Asset = @('dist/guideline-2.7.4.apk', 'dist/guideline-windows-2.7.4.zip') },
+  # 2026-10-06：条目从 v2.7.0 换成 **v2.7.11**（v2.7.4 那版也没发出去过）——
+  # 与其补一串 Release，不如一次发**当前版本**，正文里把这几版讲的事一起带上。
+  @{ Tag = 'v2.7.11'; Name = 'v2.7.11 — 提醒不再重复弹、到期日显示统一、时间选择器回到系统'; Section = 'v2.7.11'; Asset = @('dist/guideline-2.7.11.apk', 'dist/guideline-windows-2.7.11.zip') },
   @{ Tag = 'v1.9.3'; Name = 'v1.9.3 — 两条用例不再依赖 Windows 专用命令，CI 首次变绿'; Section = 'v1.9.3'; Asset = 'dist/guideline-1.9.3.apk' },
   @{ Tag = 'v1.5.1'; Name = 'v1.5.1 — 文案去括号，版本号不再漂移'; Section = 'v1.5.1'; Asset = 'dist/guideline-1.5.1.apk' },
   @{ Tag = 'v1.5.0'; Name = 'v1.5.0 — 事件详情页改名 + 速记按钮两处修复'; Section = 'v1.5.0'; Asset = 'dist/guideline-1.5.0.apk' },
