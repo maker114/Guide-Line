@@ -29,7 +29,23 @@ class UiPrefs {
     this.githubBackupPath = defaultGithubBackupPath,
     this.reminderEnabled = false,
     this.reminderLeads = ReminderLead.defaults,
+    this.reminderCatchUpShown = const <String>{},
   });
+
+  /// **已经补发过**的提醒档，键是 `任务 id|到期值`。
+  ///
+  /// 为什么要落盘：补发去重原先只存在 `AppController` 的内存里
+  /// （`_catchUpShown`），而**每次重开 App 都是一个新控制器** ⇒ 同一个"错过窗口"
+  /// 会被反复补发。用户 2026-10-06 实机反馈："当一件事情的截止日期进入一个小时
+  /// 之内时，每当我打开一次软件就会弹一次通知" —— 就是「提前 1 小时」那一档的
+  /// 触发时刻在这段时间里**已经过去了**，于是每次冷启动都判它"错过了"、都补一次。
+  ///
+  /// 键里带 `dueAt`：任务一改期，键就变了，于是**改期后允许重新补发一次** ——
+  /// 与从前的语义一致，只是不再重复。
+  ///
+  /// 与 [reminderLeads] 同一条口径：绑的是**这一台设备的通知行为**，
+  /// 所以不进导出、不进备份（`ui_prefs.json` 本来就不进）。丢了只会多补发一次。
+  final Set<String> reminderCatchUpShown;
 
   static const UiPrefs empty = UiPrefs();
 
@@ -242,6 +258,7 @@ class UiPrefs {
     String? githubBackupPath,
     bool? reminderEnabled,
     List<ReminderLead>? reminderLeads,
+    Set<String>? reminderCatchUpShown,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -272,6 +289,7 @@ class UiPrefs {
         githubBackupPath: githubBackupPath ?? this.githubBackupPath,
         reminderEnabled: reminderEnabled ?? this.reminderEnabled,
         reminderLeads: reminderLeads ?? this.reminderLeads,
+        reminderCatchUpShown: reminderCatchUpShown ?? this.reminderCatchUpShown,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -299,6 +317,10 @@ class UiPrefs {
         'reminderLeads': reminderLeads
             .map((lead) => lead.toJson())
             .toList(growable: false),
+        // 排序后再落盘：`Set` 的迭代顺序不稳定，不排序会让"同样的内容"写出不同的字节，
+        // 于是每次重排提醒都白白重写一遍偏好文件（`collapsedIds` 那两处同理）。
+        'reminderCatchUpShown':
+            reminderCatchUpShown.toList(growable: false)..sort(),
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -340,6 +362,10 @@ class UiPrefs {
       // 而不是先看到两格空白。
       reminderEnabled: json['reminderEnabled'] == true,
       reminderLeads: ReminderLead.normalize(json['reminderLeads']),
+      // 缺键 ⇒ 空集（老偏好文件里没有它）：**不会**因此少补发什么，
+      // 只是这一档还没被补发过而已，下一次重排照常补一次。
+      // 与其它集合字段同一套"坏值只丢那一项"的读法（复用 `_readIdSet`）。
+      reminderCatchUpShown: _readIdSet(json['reminderCatchUpShown']),
     );
   }
 

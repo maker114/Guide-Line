@@ -477,12 +477,6 @@ class AppController extends ChangeNotifier {
   /// 点通知进来、还等着被导航过去的那条任务 id（外壳取走一次即清）。
   String? pendingReminderTaskId;
 
-  /// 这一会话里**已经补发过**的 `任务 id|到期值`。
-  ///
-  /// 为什么需要它：排期是幂等的、会被反复重算（改个清单勾选也会触发），
-  /// 不记一笔的话同一条"错过窗口"的补发会在每次重算时重弹一遍。
-  final Set<String> _catchUpShown = <String>{};
-
   /// 这一会话是否真的往系统里排过东西。
   ///
   /// 它让"从没打开过提醒"的用户**连插件都不初始化** —— 提醒默认是关的，
@@ -545,6 +539,13 @@ class AppController extends ChangeNotifier {
       final leads = prefs.reminderLeads;
       final fires = <ReminderFire>[];
       final catchUps = <ReminderFire>[];
+      // 补发去重**落在偏好文件里**（`ui_prefs.json` 的 `reminderCatchUpShown`），
+      // 不是存在这个实例的内存里。为什么（2026-10-06 修，用户实机反馈）：
+      // 只在内存里的话，**每次重开 App 都是新控制器** ⇒ 同一个"错过窗口"会被
+      // 反复补发 —— "截止日期进入一个小时之内时，每当我打开一次软件就会弹一次通知"，
+      // 因为「提前 1 小时」那一档的触发时刻在这段时间里已经过去了。
+      final shown = prefs.reminderCatchUpShown;
+      final nextShown = <String>{};
       for (final task in workspace.openTasks()) {
         // "放下的线不该继续催"：事件已搁置 ⇒ 线下的任务不排、也不补。
         // 提醒正是"催"的地方之一，所以与 `Workspace.overdueTasks()` 同一口径
@@ -561,9 +562,18 @@ class AppController extends ChangeNotifier {
         );
         fires.addAll(plan.fires);
         final catchUp = plan.catchUp;
-        if (catchUp != null && _catchUpShown.add('${task.id}|${task.dueAt}')) {
-          catchUps.add(catchUp);
-        }
+        if (catchUp == null) continue; // 还没错过任何一档：不记键
+        // 键里带 `dueAt`：改期后键就变了，于是允许重新补发一次（语义与从前一致）
+        final key = '${task.id}|${task.dueAt}';
+        if (!shown.contains(key)) catchUps.add(catchUp);
+        nextShown.add(key);
+      }
+      // 顺手清掉过期键（任务已删 / 已完成 / 已搁置 / 已改期 ⇒ 它的键不再进 nextShown），
+      // 免得这个集合随用随涨。**内容没变就不写**：排期会被反复重算（勾一下清单也会），
+      // 每次重写一遍偏好文件既没必要，也会把"改动"放大成磁盘写入。
+      if (nextShown.length != prefs.reminderCatchUpShown.length ||
+          !nextShown.containsAll(prefs.reminderCatchUpShown)) {
+        updatePrefs(prefs.copyWith(reminderCatchUpShown: nextShown));
       }
       await service.replaceAll(fires);
       _hasScheduledReminders = fires.isNotEmpty;
