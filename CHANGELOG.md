@@ -35,6 +35,52 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.7.7] - 2026-10-06
+
+> 用户（2026-10-06）："算了，24小时时间恢复一下，但是在选择下午的时候轮盘上显示
+> 24 小时计数的点数。"
+>
+> 版本位（`AGENTS.md` §6）：撤销一条显示制式 ⇒ **修订位 +1**。
+>
+> ⚠️ **这一版只落地了前半句**（恢复 12 格轮盘）。后半句"下午那半圈按 24 小时标点数"
+> **未落地**，原因见下 —— 不是没做，是**试过之后确认它前面挡着一个加依赖的决定**。
+
+### Changed
+
+- **撤销 2.7.6 的强制 24 小时制**（`lib/ui/common/due_sheet.dart` 的 `showTimePicker`
+  去掉那层 `alwaysUse24HourFormat: true`）⇒ 时间表盘回到**系统的 12 格**
+  （1–12 + 上午/下午）。用户口径："恢复到之前的 12 格轮盘"。
+
+### 未落地：下午那半圈按 24 小时标点数（如实记下）
+
+用户要的是"**12 格的几何 + 下午标 13–23**"，而 Flutter 的表盘只有两档：
+12 格（1–12）与 24 格两圈（`alwaysUse24HourFormat: true`）—— **没有这一档**。
+
+试过一条路并**撞墙**（有编译错误为证）：表盘上的字确实经由
+`MaterialLocalizations.formatHour()`（SDK `material/time_picker.dart:1532/1544/1563/2188`），
+所以只要换掉 `MaterialLocalizations` 就能改到字。但换它必须继承
+`MaterialLocalizationZh`，而它的 9 个 `DateFormat` / `NumberFormat` 参数是
+**构造参数、父类私有存储**（`generated_material_localizations.dart:44979` 那 9 个
+`required super.xxx`）—— 实例上取不到（分析器报 8 条 `undefined_getter`），
+于是只能自己构造这 9 个 ⇒ 需要把 **`intl` 提成直接依赖**（现在只是
+`flutter_localizations` 的传递依赖，直接用会触发 `depend_on_referenced_packages`，
+而本仓库的验收线连 info 都不放过）。
+
+**下一步（下一轮一次做完）**：
+1. `pubspec.yaml` 加 `intl`（版本跟随 `flutter_localizations` 已锁定的那个），
+   `test/core/platform_boundary_test.dart` 的依赖册 +1；
+2. 新文件 `lib/ui/common/pm24_hour_localizations.dart`：`class Pm24HourZh extends
+   MaterialLocalizationZh` **只覆盖 `formatHour`**（下午 `hour >= 12` 返回 24 小时数，
+   其余 `super` 原样）+ 一个 `LocalizationsDelegate`（仅 zh，其它语言原样退回）；
+3. `due_sheet.dart` 的 `showTimePicker` 加 `builder:`，用 `Localizations.override`
+   **只包住这一个选择器**；
+4. 验证：`analyze` 0 问题 + 全量用例（`test/ui/localization_test.dart` 正好能挡住
+   "文案变英文"那类事故）+ **装机后拍上午 / 下午两张截图**（表盘数字是画布绘制的，
+   widget 测试钉不住）。
+
+> 2026-10-06 实测：`flutter pub add intl` 在本机**挂在 pub.dev 上拿不到包**
+> （网络那条路不通），所以这一步没能在当轮完成 —— 卡的是网络，不是代码。
+
 ## [2.7.6] - 2026-10-06
 
 > 用户（2026-10-06）："可以给详细时间选择轮盘改成 24 小时的吗，同时对于一个
