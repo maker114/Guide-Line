@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/ids.dart';
 import 'format.dart';
-import 'pm24_localizations.dart';
+import 'pm24_time_picker.dart';
 
 /// 选日期时点「清除」交回来的值。
 ///
@@ -148,9 +148,9 @@ Future<String?> pickDateSheet(
                     // 选完时刻 ⇒ **今天 + 该时刻**。
                     TextButton.icon(
                       onPressed: () async {
-                        final picked = await showTimePicker(
-                          context: sheetContext,
-                          initialTime: TimeOfDay.fromDateTime(
+                        final picked = await showPm24TimePicker(
+                          sheetContext,
+                          initial: TimeOfDay.fromDateTime(
                             currentTime ??
                                 DateTime(now.year, now.month, now.day, 9),
                           ),
@@ -160,32 +160,13 @@ Future<String?> pickDateSheet(
                           //
                           // ⚠️ 2026-10-06 试了三版，把结论钉在这里，别再反复：
                           //
-                          // ① 只换 `MaterialLocalizations`（下面这层 override）
-                          //    ⇒ 只有**表头**变 24 小时，**表盘那圈数字不变**。
-                          //    原因（SDK `time_picker.dart:1563`）：12 格模式下
-                          //    表盘把**格位**（1–12）交给 `formatHour`，
-                          //    它手里**没有"15"这个数**，也就无从显示 13–23。
-                          // ② 再加 `alwaysUse24HourFormat: true` ⇒ 表盘会标 0–23，
-                          //    但几何变成**两圈**、并且**上午/下午开关消失** ✗
-                          //    （用户不需要这个）。
-                          // ③ 要"12 格 + 下午标 13–23 + 保留上午/下午开关"，
-                          //    **只能自己画表盘** —— 那是新组件，不是改几行。
-                          //
-                          // 所以这里保持 ① 的状态：**12 格表盘 + 上午/下午开关照旧**，
-                          // 表头按 24 小时显示（用户认可的那半）。
-                          builder: (pickerContext, child) => Localizations.override(
-                            context: pickerContext,
-                            delegates: const <LocalizationsDelegate<dynamic>>[
-                              Pm24HourZhDelegate(),
-                            ],
-                            child: child ?? const SizedBox.shrink(),
-                          ),
-                          // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
-                          // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
-                          // `showTimePicker` 从来不给；表盘的 5 分钟步长是它自己的行为，
-                          // 想要任意分钟只能切到键盘输入模式。
-                          // 所以"5 分钟"不是我们设的，是它本来就有的 ——
-                          // 特意写下来，免得以后有人去传一个不存在的参数。
+                          // **自己画的 12 格表盘**（2026-10-06 用户要求："照着画一个"）。
+                          // 为什么不用系统那个：12 格模式下 SDK 把**格位**（1–12）
+                          // 交给 `formatHour`（`time_picker.dart:1563`），它手里
+                          // 没有"15"这个数 ⇒ 标不出 13–23；而打开
+                          // `alwaysUse24HourFormat` 虽能标 0–23，却会把表盘变成两圈
+                          // 并**吃掉上午/下午开关**（用户不要）。三条路的完整记录
+                          // 见 `pm24_time_picker.dart` 顶部与 CHANGELOG 2.7.10。
                         );
                         if (picked == null) return;
                         if (!sheetContext.mounted) return;
