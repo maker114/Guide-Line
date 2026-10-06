@@ -41,7 +41,7 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ## 灵感：速记 → 归类 → 合并
 
-![灵感页](docs/images/inspiration.png)
+<p align="center"><img src="docs/images/inspiration.png" width="420" alt="灵感页"></p>
 
 - **速记优先**：顶部一个输入框，随手写、点「记下」就存住；长按桌面图标也能直接落到这里
 - **写的时候就把项目选好**：输入框左下角能选归属（或「不分配」），选中后**不重置** ——
@@ -55,7 +55,7 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ## 项目：分类与目标
 
-![项目页](docs/images/projects.png)
+<p align="center"><img src="docs/images/projects.png" width="420" alt="项目页"></p>
 
 - 有下级的算**分类**（只显示名字、色条与汇总），没有下级的算**目标**（全套字段）——
   这样"要做什么"和"怎么归类"不会混在同一个视图里
@@ -66,7 +66,7 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ### 项目的「如何解决」：清单 + 正文 + AI 整理
 
-![目标详情](docs/images/project-detail.png)
+<p align="center"><img src="docs/images/project-detail.png" width="294" alt="目标详情"></p>
 
 「如何解决」由**两块并存**组成：**清单**是"要做什么"的拆分，**正文**是"整体怎么做"的说明。
 
@@ -81,13 +81,13 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ## 事件：一条线走到底
 
-![事件页](docs/images/events.png)
+<p align="center"><img src="docs/images/events.png" width="420" alt="事件页"></p>
 
 - **一个事件一张卡**：卡头是事件名 + `主线 3/5 已完成` + 当前走到哪个节点，右侧是这一条的动作菜单
 - **不用点进去**就能看到这条线走到哪一步了；点卡头或任意节点进详情
 - **已完成自动收起**：留下的那一行写着 `另有 N 个已完成节点`，点它就地展开、再点收回
 
-![事件详情](docs/images/event-detail.png)
+<p align="center"><img src="docs/images/event-detail.png" width="294" alt="事件详情"></p>
 
 - 一条事件就是**一条链**：节点按顺序往下走（`需求盘点 → 写方案 → 设计定稿 → 开发排期 → 发布上线`）。
   **只有这一种结构** —— 分叉与合流曾经有过，后来删了，因为"并行两条线请开两个事件"更清楚
@@ -97,7 +97,7 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ## 全部任务与提醒
 
-![更多页](docs/images/more.png)
+<p align="center"><img src="docs/images/more.png" width="420" alt="更多页"></p>
 
 - **接下来的任务**：还开着的任务一览，含没排期的
 - **全部任务**：分组三选一 —— **按完成度 / 按事件 / 按紧迫度**；
@@ -112,7 +112,7 @@ Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没�
 
 ### 提醒：到点了会告诉你
 
-![提醒设置](docs/images/reminder.png)
+<p align="center"><img src="docs/images/reminder.png" width="294" alt="提醒设置"></p>
 
 - **只提醒设了具体时间的任务**（`2026-10-03 18:00`）。只写到哪一天的不提醒 ——
   给"某天要做"编一个具体钟点是编出来的信息
