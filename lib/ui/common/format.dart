@@ -79,16 +79,18 @@ DateTime? parseIsoDateTime(String? value) => Ids.parseIsoDateTime(value);
 /// 2026-10-02：值可以是 `YYYY-MM-DD HH:mm`（截止时间精确到分钟）。
 /// 带时刻时**原样带上时刻**（`2026-10-03 08:30（明天）`）—— 用户设了钟点就是要看它。
 ///
-/// 2026-10-03（用户）：**到期日是今天的，不摆绝对日期与时刻**，只给「今天」/「逾期」。
-/// 摆出 `2026-10-03 08:30` 在这时候是噪音 —— 今天的事只需要判断"过没过点"。
-/// 其余日子照旧给「绝对 + 相对」。
+/// 2026-10-03 曾短暂加过一条"到期日是今天的就**只给「今天」**、不摆日期与时刻" ——
+/// 那是我把用户那句"今天的后缀给「今天」"理解成了"把日期藏掉"。
+/// **2026-10-06 已撤回**（用户："我的意思就是 `2026-10-06 08:00（今天）`"）：
+/// 今天照常给全称。藏掉那串等于把"今天几点要办"这个最有用的信息删了 ——
+/// 而用户恰恰是按钟点被提醒的。
+///
+/// （相对那一半仍然分两态：今天还没到点说「今天」、已经过点说「逾期」。）
 String describeDateWithDays(String? date, {DateTime? now}) {
   if (date == null || date.isEmpty) return '';
   final parsed = parseIsoDateTime(date);
   if (parsed == null) return date; // 解析不了就只回原文
-  final current = now ?? DateTime.now();
-  if (_daysBetween(parsed, current) == 0) return describeDate(date, now: current);
-  return '$date（${describeDate(date, now: current)}）';
+  return '$date（${describeDate(date, now: now)}）';
 }
 
 /// 是否已逾期。

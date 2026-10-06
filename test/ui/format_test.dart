@@ -48,14 +48,17 @@ void main() {
       expect(describeDateWithDays('2026-09-20', now: now), '2026-09-20（逾期 3 天）');
     });
 
-    test('到期日是今天 ⇒ **不摆绝对日期与时刻**，只给「今天」/「逾期」（用户 2026-10-03）', () {
-      expect(describeDateWithDays('2026-09-23', now: now), '今天');
-      // 今天带时刻、还没到点：同样是「今天」，不摆 `2026-09-23 08:30`
-      expect(describeDateWithDays('2026-09-23 08:30', now: now), '今天');
-      // 今天带时刻、已经过了：说「逾期」（用户挑的词）
+    test('今天照常给「绝对 + 相对」（2026-10-06 撤回 2.7.1 那条"今天不摆日期"）', () {
+      // 用户原话："我的意思就是 `2026-10-06 08:00（今天）`" —— 日期与时刻都要在。
+      expect(describeDateWithDays('2026-09-23', now: now), '2026-09-23（今天）');
+      expect(
+        describeDateWithDays('2026-09-23 08:30', now: now),
+        '2026-09-23 08:30（今天）',
+      );
+      // 今天带时刻、已经过了：相对那一半说「逾期」（用户挑的词），日期与时刻照样在
       expect(
         describeDateWithDays('2026-09-23 08:30', now: DateTime(2026, 9, 23, 9)),
-        '逾期',
+        '2026-09-23 08:30（逾期）',
       );
     });
 
@@ -116,14 +119,17 @@ void main() {
         }
       });
 
-      test('带时刻的值，显示时**原样带上时刻**（今天那一档除外）', () {
+      test('带时刻的值，显示时**原样带上时刻**', () {
         expect(
           describeDateWithDays('2026-09-24 08:30', now: now),
           '2026-09-24 08:30（明天）',
         );
         expect(describeDate('2026-09-24 08:30', now: now), '明天');
-        // 今天是例外：只给「今天」/「逾期」，不摆那串绝对日期与时刻
-        expect(describeDateWithDays('2026-09-23 08:30', now: now), '今天');
+        // 今天也一样带上（2026-10-06 起不再是例外）
+        expect(
+          describeDateWithDays('2026-09-23 08:30', now: now),
+          '2026-09-23 08:30（今天）',
+        );
         expect(describeDate('2026-09-23 08:30', now: now), '今天');
       });
 
