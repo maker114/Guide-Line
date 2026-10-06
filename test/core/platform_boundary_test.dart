@@ -23,9 +23,10 @@ import 'package:flutter_test/flutter_test.dart';
 ///   · `package:guideline/` 是工程自己的包（`pubspec.yaml` 的 `name:`），不是依赖；
 ///   · 其余一律算第三方依赖 —— 只能出现在 `lib/platform/` 下。
 ///
-/// 与 `README.md` 里"pubspec.yaml 声明了几个 / 真在用的是几个"那两句是**两件事**：
-/// 那两句说的是 `pubspec.yaml` 的声明（含模板自带、本工程一处没用的 `cupertino_icons`），
-/// 这里说的是**代码里真的 import 了谁**。
+/// 与 `docs/工程说明.md` §3 里"pubspec.yaml 声明了几个 / 真在用的是几个"那两句是
+/// **两件事**：那两句说的是 `pubspec.yaml` 的声明（含模板自带、本工程一处没用的
+/// `cupertino_icons`），这里说的是**代码里真的 import 了谁**。
+/// （那两句话 2026-10-06 之前写在 README 里，README 重写成软件介绍之后搬到了工程说明。）
 void main() {
   final files = _dartFiles(Directory('lib'));
 

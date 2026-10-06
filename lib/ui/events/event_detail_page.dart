@@ -919,7 +919,15 @@ class _TaskLine extends StatelessWidget {
       ),
       // **不能用 SingleChildScrollView 包副标题**：ListTile 量高度时会给
       // `maxWidth: Infinity`，横向滚动视图在那种约束下会让里面的 RenderParagraph
-      // 拿不到宽度而炸在布局里。用 Flexible + ellipsis，宽度由父级分配，安全。
+      // 拿不到宽度而炸在布局里。用 ellipsis，宽度由父级分配，安全。
+      //
+      // ⚠️ 日期那一段**不许用 `Flexible`**（2026-10-06 修）：它原来是
+      // `Flexible(Text(due))`，而「下级 x/y」也是 `Flexible` —— 两个 flex: 1
+      // 的兄弟在空间不够时**各分一半**，于是日期只剩半行可写、被省略号从中间切断
+      // （真机上是 `2026-10-05（昨…`）。那比"退成短句"难看得多，而且**调预留宽度
+      // 救不了它**（预留只管"该不该显示全称"，管不了排版怎么分宽度）。
+      // 现在日期按自然宽度排（`dueLabelOf` 已经保证它单独放得下），
+      // 只有「下级 x/y」用 `Expanded` 去吃剩下的、必要时自己省略。
       subtitle: (due.isEmpty && summary == null)
           ? null
           : Row(
@@ -931,19 +939,17 @@ class _TaskLine extends StatelessWidget {
                     color: overdue ? theme.colorScheme.error : theme.colorScheme.outline,
                   ),
                   const SizedBox(width: 3),
-                  Flexible(
-                    child: Text(
-                      due,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: overdue ? theme.colorScheme.error : null,
-                      ),
+                  Text(
+                    due,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: overdue ? theme.colorScheme.error : null,
                     ),
                   ),
                 ],
                 if (due.isNotEmpty && summary != null) const SizedBox(width: 10),
                 if (summary != null)
-                  Flexible(
+                  Expanded(
                     child: Text(
                       summary,
                       overflow: TextOverflow.ellipsis,

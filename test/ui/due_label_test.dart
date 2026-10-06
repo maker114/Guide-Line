@@ -47,9 +47,13 @@ void main() {
         );
   }
 
-  test('预留宽度是量出来的那个数 —— 改它得先重量（回归：2026-10-04）', () {
-    // 这个数不许再回到 200 / 240 / 300：那三档会把"还剩一半空间"的行也截掉。
-    expect(dueRowReservedWidth, 100);
+  test('预留宽度是量出来的那个数 —— 改它得先重量（回归：2026-10-04 / 10-06）', () {
+    // 不许回到 200 / 240 / 300：那三档会把"还剩一半空间"的行也截成短句。
+    // 104 = 行内实测 74 + 卡片左右外边距 24 + 6 余量。
+    // ⚠️ 2026-10-06 那条"中间截断"的教训：它**不是**这个数太小造成的，
+    // 是详情页把日期也放进了 `Flexible`（与「下级 x/y」各分一半）——
+    // 所以别再看到截断就往上加这个数，先去看排版。
+    expect(dueRowReservedWidth, 104);
   });
 
   testWidgets('日期型的全称不再被虚高的预留挤掉', (tester) async {
@@ -71,12 +75,12 @@ void main() {
   });
 
   testWidgets('同一串：屏幕越窄越容易退成短句（方向不许反）', (tester) async {
-    // 320dp 下这一串正好等于预算（384→320 时可用 220dp，串也约 220dp），
-    // 所以这里拿更窄的 200dp 钉方向：窄了才退，宽了不该退。
-    final wide = await pumpPage(tester, width: 320);
+    // 真机宽 384dp（预留 132 ⇒ 可用 252）下这一串放得下；
+    // 压到 300dp（可用 168）就该退成短句。
+    final wide = await pumpPage(tester, width: 384);
     expect(wide('2026-09-28'), '2026-09-28（逾期 6 天）');
 
-    final narrow = await pumpPage(tester, width: 200);
+    final narrow = await pumpPage(tester, width: 300);
     expect(narrow('2026-09-28'), '逾期 6 天');
   });
 
