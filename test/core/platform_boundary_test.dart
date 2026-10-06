@@ -130,15 +130,6 @@ const Set<String> _sdkPackages = <String>{
   'flutter',
   'flutter_test',
   'flutter_localizations',
-  // 2026-10-06 登记：判据同样是"有没有平台通道" —— `intl` 是 Dart 团队的纯 Dart 包、
-  // 没有任何原生实现，而且它本来就是 `flutter_localizations` 的传递依赖。
-  //
-  // 为什么突然直接用上它：时间表盘要"**12 格几何 + 下午标 13–23**"，Flutter 只提供
-  // "12 格"与"24 格两圈"两档，只能换掉那一处的 `MaterialLocalizations`
-  // （见 `lib/ui/common/pm24_localizations.dart`）；而换它要继承
-  // `MaterialLocalizationZh`，那个类的 9 个 `DateFormat` / `NumberFormat` 是
-  // 构造参数、实例上取不到 ⇒ 必须自己造 ⇒ 得直接依赖 `intl`。
-  'intl',
 };
 
 /// `lib/platform` 下**当前**真的在用的插件，以及各自被 import 的处数。
