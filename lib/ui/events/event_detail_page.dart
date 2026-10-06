@@ -817,10 +817,16 @@ class _TaskLine extends StatelessWidget {
     // 到期日走全应用统一口径（`dueLabelOf`）：默认"绝对日期 + 剩余天数"，
     // 只有宽度真的放不下时才退成相对日。有下级汇总时那一行还要放
     // 「下级 x/y」，1.6 倍字体下会顶到行尾，所以余量多留一点。
+    // 预留 = 行里固定的那一份 + 「下级 x/y」**实测**的宽度。
+    // 原先这里拍的是 `summary == null ? 200 : 300` —— 于是只要有子任务，
+    // 那一行的到期日就一律被截成短句（用户实机反馈"有子任务的就不显示完整日期"，
+    // 2026-10-04 量过之后改成按实际宽度加）。
     final due = dueLabelOf(
       context,
       task.dueAt,
-      reservedWidth: summary == null ? 200 : 300,
+      reservedWidth: summary == null
+          ? dueRowReservedWidth
+          : dueRowReservedWidth + labelWidthOf(context, summary) + 8,
     );
 
     // 层级区分：主任务是 titleSmall（更大更重），子任务降到 bodySmall 并缩进

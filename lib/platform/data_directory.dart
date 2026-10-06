@@ -87,9 +87,9 @@ class AppInfo {
 
   static const String displayName = 'Guide Line';
 
-  static const String version = '2.7.1';
+  static const String version = '2.7.2';
 
-  static const String buildNumber = '81';
+  static const String buildNumber = '82';
 
   /// 界面与导出里展示的完整版本（`1.8.5+37`）。
   ///

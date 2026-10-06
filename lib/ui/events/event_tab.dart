@@ -423,8 +423,9 @@ class _EventTaskRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     // 到期日走全应用统一口径（`dueLabelOf`）：默认"绝对日期 + 剩余天数"，
-    // 这一行有缩进与状态图标，余量按 240 估。
-    final due = dueLabelOf(context, task.dueAt, reservedWidth: 240);
+    // 放不下才退成短句。预留宽度用 `dueRowReservedWidth`（真机量出来的，
+    // 原先这里拍的是 240 —— 白白扔掉一半空间，带时刻的值一律被截）。
+    final due = dueLabelOf(context, task.dueAt);
     // **已搁置的任务不标红**：与事件详情页、任务行一致 ——
     // 一边说"不再催"，一边画个红日期是自相矛盾的。
     // 判据收在 `isTaskRowOverdue` 一处：详情页那处原先漏了 `muted`，
