@@ -195,15 +195,14 @@ void main() {
 
     await tester.tap(find.text('选时间…'));
     await tester.pumpAndSettle();
-    // 2026-10-06：面板里的时刻选择器换成了**自己画的 12 格表盘**
-    // （`pm24_time_picker.dart`）。表盘上的数字是画布绘制的，`find.text`
-    // 找不到它们 —— 所以这里走**表头与按钮**这条路：初始值本来就落在 09:00，
-    // 直接「完成」即可，验的是"选完能落成带 HH:mm 的值"这件事本身。
-    expect(find.text('选小时'), findsOneWidget, reason: '一进来是"选小时"那一档');
-    expect(find.text('上午'), findsOneWidget);
-    expect(find.text('下午'), findsOneWidget);
+    // 系统的时间选择器（2026-10-06：自画表盘那版已撤掉，见 CHANGELOG 2.7.12）
+    expect(find.byType(TimePickerDialog), findsOneWidget);
 
-    await tester.tap(find.text('完成'));
+    // 确定键的文案跟 locale 走，**不写死**（写死过一次，不同语言下会找不到）。
+    final l10n = MaterialLocalizations.of(
+      tester.element(find.byType(TimePickerDialog)),
+    );
+    await tester.tap(find.text(l10n.okButtonLabel));
     await tester.pumpAndSettle();
 
     final due = app.ws.liveTasks.single.dueAt!;

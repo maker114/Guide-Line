@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/ids.dart';
 import 'format.dart';
-import 'pm24_time_picker.dart';
+import 'pm24_localizations.dart';
 
 /// 选日期时点「清除」交回来的值。
 ///
@@ -148,9 +148,9 @@ Future<String?> pickDateSheet(
                     // 选完时刻 ⇒ **今天 + 该时刻**。
                     TextButton.icon(
                       onPressed: () async {
-                        final picked = await showPm24TimePicker(
-                          sheetContext,
-                          initial: TimeOfDay.fromDateTime(
+                        final picked = await showTimePicker(
+                          context: sheetContext,
+                          initialTime: TimeOfDay.fromDateTime(
                             currentTime ??
                                 DateTime(now.year, now.month, now.day, 9),
                           ),
