@@ -158,8 +158,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('现在还没有日期'), findsOneWidget, reason: '没设过就说清"还没有"');
     expect(find.text('清除日期'), findsNothing, reason: '没有值就不该出现清除键');
-    // 2026-10-02：没有日期时也不给「选时间…」—— 那一天还不存在，谈几点都早
-    expect(find.text('选时间…'), findsNothing);
+    // 2026-10-06 改口径（用户要求）：**没有日期时也给「选时间…」** ——
+    // "对于一个没有设置时间的条目，需要一开始就可以设置详细时间"。
+    // 选完时刻落成"今天 + 该时刻"（见 `due_sheet.dart` 里那句 `?? now`）。
+    // 原先这里断言的是 `findsNothing`（"那一天还不存在，谈几点都早"）。
+    expect(find.text('选时间…'), findsOneWidget);
 
     await tester.tap(firstTappableDay(tester));
     await tester.pumpAndSettle();

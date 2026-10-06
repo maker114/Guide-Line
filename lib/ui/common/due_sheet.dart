@@ -110,6 +110,20 @@ Future<String?> pickDateSheet(
                   firstDate: first,
                   lastDate: last,
                   onDateChanged: (picked) {
+                    // **改日期时保留已设的时刻**（2026-10-06 修）：原先这里无条件 pop
+                    // 一个纯日期串，于是"先设时刻、再改日期"会把刚设的时刻冲掉。
+                    // 从前这条路少见（没设过日期的条目根本点不到「选时间…」），
+                    // 现在它成了主线用法之一，必须留住。
+                    if (currentTime != null) {
+                      Navigator.of(sheetContext).pop(
+                        Ids.isoDateTime(
+                          picked,
+                          hour: currentTime.hour,
+                          minute: currentTime.minute,
+                        ),
+                      );
+                      return;
+                    }
                     final month = picked.month.toString().padLeft(2, '0');
                     final day = picked.day.toString().padLeft(2, '0');
                     Navigator.of(sheetContext)
@@ -124,42 +138,56 @@ Future<String?> pickDateSheet(
                   crossAxisAlignment: WrapCrossAlignment.center,
                   spacing: 4,
                   children: <Widget>[
-                    // 「选时间…」**只在有日期时给**：没日期就没有"在哪一天几点"可谈。
-                    // 打开时预填已有时刻；没有就落在 09:00（一天里最常见的截止点）。
-                    if (current != null)
-                      TextButton.icon(
-                        onPressed: () async {
-                          final picked = await showTimePicker(
-                            context: sheetContext,
-                            initialTime: TimeOfDay.fromDateTime(
-                              currentTime ??
-                                  DateTime(now.year, now.month, now.day, 9),
+                    // 「选时间…」**一直给**（2026-10-06 改，用户要求）。
+                    //
+                    // 原先这里是 `if (current != null)` ——"没日期就没有'在哪一天几点'
+                    // 可谈"。但用户要的正好相反："对于一个没有设置时间的条目，
+                    // 需要一开始就可以设置详细时间"：还没设过日期的条目，一上来就该
+                    // 能设到几点几分。没日期时的语义落在下面那句 `?? now`：
+                    // 选完时刻 ⇒ **今天 + 该时刻**。
+                    TextButton.icon(
+                      onPressed: () async {
+                        final picked = await showTimePicker(
+                          context: sheetContext,
+                          initialTime: TimeOfDay.fromDateTime(
+                            currentTime ??
+                                DateTime(now.year, now.month, now.day, 9),
+                          ),
+                          // **强制 24 小时制**（用户 2026-10-06："时间选择轮盘改成
+                          // 24 小时的"）。不干预就跟随系统的"12/24 小时制"设置，
+                          // 系统是 12 小时制时轮盘上会出现 AM/PM。
+                          // 只改"怎么显示"，不改任何数据（存的仍是 ISO 的 `HH:mm`）。
+                          builder: (pickerContext, child) => MediaQuery(
+                            data: MediaQuery.of(pickerContext).copyWith(
+                              alwaysUse24HourFormat: true,
                             ),
-                            // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
-                            // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
-                            // `showTimePicker` 从来不给；表盘的 5 分钟步长是它自己的行为，
-                            // 想要任意分钟只能切到键盘输入模式。
-                            // 所以"5 分钟"不是我们设的，是它本来就有的 ——
-                            // 特意写下来，免得以后有人去传一个不存在的参数。
-                          );
-                          if (picked == null) return;
-                          if (!sheetContext.mounted) return;
-                          final day = Ids.parseIsoDateTime(current) ?? now;
-                          Navigator.of(sheetContext).pop(
-                            Ids.isoDateTime(
-                              day,
-                              hour: picked.hour,
-                              minute: picked.minute,
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.schedule_outlined, size: 18),
-                        label: Text(
-                          currentTime == null
-                              ? '选时间…'
-                              : '时间 ${_hhmm(currentTime)}',
-                        ),
+                            child: child ?? const SizedBox.shrink(),
+                          ),
+                          // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
+                          // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
+                          // `showTimePicker` 从来不给；表盘的 5 分钟步长是它自己的行为，
+                          // 想要任意分钟只能切到键盘输入模式。
+                          // 所以"5 分钟"不是我们设的，是它本来就有的 ——
+                          // 特意写下来，免得以后有人去传一个不存在的参数。
+                        );
+                        if (picked == null) return;
+                        if (!sheetContext.mounted) return;
+                        final day = Ids.parseIsoDateTime(current) ?? now;
+                        Navigator.of(sheetContext).pop(
+                          Ids.isoDateTime(
+                            day,
+                            hour: picked.hour,
+                            minute: picked.minute,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.schedule_outlined, size: 18),
+                      label: Text(
+                        currentTime == null
+                            ? '选时间…'
+                            : '时间 ${_hhmm(currentTime)}',
                       ),
+                    ),
                     // 「清除时间」只在这一份值**真的带时刻**时给：
                     // 纯日期的值上摆一个"清除时间"是让人以为它有时间。
                     if (currentTime != null)
