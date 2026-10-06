@@ -46,6 +46,17 @@ jobs:
       - name: Test
         run: flutter test --no-pub
 
+      # 演示数据也要能生成、并通过它自己的自检。
+      #
+      # 为什么把这一步放进 CI：这份工具**悄悄烂过一次**（2026-09-27 审计发现的，
+      # 见本文件开头）。根因不是它写得差，是**没人跑它** —— `flutter analyze`
+      # 与 `flutter test` 都不碰 `tool/`，于是它的期望值随功能演进过期了也没人知道。
+      # 演示数据是"给别人试 / 写文档拍截图"的那一份，值得一条机器守卫。
+      - name: Demo data seed + self-check
+        run: |
+          dart run tool/demo_seed.dart
+          dart run tool/demo_verify.dart
+
   build:
     name: build apk (release)
     runs-on: ubuntu-latest

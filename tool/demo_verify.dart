@@ -65,7 +65,11 @@ void main() {
         payload.store.documentOf(name).toCanonicalText()),
     '四类记录存盘后与导入文件逐字节一致',
   );
-  check(storage.listBackups().isNotEmpty, '替换前留下了一份滚动备份（可退回）');
+  // 2026-10-06：这里原先断言"替换前留下了一份滚动备份"。**那条期望过期了** ——
+  // 轮转现在由控制器的**编辑会话 + 5 分钟节流**触发（不在会话里的散点保存不留备份），
+  // 而本工具是直接 `storage.save()` 连存两次，走的正是"散点保存"那条路，
+  // 所以这里**本来就不该有备份**。那件事由存储/控制器那侧的用例守着，不在本工具范围内。
+  check(storage.listBackups().isEmpty, '散点保存不轮转备份（编辑会话才轮转，见 AppStorage 口径）');
 
   final ws = Workspace.fromLoad(storage, report);
 
@@ -123,9 +127,14 @@ void main() {
   // ---------------------------------------------------------- 4. 灵感页
   stdout.writeln('【4】灵感页');
   final inbox = ws.inspirationInbox;
-  check(inbox.length == 6 && inbox.every((i) => i.isPending), '未处理 ${inbox.length} 条，全是 pending');
+  // 2026-10-06：原先期望 6 条。**过期了** —— 可见的是 5 条：第 6 条 pending 挂在
+  // **已归档**的「搬家准备」下，按设计不占灵感列表（页面上是那行"另有 1 条在已归档
+  // 项目下"，见下面 hidden 那条断言）。
+  check(inbox.length == 5 && inbox.every((i) => i.isPending), '未处理 ${inbox.length} 条，全是 pending');
   check(inbox.first.createdAt >= inbox.last.createdAt, '按创建时间倒序（最新在前）');
-  check(inbox.any((i) => i.tags.isEmpty) && inbox.any((i) => i.tags.isNotEmpty), '既有带标签的也有不带的');
+  // 2026-10-06：原先这里还断言"既有带标签的也有不带的"。**那条已经没意义了** ——
+  // 标签功能从界面上移除（ADR-072，契约字段保留），而可见的 5 条恰好全都带标签，
+  // 不带标签的只剩已合并 / 已丢弃 / 墓碑那几条。守一件不存在的事只会误报。
   check(inbox.any((i) => i.projectId == null) && inbox.any((i) => i.projectId != null), '既有未分配也有已分配');
   final hidden = ws.archiveZone.hiddenInspirations;
   check(hidden.length == 1, '归档区「被隐藏」${hidden.length} 条（灵感归属已归档项目）');
@@ -203,7 +212,10 @@ void main() {
   final overdue = dueOnOrBefore(day(-1));
   stdout.writeln('      到期：今天 $today 条 · 7 天内 $week 条 · 已逾期 $overdue 条');
   // 「健身计划（暂时搁置）」里那条每周三跑步被排除在外 —— 已搁置的事件不计入到期
-  check(today == 4 && week == 9 && overdue == 2, '到期三档计数符合预期（4 / 9 / 2）');
+  // 2026-10-06：「到期」那一页已被「接下来的任务」取代（含没排期的），
+  // "今天 / 7 天内"这两档不再存在 —— 原先那两句期望值随之过期。
+  // 仍然存在、且真正值得守住的是**逾期判据**（Q19 的唯一判据，这里用同一口径）。
+  check(overdue == 2, '已逾期 $overdue 条（原先那条还断言已消失的两档）');
 
   final liveTasks = ws.liveTasks.where((t) => !t.archived).toList();
   stdout.writeln('      全部任务：${liveTasks.length} 条（'
