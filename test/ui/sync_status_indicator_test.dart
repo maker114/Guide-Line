@@ -4,6 +4,8 @@ import 'package:guideline/app/auto_sync_state.dart';
 import 'package:guideline/ui/common/diff_colors.dart';
 import 'package:guideline/ui/common/sync_status_indicator.dart';
 
+import '../support/tolerant_golden.dart';
+
 /// 标题栏右侧那枚自动同步指示器（handoff 双端同步 #87c57e）的外观。
 ///
 /// 用户口径（2026-09-30，见 ADR-093）：在传是**缺口圆环**；传完了同一支描边
@@ -547,9 +549,23 @@ void main() {
       // 只截这一格：既避开 debug 角标，也不会被标题栏其余部分干扰。
       await pumpIndicator(tester, const AutoSyncState.done('abcdef1'));
 
+      // 换成带 0.5% 容差的比较器 —— 基准目录**沿用默认比较器那一份**。
+      //
+      // 为什么不去自己拼路径：这件事我错了两次。`Uri.file('E:\...\test/')`
+      // 会把 `test/` 那一段吞掉；放到 `test/flutter_test_config.dart` 里用
+      // `Directory.current.uri.resolve('test/')`，实测拿到的仍是包根目录
+      // （清了 `.dart_tool/flutter_build` 也一样）。而**默认比较器的 basedir
+      // 本来就是对的**（这条用例在改动前本地一直是绿的），直接接管它最稳。
+      // 于是 golden 的 key 照旧按"相对本文件"写。
+      final GoldenFileComparator previous = goldenFileComparator;
+      if (previous is LocalFileComparator) {
+        goldenFileComparator = TolerantGoldenComparator(previous.basedir);
+      }
+      addTearDown(() => goldenFileComparator = previous);
+
       await expectLater(
         find.byType(SyncStatusIndicator),
-        matchesGoldenFile('goldens/sync_indicator_done.png'),
+        matchesGoldenFile('ui/goldens/sync_indicator_done.png'),
       );
     });
   });
