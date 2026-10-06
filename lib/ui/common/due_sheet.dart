@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/ids.dart';
 import 'format.dart';
+import 'pm24_localizations.dart';
 
 /// 选日期时点「清除」交回来的值。
 ///
@@ -157,20 +158,18 @@ Future<String?> pickDateSheet(
                           // "恢复到之前的 12 格轮盘"）—— 2.7.6 里加的那层
                           // `alwaysUse24HourFormat: true` 已撤掉。
                           //
-                          // ⏳ 同一句要求的后半（"当选择下午的时候用 24 小时制表示"）
-                          // **仍未落地**，而且试过之后确认：**不是一两行能做的** ——
-                          //   · 表盘的字确实走 `MaterialLocalizations.formatHour()`
-                          //     （SDK `time_picker.dart:1532/1544/1563/2188`），但换掉它
-                          //     要求 `MaterialLocalizationZh` 的子类；
-                          //   · 而那个类的 9 个 `DateFormat` / `NumberFormat` 参数是
-                          //     **私有存储**（构造参数传进父类、实例上读不到），
-                          //     要自己构造就必须把 `intl` 提成**直接依赖**（现在只是
-                          //     `flutter_localizations` 的传递依赖）；
-                          //   · 包装 `MaterialLocalizations` 则要实现约 40 个成员，
-                          //     写错一处就让"上午/下午/取消/确定"变英文。
-                          // ⇒ 下一轮的正路：加 `intl` 直接依赖（并登记进
-                          // `platform_boundary_test.dart` 的插件/依赖册）+ 子类只覆盖
-                          // `formatHour`。详情见 CHANGELOG 2.7.7。
+                          // 同一句要求的后半（"当选择下午的时候用 24 小时制表示"）：
+                          // **下午那半圈按 24 小时计数标 13–23**，而表盘仍是 12 格几何。
+                          // 靠给这一个选择器换一份 `MaterialLocalizations`（只覆盖
+                          // `formatHour`）实现 —— 不能改 `alwaysUse24HourFormat`，
+                          // 那个开关会同时把表盘变成"24 格两圈"。
+                          builder: (pickerContext, child) => Localizations.override(
+                            context: pickerContext,
+                            delegates: const <LocalizationsDelegate<dynamic>>[
+                              Pm24HourZhDelegate(),
+                            ],
+                            child: child ?? const SizedBox.shrink(),
+                          ),
                           // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
                           // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
                           // `showTimePicker` 从来不给；表盘的 5 分钟步长是它自己的行为，

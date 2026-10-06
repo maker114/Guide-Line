@@ -35,6 +35,40 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.7.8] - 2026-10-06
+
+> 补上 2.7.7 里**未落地**的那半：用户要的"**12 格轮盘 + 下午标 24 小时点数**"。
+>
+> 版本位（`AGENTS.md` §6）：显示制式 ⇒ **修订位 +1**。
+>
+> 验收：`flutter analyze --no-pub` 0 问题；`flutter test --no-pub` **1007 例全绿**
+> （其中 `platform_boundary_test` 挡住了"插件漏进分层"、`localization_test`
+> 挡住了"文案变英文"）。**真机复核待装 2.7.8 后看表盘**（表盘数字是画布绘制的，
+> widget 测试钉不住它）。
+
+### Changed
+
+- **时间表盘的下午那半圈按 24 小时计数标**（12 → `12`、13 … 23 原样），
+  表盘仍是**12 格几何** —— 用户口径："恢复到之前的 12 格轮盘，但是当选择下午的时候
+  用 24 小时制表示"。
+  新增 `lib/ui/common/pm24_localizations.dart`：
+  `Pm24HourZh extends MaterialLocalizationZh` **只覆盖 `formatHour`**，
+  外加一个只认 zh 的 `LocalizationsDelegate`；由 `due_sheet.dart` 的
+  `showTimePicker` 用 `Localizations.override` **只包住这一个选择器** ——
+  全应用其它文案一个字不动，表头与无障碍朗读也照旧。
+- `pubspec.yaml` 加 **`intl: ^0.20.3`** 直接依赖（原先只是 `flutter_localizations`
+  的传递依赖）：`MaterialLocalizationZh` 的 9 个 `DateFormat` / `NumberFormat`
+  是**构造参数、实例上取不到**（分析器报 `undefined_getter`），只能自己造。
+  取值口径与 Flutter 自己的 `GlobalMaterialLocalizations.delegate.load` 一致。
+- `test/core/platform_boundary_test.dart` 的 `_sdkPackages` 登记 `intl` ——
+  判据与 `flutter_localizations` 相同：**没有平台通道**（不是插件），
+  所以允许出现在 `lib/ui`，不必为它把它塞进 `lib/platform`。
+
+### 说明
+
+2.7.7 那一节写着"下半圈未落地"，本节把它补上了 —— 按 `AGENTS.md` §8，
+历史条目不改写，更正写在新版本节里。
+
 ## [2.7.7] - 2026-10-06
 
 > 用户（2026-10-06）："算了，24小时时间恢复一下，但是在选择下午的时候轮盘上显示
