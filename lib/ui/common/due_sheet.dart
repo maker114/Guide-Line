@@ -158,29 +158,27 @@ Future<String?> pickDateSheet(
                           // "恢复到之前的 12 格轮盘"）—— 2.7.6 里加的那层
                           // `alwaysUse24HourFormat: true` 已撤掉。
                           //
-                          // 同一句要求的后半（"当选择下午的时候用 24 小时制表示"）：
-                          // **整块表盘按 24 小时标**（0–23）。
+                          // ⚠️ 2026-10-06 试了三版，把结论钉在这里，别再反复：
                           //
-                          // 2026-10-06 试过两次才对，过程留在这：
-                          //   1. 只换 `MaterialLocalizations`（下面那层 `Localizations.override`）
-                          //      ⇒ **只有表头变了**（"3" → "15"），**表盘那圈数字没变**：
-                          //      SDK 里表盘的字取的是**格位**（1–12），不带"上午/下午"，
-                          //      所以按 `hour >= 12` 判不出来。
-                          //   2. 必须同时给 `alwaysUse24HourFormat: true` —— 表盘的 24 小时
-                          //      分支才会把 0–23 标出来（SDK `time_picker.dart:1532/1544`）。
-                          // 表盘几何因此从"一圈 12 格"变成"两圈 0–23"：Flutter 只提供这两档，
-                          // **没有"12 格几何 + 下午标 13–23"**；真要那个形状只能自己画表盘。
-                          builder: (pickerContext, child) => MediaQuery(
-                            data: MediaQuery.of(pickerContext)
-                                .copyWith(alwaysUse24HourFormat: true),
-                            child: Localizations.override(
-                              context: pickerContext,
-                              delegates:
-                                  const <LocalizationsDelegate<dynamic>>[
-                                Pm24HourZhDelegate(),
-                              ],
-                              child: child ?? const SizedBox.shrink(),
-                            ),
+                          // ① 只换 `MaterialLocalizations`（下面这层 override）
+                          //    ⇒ 只有**表头**变 24 小时，**表盘那圈数字不变**。
+                          //    原因（SDK `time_picker.dart:1563`）：12 格模式下
+                          //    表盘把**格位**（1–12）交给 `formatHour`，
+                          //    它手里**没有"15"这个数**，也就无从显示 13–23。
+                          // ② 再加 `alwaysUse24HourFormat: true` ⇒ 表盘会标 0–23，
+                          //    但几何变成**两圈**、并且**上午/下午开关消失** ✗
+                          //    （用户不需要这个）。
+                          // ③ 要"12 格 + 下午标 13–23 + 保留上午/下午开关"，
+                          //    **只能自己画表盘** —— 那是新组件，不是改几行。
+                          //
+                          // 所以这里保持 ① 的状态：**12 格表盘 + 上午/下午开关照旧**，
+                          // 表头按 24 小时显示（用户认可的那半）。
+                          builder: (pickerContext, child) => Localizations.override(
+                            context: pickerContext,
+                            delegates: const <LocalizationsDelegate<dynamic>>[
+                              Pm24HourZhDelegate(),
+                            ],
+                            child: child ?? const SizedBox.shrink(),
                           ),
                           // 表盘就是 5 分钟一格（用户口径："只需要 5 分钟就行了"）。
                           // ⚠️ 这里**没有** `minuteInterval` 这个参数 —— Flutter 的
