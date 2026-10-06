@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/ids.dart';
 import 'format.dart';
-import 'pm24_localizations.dart';
 
 /// 选日期时点「清除」交回来的值。
 ///
