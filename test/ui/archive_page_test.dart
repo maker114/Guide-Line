@@ -128,6 +128,53 @@ void main() {
     expect(find.textContaining('还有 30 天自动清除'), findsOneWidget, reason: '倒计时不动');
   });
 
+  testWidgets('已处理的灵感：归属、状态、保留期、时间**各归各位，一样都不许被截掉**（2026-10-07 排版重做）',
+      (tester) async {
+    final app = await boot();
+    // 归属写成"分类 · 项目"两级：全名是这一版新加的读法
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+    final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
+    app.run(() => app.ws.mergeInspiration(
+          inspirationId: merged.id,
+          projectId: target.id,
+          newImplementation: '写进项目的正文',
+        ));
+    final dropped = app.ws.captureInspiration('丢掉的灵感', projectId: target.id);
+    app.run(() => app.ws.discardInspiration(dropped.id));
+    // 一条名字特别长的：从前它会把同一行上的状态与倒计时挤没（用户反馈的那一幕）
+    final longProject = app.ws.createProject(title: '一个名字特别长的项目用来把同一行挤爆');
+    final longOne = app.ws.captureInspiration('挂在长名字项目下的灵感', projectId: longProject.id);
+    app.run(() => app.ws.discardInspiration(longOne.id));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已处理的灵感'));
+    await tester.pumpAndSettle();
+
+    // 归属单独一行，而且是全名
+    expect(find.text('项目：工作 · 发布 v1'), findsNWidgets(2), reason: '两条都归这个目标');
+    expect(
+      find.text('项目：一个名字特别长的项目用来把同一行挤爆'),
+      findsOneWidget,
+      reason: '长名字也不截断（它自己独占一行）',
+    );
+
+    // 状态与倒计时**照样在**：从前它们和归属挤在一行，长名字一来就没了
+    expect(find.text('已合并'), findsOneWidget);
+    expect(find.text('已丢弃'), findsNWidgets(2), reason: '长名字那条的状态也不许丢');
+    expect(find.text('还有 30 天自动清除'), findsNWidgets(3), reason: '每条都还看得到保留期');
+
+    // 三样东西分处**不同的行**：状态那一行在归属那一行下面
+    final projectLine = tester.getRect(find.text('项目：工作 · 发布 v1').first);
+    final chipLine = tester.getRect(find.text('已合并'));
+    expect(
+      chipLine.top,
+      greaterThanOrEqualTo(projectLine.bottom - 1),
+      reason: '状态 / 保留期 / 时间另起一行，不再与归属抢同一行的宽度',
+    );
+  });
+
   testWidgets('已处理的灵感：丢弃 / 合并的每条也有倒计时，被隐藏的没有', (tester) async {
     final app = await boot();
     final dropped = app.ws.captureInspiration('丢掉的灵感');

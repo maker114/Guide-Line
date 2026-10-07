@@ -349,26 +349,50 @@ class _ProcessedInspirationsPane extends StatelessWidget {
           // 「被隐藏」没有保留期（见上面 note）：给它挂一个倒计时等于说
           // "这条会被删"，而它连处理都没被处理过（原文一个字没动）。
           final countdown = entry.source == ProcessedSource.hidden
-              ? ''
-              : '${describeRetentionCountdown(processedDaysLeft(inspiration.updatedAt))} · ';
+              ? null
+              : describeRetentionCountdown(processedDaysLeft(inspiration.updatedAt));
           return ListTile(
+            // 四行内容（灵感最多 3 行 + 归属 1 行 + 来源/保留期/时间 1 行），
+            // 必须给足高度，否则最后一行会被 `ListTile` 自己的最小高度裁掉。
             isThreeLine: true,
+            minVerticalPadding: 10,
             leading: const Icon(Icons.lightbulb_outline),
             title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),
+            // ⚠️ 这三样**必须分行摆**（2026-10-07 用户反馈："项目和剩余天数还有状态
+            // 全部合在一起，看不清，有的甚至被隐藏了"）：
+            //   · 从前挤在一行里（`来源胶囊 + 项目名 · 倒计时 · 相对时间`），
+            //     窄屏上被 `Expanded` 一截，最先没的正是"还剩几天"与状态；
+            //   · 现在归属单独一行（还给了全名 `分类名 · 项目名`），
+            //     第二行只放三样短东西，且用 `Wrap` —— 宽度不够就换行，不再截断。
             subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Row(
+              padding: const EdgeInsets.only(top: 6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  _SourceChip(source: entry.source),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${_projectName(inspiration)} · $countdown'
-                      '${relativeTime(inspiration.updatedAt)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
+                  Text(
+                    _projectName(inspiration),
+                    style: Theme.of(context).textTheme.labelSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      _SourceChip(source: entry.source),
+                      if (countdown != null)
+                        Text(
+                          countdown,
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      Text(
+                        relativeTime(inspiration.updatedAt),
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -418,11 +442,17 @@ class _ProcessedInspirationsPane extends StatelessWidget {
     );
   }
 
+  /// 归属那半行：**全名**（`分类名 · 项目名`，2026-10-07）。
+  ///
+  /// 与灵感页那一行**同一个读法**：这两个列表装的都是"某条灵感归在哪"，写法不一致
+  /// 只会让人以为是两回事。项目已不在（悬挂引用）时照旧说「未分配」。
   String _projectName(Inspiration inspiration) {
     final id = inspiration.projectId;
     if (id == null) return '未分配';
     final project = app.ws.findProject(id);
-    return project == null ? '未分配' : '项目：${project.title}';
+    if (project == null) return '未分配';
+    final full = app.ws.projectTree.fullName(id, separator: projectPathSeparator);
+    return full.isEmpty ? '项目：${project.title}' : '项目：$full';
   }
 }
 
