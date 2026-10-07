@@ -37,6 +37,14 @@ class Event implements EntityNode {
   /// 注意字段名是 `name`（不是 `title`）—— 历史冻结，不得改名。
   final String name;
 
+  /// 给 [EntityNode] 用的显示名。
+  ///
+  /// 为什么不把字段改名成 `title`：`name` 是**冻结的契约键**（见上一行注释），
+  /// 改名要动契约与全部样本；而树算法（`TreeIndex.fullName` 这类）只需要
+  /// "这条叫什么"，一个只读别名就够 —— 转发到 [name]，不新增第二个真相。
+  @override
+  String get title => name;
+
   @override
   final NodeStatus status;
 

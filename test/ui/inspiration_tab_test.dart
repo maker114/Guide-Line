@@ -357,7 +357,9 @@ void main() {
     // 于是退回"问一次落点"，让用户自己挑一个真目标
     expect(find.text('合并到哪个项目'), findsOneWidget, reason: '分类不能当落点，只能问');
 
-    // 分类行明说"不装灵感"：点它只给提示，不往下走
+    // 分类行明说"不装灵感"：点它只给提示，不往下走。
+    // 行上给的是**全名**（2026-10-07 起）。`.last` 是因为页面上还有两条灵感的
+    // 副标题也写着「工作」（它们就挂在这个分类上），而选择器是后叠加出来的那一层。
     expect(find.text('分类，这里不装灵感'), findsOneWidget);
     await tester.tap(find.text('工作').last);
     await tester.pumpAndSettle();
@@ -367,8 +369,8 @@ void main() {
     expect(app.ws.inspirationInbox.length, 2, reason: '一条都不许被合掉');
     expect(app.ws.archiveZone.mergedInspirations, isEmpty);
 
-    // 选目标才继续
-    await tester.tap(find.text('发布 v1').last);
+    // 选目标才继续（它在分类下，所以行上是全名）
+    await tester.tap(find.text('工作 · 发布 v1'));
     await tester.pumpAndSettle();
     expect(find.textContaining('合并进「发布 v1」'), findsOneWidget);
   });
@@ -433,6 +435,34 @@ void main() {
     final captured = app.ws.liveInspirations.single;
     expect(captured.text, '写下就归好类的灵感');
     expect(captured.projectId, project.id, reason: '归属应当在书写时就定下来');
+  });
+
+  testWidgets('分配时给**全名**「分类名 · 项目名」，三层一路写到根（2026-10-07 用户要求）', (tester) async {
+    final app = await boot();
+    final work = app.ws.createProject(title: '工作');
+    final release = app.ws.createProject(title: '发布 v1', parentId: work.id);
+    final frontend = app.ws.createProject(title: '前端', parentId: release.id);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
+
+    // 书写区那个归属按钮打开的就是同一个选择器
+    await tester.tap(find.text('未分配'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('发布 v1'), findsNothing, reason: '只写自己的名字分不出是哪个分类下的');
+    expect(find.text('工作 · 发布 v1'), findsOneWidget);
+    expect(find.text('工作 · 发布 v1 · 前端'), findsOneWidget, reason: '三层一路写到根');
+
+    await tester.tap(find.text('工作 · 发布 v1 · 前端'));
+    await tester.pumpAndSettle();
+    // 全名只影响选择器那一行；选中之后按钮上照旧只显示项目自己的名字
+    expect(find.text('前端'), findsOneWidget);
+    expect(
+      app.ws.findProject(frontend.id)!.parentProjectId,
+      release.id,
+      reason: '选中的确实是那个三级项目',
+    );
   });
 
   testWidgets('书写框更高了，且「记下」按钮不随归属标签长短移动', (tester) async {

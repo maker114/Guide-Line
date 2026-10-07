@@ -83,4 +83,24 @@ void main() {
       expect(index.childrenOf('从来没有过这个 id'), isEmpty);
     });
   });
+
+  group('fullName（全名，2026-10-07）', () {
+    // 样本里每个节点的 `title` 就等于它的 id，读起来更直白。
+    test('根只有自己；两层写"父 · 自己"；三层一路写到根', () {
+      expect(index.fullName('root'), 'root');
+      expect(index.fullName('a'), 'root · a');
+      expect(index.fullName('a1'), 'root · a · a1');
+      expect(index.fullName('b'), 'root · b');
+    });
+
+    test('分隔符可换（界面上要的是「分类名 · 项目名」那种读法）', () {
+      expect(index.fullName('a1', separator: '/'), 'root/a/a1');
+    });
+
+    test('未知 id 给空串、悬挂父引用只丢了那一段前缀 —— 都不抛', () {
+      expect(index.fullName('从来没有过这个 id'), '');
+      // `gone` 的父不在批内 → 构造函数把它规范成根，所以它的全名就是自己
+      expect(index.fullName('gone'), 'gone');
+    });
+  });
 }

@@ -68,6 +68,24 @@ class TreeIndex {
     return out;
   }
 
+  /// [id] 的**全名**：祖先名 + 自己，用 [separator] 连起来（如 `工作 · 发布 v1`）。
+  ///
+  /// 为什么要有它：项目树最多三层，而**叶子行只写自己的名字** —— 两个分类下各有一个
+  /// 「发布 v1」时，光看列表根本分不出是哪一个（实机反馈：分配灵感时认不出来）。
+  /// 缩进在宽屏上还看得见层级，在选择器那种窄面板里就只剩几个像素。
+  ///
+  /// 与 `ancestorsOf` 同源（一路读到根），`id` 不在批内时按空串处理 ——
+  /// 界面上宁可少一段前缀，也不要因为一条悬挂引用炸掉整个列表。
+  String fullName(String id, {String separator = ' · '}) {
+    final self = byId[id];
+    if (self == null) return '';
+    final names = <String>[
+      for (final ancestor in ancestorsOf(id).reversed) ancestor.title,
+      self.title,
+    ];
+    return names.join(separator);
+  }
+
   /// 相对批内根节点的层级：根 = 1。
   int depthOf(String id) {
     if (!byId.containsKey(id)) return 0;

@@ -59,6 +59,8 @@ class Task implements EntityNode {
   final String? parentId;
 
   final TaskType taskType;
+
+  @override
   final String title;
 
   /// 到期 / 目标日，可为空；**不联动任何任务**（A3）。
