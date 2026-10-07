@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
 import '../app/auto_sync_state.dart';
-import '../core/rules/archive_zone.dart';
 import '../platform/shortcut_channel.dart';
 import 'common/auto_sync_panels.dart';
 import 'common/sync_status_indicator.dart';
@@ -738,11 +737,11 @@ class _AppShellState extends State<AppShell> {
 
   static const List<String> _titles = <String>['灵感', '项目', '事件', '更多'];
 
-  /// 回收站到期清理的提示是否被关掉了。
+  /// 到期清理（回收站 / 已处理的灵感）的提示是否被关掉了。
   ///
   /// 关掉就是关掉（本次运行不再出现）：那是启动时的**维护动作**，
   /// 用户看过一次、表示知道了，就没有理由每次重建界面再念一遍。
-  bool _trashNoticeClosed = false;
+  bool _retentionNoticeClosed = false;
 
   /// 第 [index] 页的标题栏文案。
   ///
@@ -1021,14 +1020,14 @@ class _AppShellState extends State<AppShell> {
                         messages: app.startupWarnings,
                         onTap: () => showDataIncident(context, app),
                       ),
-                    // 回收站到期清理（Q12）：清了多少条必须让人看得见 ——
-                    // 数据被自动删掉却一声不吭，是"损坏永不静默"那条规矩的漏网之鱼。
-                    if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
+                    // 到期清理（Q12 + 2026-10-07「已处理的灵感保存 30 天」）：清了多少条
+                    // 必须让人看得见 —— 数据被自动删掉却一声不吭，是"损坏永不静默"
+                    // 那条规矩的漏网之鱼。句子由 `AppController.retentionNotice` 出，
+                    // 手机与电脑两套外壳共用同一份（写两处必然会漂）。
+                    if (app.retentionNotice != null && !_retentionNoticeClosed)
                       ShellWarningBanner(
-                        messages: <String>[
-                          '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
-                        ],
-                        onDismiss: () => setState(() => _trashNoticeClosed = true),
+                        messages: <String>[app.retentionNotice!],
+                        onDismiss: () => setState(() => _retentionNoticeClosed = true),
                       ),
                     if (app.overdueCount > 0)
                       ShellDueBanner(count: app.overdueCount, app: app),

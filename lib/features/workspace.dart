@@ -2006,6 +2006,9 @@ class Workspace {
   /// （它是扁平实体，见 `deriveArchiveZone`），但它的墓碑同样只在文件里留 30 天，
   /// 否则"删除的数据只保存 30 天"这条口径就有个看不见的例外。
   ///
+  /// ⚠️ 「已处理的灵感」是**另一件事**，清理在 [purgeExpiredInspirations]
+  /// （那些灵感不是墓碑，只是状态是丢弃 / 合并）—— 别把两者合成一个数报给用户。
+  ///
   /// 只抹墓碑、不碰活着的节点：子树里若真有活节点（理论上不会），留着不动。
   int purgeExpiredTrash({DateTime? now}) {
     final expired = <DocName, Set<String>>{};
@@ -2036,6 +2039,34 @@ class Workspace {
       // 四个集合的清理**一次落盘**：中途失败不该留下"清了一半"的状态
       count += _skeletonize(entry.key, entry.value, purgedAt: purgedAt);
     }
+    persist();
+    return count;
+  }
+
+  /// 清掉**超过 [processedRetentionDays] 天**的已处理灵感（丢弃 / 合并），
+  /// 返回清掉的条数；在启动时调用一次（与回收站同一时机）。
+  ///
+  /// 2026-10-07 用户要求："已处理的灵感改为保存 30 天"。从前它们**无限期留着**，
+  /// 于是归档区那一档只增不减 —— 而这一档的用途（重新决定归属、恢复为待处理）
+  /// 九成在头几天就做完了。
+  ///
+  /// 三条边界：
+  ///   · **只清丢弃 / 合并**。「被隐藏」的那些是"项目归档了、原文一个字没动"的
+  ///     待处理灵感，没有"被处理"的时刻，也不该因为晾了 30 天就被清掉；
+  ///   · 计时起点是 `updated_at`（丢弃与合并都会顶到那一刻），**不新增契约字段**；
+  ///   · 清法与回收站一致 —— **骨架化成墓碑**，而不是整条抹掉：两端各自的墓碑
+  ///     才能让"这台清了、那台还没清"在合并时有据可依。
+  int purgeExpiredInspirations({DateTime? now}) {
+    final expired = <String>{};
+    for (final inspiration in allInspirations) {
+      if (inspiration.deleted) continue;
+      if (inspiration.isPending) continue; // 只有丢弃 / 合并这一路有保留期
+      if (processedDaysLeft(inspiration.updatedAt, now: now) > 0) continue; // 还没到期
+      expired.add(inspiration.id);
+    }
+    if (expired.isEmpty) return 0;
+
+    final count = _skeletonize(DocName.inspirations, expired, purgedAt: Ids.nowMillis());
     persist();
     return count;
   }

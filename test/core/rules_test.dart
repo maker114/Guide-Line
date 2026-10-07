@@ -284,6 +284,10 @@ void main() {
       events: events,
       tasks: tasks,
       inspirations: inspirations,
+      // `now` 钉在样本时间戳（1700000000000 = 2023-11-15）之后一两天：
+      // 这一组守的是"哪一条归哪一档"，而丢弃 / 合并那两档自 ADR-098 起**只留 30 天**
+      // —— 不钉 `now` 的话，样本会随"跑测试的那一天"逐渐过期，用例的失败还与被测口径无关。
+      now: DateTime(2023, 11, 16),
     );
 
     test('已归档只列归档根，不列被级联归档的后代', () {
@@ -352,6 +356,46 @@ void main() {
       test('满 30 天时为 0（这次启动就该清掉），更早的是负数', () {
         expect(trashDaysLeft(at(DateTime(2026, 8, 26, 12)), now: now), 0);
         expect(trashDaysLeft(at(DateTime(2026, 1, 1)), now: now), lessThan(0));
+      });
+    });
+
+    group('已处理的灵感保留期（ADR-098，30 天）', () {
+      final now = DateTime(2026, 9, 25, 23, 30);
+      int at(DateTime when) => when.millisecondsSinceEpoch;
+
+      test('刚处理完的还能待满 30 天，满 30 天时为 0', () {
+        expect(processedDaysLeft(at(now), now: now), processedRetentionDays);
+        expect(processedDaysLeft(at(DateTime(2026, 8, 26, 12)), now: now), 0);
+        expect(processedDaysLeft(at(DateTime(2026, 1, 1)), now: now), lessThan(0));
+      });
+
+      test('同样按**日历天**算（与回收站同一段实现，不是各算各的）', () {
+        expect(processedDaysLeft(at(DateTime(2026, 9, 24, 0, 1)), now: now), 29);
+        expect(processedDaysLeft(at(DateTime(2026, 9, 24, 23, 59)), now: now), 29);
+        expect(processedDaysLeft(at(DateTime(2026, 9, 23, 23, 59)), now: now), 28);
+      });
+
+      test('已到期的丢弃 / 合并不进那一档（"列出来却点不动"的那条路堵掉）', () {
+        final zone = deriveArchiveZone(
+          projects: const <Project>[],
+          events: const <Event>[],
+          tasks: const <Task>[],
+          inspirations: <Inspiration>[
+            inspiration('justDiscarded', status: InspirationStatus.discarded),
+            inspiration('staleMerged', status: InspirationStatus.merged, mergedInto: 'p1'),
+            inspiration('pending'),
+          ],
+          now: DateTime(2026, 9, 25),
+        );
+
+        // 样本的 `updated_at` 是 1700000000000（2023-11），两条都早已过期
+        expect(zone.discardedInspirations, isEmpty);
+        expect(zone.mergedInspirations, isEmpty);
+        expect(
+          zone.hiddenInspirations,
+          isEmpty,
+          reason: '待处理的、且项目没归档 —— 哪一档都不该有它',
+        );
       });
     });
   });

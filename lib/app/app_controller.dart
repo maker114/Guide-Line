@@ -11,6 +11,7 @@ import '../core/models/entity.dart';
 import '../core/models/github_backup_config.dart';
 import '../core/models/project.dart';
 import '../core/models/reminder.dart';
+import '../core/rules/archive_zone.dart';
 import '../core/rules/reminder_schedule.dart';
 import '../core/store/app_paths.dart';
 import '../core/store/app_storage.dart';
@@ -142,21 +143,48 @@ class AppController extends ChangeNotifier {
     },
   );
 
-  /// 启动时清一次回收站（墓碑只留 `trashRetentionDays` 天）。
+  /// 启动时清一次**过期的**回收站墓碑（只留 `trashRetentionDays` 天）
+  /// 与**过期的**已处理灵感（只留 `processedRetentionDays` 天）。
   ///
   /// 失败**不打断启动**：清理是"维护动作"，写盘失败时下次启动会再试一次，
   /// 比在启动路径上抛异常（用户看到白屏）合理得多。清理条数记在
-  /// [lastTrashPurgedCount] 里，设置页 / 用例可以看。
+  /// [lastTrashPurgedCount] / [lastProcessedPurgedCount] 里，设置页 / 用例可以看。
   void _purgeExpiredTrash() {
     try {
       lastTrashPurgedCount = workspace.purgeExpiredTrash();
     } on FileSystemException {
       lastTrashPurgedCount = 0;
     }
+    try {
+      lastProcessedPurgedCount = workspace.purgeExpiredInspirations();
+    } on FileSystemException {
+      lastProcessedPurgedCount = 0;
+    }
   }
 
   /// 上次启动清理掉了几条过期墓碑（0 = 没清）。
   int lastTrashPurgedCount = 0;
+
+  /// 上次启动清理掉了几条**过期的已处理灵感**（0 = 没清）。
+  ///
+  /// 与 [lastTrashPurgedCount] **分开记**：两者清的是不同的东西（墓碑 vs 丢弃 / 合并的灵感），
+  /// 合成一个数会让"到底少的是什么"说不清。
+  int lastProcessedPurgedCount = 0;
+
+  /// 启动清理的**如实告知**：清了多少条、清的是哪一类；一条没清时返回 `null`。
+  ///
+  /// 为什么放在控制器里而不是两个外壳各拼一遍：手机与电脑两套外壳，
+  /// 一模一样的句子写两处必然会漂（这个仓库已经在别处踩过）。
+  String? get retentionNotice {
+    final parts = <String>[
+      if (lastTrashPurgedCount > 0)
+        '回收站有 $lastTrashPurgedCount 条已超过 $trashRetentionDays 天',
+      if (lastProcessedPurgedCount > 0)
+        '已处理的灵感有 $lastProcessedPurgedCount 条已超过 $processedRetentionDays 天',
+    ];
+    if (parts.isEmpty) return null;
+    return '${parts.join('；')}，已自动清除';
+  }
 
   /// 本次启动被隔离保留的损坏文件（**完整路径**，界面只显示文件名）。
   final List<String> quarantinedPaths;

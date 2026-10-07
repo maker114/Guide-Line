@@ -28,6 +28,10 @@ import '../theme/shape_tokens.dart';
 /// 回收站        deleted（只列级联根），每条保留 30 天
 /// ```
 ///
+/// **有保留期的是两档**：「已处理的灵感」里的**丢弃 / 合并**（2026-10-07 起 30 天）
+/// 与整个回收站 —— 两者都在启动时清掉过期的，清了多少条由外壳那条提示如实报出。
+/// 「被隐藏」与「已归档」**没有保留期**（它们只是被遮住 / 暂时不看，原文没动）。
+///
 /// **灵感删除不进这里**：它是唯一不进回收站的实体（《定义与边界》§8），
 /// 删除只留一条 30 天后骨架化的墓碑。
 ///
@@ -313,9 +317,15 @@ class _ProcessedInspirationsPane extends StatelessWidget {
     // 分区说明必须与动作名**说同一件事**（Q9）：三档合一之后，这里要把
     // 「三件事的出路不一样」一次讲清 —— 尤其是"合并过的那条，项目里的内容
     // 不会退回来"，那是涉及数据会不会回来的一句，必须留。
+    //
+    // 保留期那句（2026-10-07）同样涉及数据会不会丢，所以照回收站那一档的写法
+    // 引同一个常量：**到期在下次启动时清**，而且**只对丢弃 / 合并那两类** ——
+    // 「被隐藏」是"项目归档了、原文一个字没动"，它没有保留期，不能让人以为
+    // "晾着不管就会被删掉"。
     const note = '「恢复为待处理」只把灵感放回灵感箱；'
         '已合并的那些，写进项目里的内容不会退回。'
-        '「被隐藏」的那些，取消归档对应项目即可自动回到灵感列表。';
+        '「被隐藏」的那些，取消归档对应项目即可自动回到灵感列表。'
+        '丢弃 / 合并的每条保留 $processedRetentionDays 天，到期的在下次启动时自动清除。';
     if (items.isEmpty) {
       return _Pane(
         note: note,
@@ -336,6 +346,11 @@ class _ProcessedInspirationsPane extends StatelessWidget {
           // 「被隐藏」的那条**没有动作可做**：它没被处理过，只是所在项目归档了 ——
           // 出路是去把那个项目取消归档，不是"恢复为待处理"。
           final actionable = entry.source != ProcessedSource.hidden;
+          // 「被隐藏」没有保留期（见上面 note）：给它挂一个倒计时等于说
+          // "这条会被删"，而它连处理都没被处理过（原文一个字没动）。
+          final countdown = entry.source == ProcessedSource.hidden
+              ? ''
+              : '${describeRetentionCountdown(processedDaysLeft(inspiration.updatedAt))} · ';
           return ListTile(
             isThreeLine: true,
             leading: const Icon(Icons.lightbulb_outline),
@@ -348,7 +363,8 @@ class _ProcessedInspirationsPane extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '${_projectName(inspiration)} · ${relativeTime(inspiration.updatedAt)}',
+                      '${_projectName(inspiration)} · $countdown'
+                      '${relativeTime(inspiration.updatedAt)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.labelSmall,
@@ -441,7 +457,7 @@ class _TrashPane extends StatelessWidget {
             title: Text(entityTitle(entity), maxLines: 2, overflow: TextOverflow.ellipsis),
             subtitle: Text(
               '${entityTypeLabel(entity)} · '
-              '${describeTrashCountdown(trashDaysLeft(entity.updatedAt))}',
+              '${describeRetentionCountdown(trashDaysLeft(entity.updatedAt))}',
               style: Theme.of(context).textTheme.labelSmall,
             ),
             trailing: PopupMenuButton<String>(

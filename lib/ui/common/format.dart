@@ -137,11 +137,15 @@ int _daysBetween(DateTime a, DateTime b) => DateTime.utc(
   a.day,
 ).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
 
-/// 回收站条目的倒计时文案（配合 `core/rules/archive_zone.dart` 的 `trashDaysLeft`）。
+/// 保留期条目的倒计时文案（配合 `core/rules/archive_zone.dart` 的
+/// `trashDaysLeft` 与 `processedDaysLeft`）。
 ///
 /// 界面上要让人一眼看出"这条还能待多久"，所以按剩余天数换说法：
 /// 还剩一天说「明天」，今天该清的说「即将」，其余给具体天数。
-String describeTrashCountdown(int daysLeft) {
+///
+/// 回收站与「已处理的灵感」**共用这一句**：两处保留期都是 30 天、都在启动时清理，
+/// 说法不一致只会让人以为它们不是同一件事。
+String describeRetentionCountdown(int daysLeft) {
   if (daysLeft <= 0) return '即将自动清除';
   if (daysLeft == 1) return '明天自动清除';
   return '还有 $daysLeft 天自动清除';

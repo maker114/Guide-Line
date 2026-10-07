@@ -128,6 +128,64 @@ void main() {
     expect(find.textContaining('还有 30 天自动清除'), findsOneWidget, reason: '倒计时不动');
   });
 
+  testWidgets('已处理的灵感：丢弃 / 合并的每条也有倒计时，被隐藏的没有', (tester) async {
+    final app = await boot();
+    final dropped = app.ws.captureInspiration('丢掉的灵感');
+    app.run(() => app.ws.discardInspiration(dropped.id));
+    final target = app.ws.createProject(title: '目标项目');
+    final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
+    app.run(() => app.ws.mergeInspiration(
+          inspirationId: merged.id,
+          projectId: target.id,
+          newImplementation: '写进项目的正文',
+        ));
+    // 被隐藏：所在项目归档，灵感原文一个字没动
+    final hiddenProject = app.ws.createProject(title: '会被归档的项目');
+    final hidden = app.ws.captureInspiration('被藏起来的灵感', projectId: hiddenProject.id);
+    app.run(() => app.ws.setProjectArchived(hiddenProject.id, true));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已处理的灵感'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('还有 30 天自动清除'),
+      findsNWidgets(2),
+      reason: '丢弃与合并那两条各给一个倒计时（刚处理完就是满 30 天）',
+    );
+    // 「被隐藏」那一行照旧列出来，但**没有**倒计时：它是"项目归档了、原文一个字没动"，
+    // 给它挂一句"还有 30 天自动清除"读起来就像"这条会被删"。
+    final hiddenTile = find.ancestor(
+      of: find.text('被藏起来的灵感'),
+      matching: find.byType(ListTile),
+    );
+    expect(hiddenTile, findsOneWidget);
+    expect(
+      find.descendant(of: hiddenTile, matching: find.textContaining('自动清除')),
+      findsNothing,
+      reason: '「被隐藏」没有保留期',
+    );
+    expect(app.ws.findInspiration(hidden.id), isNotNull);
+  });
+
+  testWidgets('说明里写清"丢弃 / 合并的保留 30 天，到期在下次启动时清"', (tester) async {
+    final app = await boot();
+    final dropped = app.ws.captureInspiration('丢掉的灵感');
+    app.run(() => app.ws.discardInspiration(dropped.id));
+
+    await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('已处理的灵感'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.textContaining('丢弃 / 合并的每条保留 30 天，到期的在下次启动时自动清除'),
+      findsOneWidget,
+      reason: '数据会被自动清掉，说明里必须写出来（与回收站那一档同一句式）',
+    );
+  });
+
   testWidgets('恢复提示带上实际范围与条数（整条任务线一起回来）', (tester) async {
     final app = await boot();
     final event = app.ws.createEvent(name: '被删的事件');

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/auto_sync_state.dart';
-import '../../core/rules/archive_zone.dart';
 import '../common/sync_status_indicator.dart';
 import '../events/event_tab.dart';
 import '../inspiration/inspiration_tab.dart';
@@ -82,8 +81,8 @@ class DesktopShell extends StatefulWidget {
 class _DesktopShellState extends State<DesktopShell> {
   _NavItem _selected = _NavItem.projects;
 
-  /// 回收站到期清理的提示关掉没有（与手机外壳同一口径：关掉就是本次运行不再出现）。
-  bool _trashNoticeClosed = false;
+  /// 到期清理（回收站 / 已处理的灵感）的提示关掉没有（与手机外壳同一口径：关掉就是本次运行不再出现）。
+  bool _retentionNoticeClosed = false;
 
   // 这里**不再自己跑开机比对**（ADR-095 第 ⑥ 条）。
   //
@@ -138,12 +137,10 @@ class _DesktopShellState extends State<DesktopShell> {
                         messages: app.startupWarnings,
                         onTap: () => showDataIncident(context, app),
                       ),
-                    if (app.lastTrashPurgedCount > 0 && !_trashNoticeClosed)
+                    if (app.retentionNotice != null && !_retentionNoticeClosed)
                       ShellWarningBanner(
-                        messages: <String>[
-                          '回收站有 ${app.lastTrashPurgedCount} 条已超过 $trashRetentionDays 天，已自动清除',
-                        ],
-                        onDismiss: () => setState(() => _trashNoticeClosed = true),
+                        messages: <String>[app.retentionNotice!],
+                        onDismiss: () => setState(() => _retentionNoticeClosed = true),
                       ),
                     if (app.overdueCount > 0)
                       ShellDueBanner(count: app.overdueCount, app: app),

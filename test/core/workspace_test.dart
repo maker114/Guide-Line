@@ -2269,6 +2269,96 @@ void main() {
     });
   });
 
+  group('已处理的灵感只保存 30 天（2026-10-07）', () {
+    /// 把盘上这几条灵感的 `updated_at` 往前挪 [days] 天，再按正式启动路径读回来。
+    ///
+    /// 与上面那条墓碑用例同一套路：单机形态下没有别的办法造"一个多月前处理的"，
+    /// 而"放了一个多月"在真机上走的正是这一条路（改盘 → 重新加载）。
+    Workspace backdated(Set<String> ids, int days) {
+      final at =
+          DateTime.now().subtract(Duration(days: days)).millisecondsSinceEpoch;
+      final raw = jsonDecode(storeTextOnDisk()) as Map<String, dynamic>;
+      final collections = raw['collections'] as Map<String, dynamic>;
+      final items =
+          (collections['inspirations'] as Map<String, dynamic>)['items'] as List<dynamic>;
+      for (final item in items.cast<Map<String, dynamic>>()) {
+        if (ids.contains(item['id'])) item['updated_at'] = at;
+      }
+      storage.paths.storeFile.writeAsStringSync(jsonEncode(raw), encoding: utf8);
+      return Workspace.fromLoad(storage, storage.load());
+    }
+
+    /// 造四条：丢弃的（40 天前）、合并的（40 天前）、合并的（10 天前）、待处理的。
+    ({Workspace ws, String discarded, String mergedStale, String mergedFresh, String pending})
+        fixture() {
+      final target = ws.createProject(title: '落点项目');
+      final discarded = ws.captureInspiration('丢了很久的那条');
+      final mergedStale = ws.captureInspiration('合进项目很久了');
+      final mergedFresh = ws.captureInspiration('前几天刚合的');
+      final pending = ws.captureInspiration('还没处理的那条');
+      ws.discardInspiration(discarded.id);
+      ws.mergeInspiration(
+        inspirationId: mergedStale.id,
+        projectId: target.id,
+        newImplementation: '很久以前合进来的正文',
+      );
+      ws.mergeInspiration(
+        inspirationId: mergedFresh.id,
+        projectId: target.id,
+        newImplementation: '前几天合进来的正文',
+      );
+
+      final reloaded = backdated(<String>{discarded.id, mergedStale.id}, 40);
+      return (
+        ws: reloaded,
+        discarded: discarded.id,
+        mergedStale: mergedStale.id,
+        mergedFresh: mergedFresh.id,
+        pending: pending.id,
+      );
+    }
+
+    test('满 30 天的丢弃 / 合并灵感被清成墓碑，待处理的与没到期的一条不动', () {
+      final f = fixture();
+      final count = f.ws.purgeExpiredInspirations();
+
+      expect(count, 2, reason: '一条丢弃 + 一条合并；刚合的与待处理的不该被算进来');
+      expect(f.ws.findInspiration(f.discarded), isNull, reason: '骨架化之后不再是 Inspiration');
+      expect(f.ws.findInspiration(f.mergedStale), isNull);
+      expect(f.ws.findInspiration(f.mergedFresh)!.isMerged, isTrue, reason: '才 10 天，不清');
+      expect(f.ws.findInspiration(f.pending)!.isPending, isTrue, reason: '没处理过的没有保留期');
+    });
+
+    test('被隐藏的（项目归档、原文没动）不进保留期 —— 晾多久都不清', () {
+      final target = ws.createProject(title: '会被归档的项目');
+      final inspiration = ws.captureInspiration('挂在项目下的待处理灵感');
+      ws.assignInspiration(inspiration.id, target.id);
+      ws.setProjectArchived(target.id, true);
+
+      final reloaded = backdated(<String>{inspiration.id}, 40);
+      expect(
+        reloaded.archiveZone.hiddenInspirations.map((e) => e.id),
+        <String>[inspiration.id],
+        reason: '「被隐藏」是算出来的，没有"被处理的时刻"',
+      );
+      expect(reloaded.purgeExpiredInspirations(), 0, reason: '待处理的不清，哪怕晾了 40 天');
+      expect(reloaded.findInspiration(inspiration.id), isNotNull);
+    });
+
+    test('归档区那一档也不列已到期的：清掉的那一条不会"点不动地挂着"', () {
+      final f = fixture();
+      final ids = f.ws.archiveZone.discardedInspirations.map((e) => e.id).toSet();
+
+      expect(ids.contains(f.discarded), isFalse, reason: '到期的不进这一档（与清理同一判据）');
+      expect(ids.contains(f.pending), isFalse, reason: '待处理的本来就不在这一档');
+      expect(
+        f.ws.archiveZone.mergedInspirations.map((e) => e.id).toSet(),
+        <String>{f.mergedFresh},
+        reason: '刚合的那条还在',
+      );
+    });
+  });
+
   group('持久化（单文件：每次变更立刻原子落盘）', () {
     test('变更无需显式保存，磁盘上立刻就能看到', () {
       final project = ws.createProject(title: '立刻落盘');
