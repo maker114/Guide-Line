@@ -45,7 +45,6 @@ class Project implements EntityNode {
   @override
   final String id;
 
-  @override
   final String title;
   final String purpose;
   final String implementation;

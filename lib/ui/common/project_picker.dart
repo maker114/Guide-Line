@@ -15,10 +15,6 @@ const String pickNone = '__none__';
 /// 也用在同一份规则的另一道闸门上（`MergeEditorPage` / `applyMergeResult`）。
 const String categoryNotForInspiration = '分类不装灵感，请选一个目标或先建一个目标';
 
-/// 灵感侧要的是**全名**（2026-10-07 用户要求："在主页灵感界面分配项目时，
-/// 显示全名『分类名 · 项目名』"）—— 见 [pickProject] 的 [pickProject.fullName]。
-const String categorySeparator = ' · ';
-
 /// 项目选择器：底部弹出的树形列表（带缩进）。
 ///
 /// 只列**未归档**的项目。移动场景用 [excludeSubtreeOf] 排除自身及其后代，
@@ -30,10 +26,10 @@ const String categorySeparator = ' · ';
 ///   · **移动侧**（`moveProjectAction`）：把项目移进一个分类正是"建分类"的做法，
 ///     所以那边传 `false`，分类照常可选。
 ///
-/// [fullName]（默认 `true`）决定行上写**自己的名字**还是**全名**
-/// （`分类名 · 项目名`，2026-10-07 用户要求）。缩进表达的是层级，但窄面板里
-/// 缩进只有几个像素，两个分类下各有一个「发布 v1」时根本分不出是哪一个；
-/// 于是默认给全名，缩进照旧留着当辅助线索。
+/// **行上只写项目自己的名字、层级靠缩进**（2026-10-07 试过一版写全名，撤回）：
+/// 这里一次只挑一个、而且有缩进与标识色，不至于认错；真正需要全名的是
+/// **灵感条目那半行**（一屏里同时出现十几个归属、又没有缩进），见
+/// `inspiration_tab.dart` 的 `inspirationProjectSeparator`。
 Future<String?> pickProject(
   BuildContext context,
   AppController app, {
@@ -42,7 +38,6 @@ Future<String?> pickProject(
   String noneLabel = '不选，或移到根层',
   String? excludeSubtreeOf,
   bool requireTarget = true,
-  bool fullName = true,
 }) {
   final tree = app.ws.projectTree;
   final excluded = <String>{};
@@ -98,11 +93,7 @@ Future<String?> pickProject(
                       // 标识色也带到这里：分配灵感时能按颜色认项目，
                       // 与项目树上是同一套视觉线索
                       leading: ProjectMarker(color: entry.key.color),
-                      title: Text(
-                        fullName
-                            ? tree.fullName(entry.key.id, separator: categorySeparator)
-                            : entry.key.title,
-                      ),
+                      title: Text(entry.key.title),
                       // 分类明说"这里不装灵感"，一眼能看出该往下选目标。
                       // **刻意不置 `enabled: false`**：禁用的行点不动，也就给不出
                       // "为什么不能选"的解释 —— 这里要让点它的人收到一句提示。

@@ -34,7 +34,6 @@ void main() {
     WidgetTester tester,
     AppController app, {
     required bool requireTarget,
-    bool fullName = true,
   }) async {
     String? picked;
     await tester.pumpWidget(
@@ -48,7 +47,6 @@ void main() {
                   app,
                   title: '选一个项目',
                   requireTarget: requireTarget,
-                  fullName: fullName,
                 );
               },
               child: const Text('打开'),
@@ -69,7 +67,10 @@ void main() {
     // 分类行明说"这里不装灵感"
     expect(find.text('分类，这里不装灵感'), findsOneWidget);
     expect(find.text('工作'), findsOneWidget);
-    expect(find.text('工作 · 发布 v1'), findsOneWidget, reason: '灵感侧给全名');
+    // 行上只写项目自己的名字、层级靠缩进（2026-10-07 试过一版写全名，按用户口径撤回：
+    // 要全名的是**灵感条目下面那半行**，见 `inspiration_tab_test.dart`）
+    expect(find.text('发布 v1'), findsOneWidget);
+    expect(find.text('工作 · 发布 v1'), findsNothing);
 
     await tester.tap(find.text('工作'));
     await tester.pumpAndSettle();
@@ -78,37 +79,9 @@ void main() {
     expect(find.byType(ListTile), findsWidgets, reason: '选择器不该被关掉：还能接着选目标');
 
     // 选目标照常 pop 出去
-    await tester.tap(find.text('工作 · 发布 v1'));
+    await tester.tap(find.text('发布 v1'));
     await tester.pumpAndSettle();
     expect(find.text('选一个项目'), findsNothing, reason: '选中目标后选择器关闭');
-  });
-
-  testWidgets('全名与缩进一起给：两层写「分类 · 项目」，三层一路写到根', (tester) async {
-    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
-    final work = app.ws.createProject(title: '工作');
-    final release = app.ws.createProject(title: '发布 v1', parentId: work.id);
-    app.ws.createProject(title: '前端', parentId: release.id);
-
-    await openPicker(tester, app, requireTarget: false);
-
-    expect(find.text('工作 · 发布 v1'), findsOneWidget);
-    expect(
-      find.text('工作 · 发布 v1 · 前端'),
-      findsOneWidget,
-      reason: '三层要一路写到根 —— 只写上一级仍然分不出是谁',
-    );
-    // 缩进照旧留着当辅助线索：越深的行左内边距越大
-    final twoLevel = tester.getTopLeft(find.text('工作 · 发布 v1')).dx;
-    final threeLevel = tester.getTopLeft(find.text('工作 · 发布 v1 · 前端')).dx;
-    expect(threeLevel, greaterThan(twoLevel));
-  });
-
-  testWidgets('全名可以关掉（移动侧那种自己会写层级的场景）', (tester) async {
-    final app = await boot();
-    await openPicker(tester, app, requireTarget: false, fullName: false);
-
-    expect(find.text('发布 v1'), findsOneWidget);
-    expect(find.text('工作 · 发布 v1'), findsNothing);
   });
 
   testWidgets('移动侧：分类照常可选（移进分类 = 建分类）', (tester) async {

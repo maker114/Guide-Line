@@ -358,8 +358,8 @@ void main() {
     expect(find.text('合并到哪个项目'), findsOneWidget, reason: '分类不能当落点，只能问');
 
     // 分类行明说"不装灵感"：点它只给提示，不往下走。
-    // 行上给的是**全名**（2026-10-07 起）。`.last` 是因为页面上还有两条灵感的
-    // 副标题也写着「工作」（它们就挂在这个分类上），而选择器是后叠加出来的那一层。
+    // `.last` 是因为页面上还有两条灵感的副标题也写着「工作」（它们就挂在这个分类上），
+    // 而选择器是后叠加出来的那一层。
     expect(find.text('分类，这里不装灵感'), findsOneWidget);
     await tester.tap(find.text('工作').last);
     await tester.pumpAndSettle();
@@ -369,8 +369,8 @@ void main() {
     expect(app.ws.inspirationInbox.length, 2, reason: '一条都不许被合掉');
     expect(app.ws.archiveZone.mergedInspirations, isEmpty);
 
-    // 选目标才继续（它在分类下，所以行上是全名）
-    await tester.tap(find.text('工作 · 发布 v1'));
+    // 选目标才继续（选择器那一行只写项目自己的名字）
+    await tester.tap(find.text('发布 v1').last);
     await tester.pumpAndSettle();
     expect(find.textContaining('合并进「发布 v1」'), findsOneWidget);
   });
@@ -437,31 +437,57 @@ void main() {
     expect(captured.projectId, project.id, reason: '归属应当在书写时就定下来');
   });
 
-  testWidgets('分配时给**全名**「分类名 · 项目名」，三层一路写到根（2026-10-07 用户要求）', (tester) async {
+  testWidgets('灵感条目下面那半行给**全名**「分类名 · 项目名」，三层一路写到根（2026-10-07 用户要求）',
+      (tester) async {
     final app = await boot();
     final work = app.ws.createProject(title: '工作');
     final release = app.ws.createProject(title: '发布 v1', parentId: work.id);
     final frontend = app.ws.createProject(title: '前端', parentId: release.id);
+    app.run(() => app.ws.captureInspiration('三级项目下的一条', projectId: frontend.id));
+    app.run(() => app.ws.captureInspiration('二级项目下的一条', projectId: release.id));
+    app.run(() => app.ws.captureInspiration('还没分配的一条'));
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
 
-    // 书写区那个归属按钮打开的就是同一个选择器
+    // 归属就写在这条灵感**下面那半行**：只写「前端」/「发布 v1」的话，
+    // 两个分类下各有一个同名项目时分不出是哪一支
+    expect(find.text('工作 · 发布 v1 · 前端'), findsOneWidget, reason: '三层一路写到根');
+    expect(find.text('工作 · 发布 v1'), findsOneWidget);
+    // 「未分配」在灵感页出现两次：书写区那个归属按钮一次、条目那半行一次
+    // （2026-10-07 之前只有按钮那一处，所以老写法 `findsOneWidget` 现在会红）
+    expect(
+      find.text('未分配'),
+      findsNWidgets(2),
+      reason: '书写区按钮 + 没归属的那条灵感',
+    );
+    expect(
+      find.text('前端'),
+      findsNothing,
+      reason: '这一行上不该再出现"只有自己的名字"的写法',
+    );
+
+    // 点这一行就是按这个项目筛（原来的动作不动），芯片上写同一份全名
+    await tester.tap(find.text('工作 · 发布 v1 · 前端'));
+    await tester.pumpAndSettle();
+    expect(find.text('只看「工作 · 发布 v1 · 前端」'), findsOneWidget);
+  });
+
+  testWidgets('选择器那一行仍然只写项目自己的名字（层级靠缩进）', (tester) async {
+    final app = await boot();
+    final work = app.ws.createProject(title: '工作');
+    app.ws.createProject(title: '发布 v1', parentId: work.id);
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('未分配'));
     await tester.pumpAndSettle();
 
-    expect(find.text('发布 v1'), findsNothing, reason: '只写自己的名字分不出是哪个分类下的');
-    expect(find.text('工作 · 发布 v1'), findsOneWidget);
-    expect(find.text('工作 · 发布 v1 · 前端'), findsOneWidget, reason: '三层一路写到根');
-
-    await tester.tap(find.text('工作 · 发布 v1 · 前端'));
-    await tester.pumpAndSettle();
-    // 全名只影响选择器那一行；选中之后按钮上照旧只显示项目自己的名字
-    expect(find.text('前端'), findsOneWidget);
+    expect(find.text('发布 v1'), findsOneWidget, reason: '弹窗里一次只挑一个，缩进够用');
     expect(
-      app.ws.findProject(frontend.id)!.parentProjectId,
-      release.id,
-      reason: '选中的确实是那个三级项目',
+      find.text('工作 · 发布 v1'),
+      findsNothing,
+      reason: '全名只给灵感条目那半行（2026-10-07 试过给选择器，按用户口径撤回）',
     );
   });
 

@@ -137,6 +137,13 @@ int _daysBetween(DateTime a, DateTime b) => DateTime.utc(
   a.day,
 ).difference(DateTime.utc(b.year, b.month, b.day)).inDays;
 
+/// 「分类名 · 项目名」里那个分隔符（2026-10-07）。
+///
+/// **一个符号只写一处**：灵感页条目那半行与归档区「已处理的灵感」那一档都按
+/// `分类名 · 项目名` 写归属，两处各写一个 `' · '` 迟早会漂成两种读法。
+/// ` · ` 本身也是这个应用里既有的连接符（`项目：X · 3 天前`）。
+const String projectPathSeparator = ' · ';
+
 /// 保留期条目的倒计时文案（配合 `core/rules/archive_zone.dart` 的
 /// `trashDaysLeft` 与 `processedDaysLeft`）。
 ///

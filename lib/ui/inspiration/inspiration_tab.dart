@@ -165,7 +165,11 @@ class InspirationTabState extends State<InspirationTab> {
                 if (_selectedProjectId != null)
                   Flexible(
                     child: FilterChip(
-                      label: Text('只看「${ws.findProject(_selectedProjectId!)?.title ?? ''}」'),
+                      // 芯片上写**全名**：它就在那些条目上面，两处写法不一致的话，
+                      // 用户会以为"筛的是另一个项目"（同一件事只写一种读法）。
+                      label: Text(
+                        '只看「${ws.projectTree.fullName(_selectedProjectId!, separator: projectPathSeparator)}」',
+                      ),
                       selected: _onlySelectedProject,
                       onSelected: (value) => setState(() {
                         _onlySelectedProject = value;
@@ -505,6 +509,15 @@ class _InspirationTile extends StatelessWidget {
     final ws = app.ws;
     final theme = Theme.of(context);
     final project = inspiration.projectId == null ? null : ws.findProject(inspiration.projectId!);
+    // **全名**（2026-10-07 用户要求）：`分类名 · 项目名`，三层就一路写到根。
+    //
+    // 为什么这一行需要全名而选择器不需要：灵感列表是**一屏里同时出现十几个归属**的
+    // 地方，而这一行只占半行高度、连缩进都没有 —— 两个分类下各有一个「功能优化」时，
+    // 光看这四个字根本不知道这条灵感归的是哪一件事。选择器那边靠缩进 + 一次只挑一个，
+    // 没有这个歧义。
+    final projectLabel = project == null
+        ? '未分配'
+        : ws.projectTree.fullName(project.id, separator: projectPathSeparator);
 
     if (editing) {
       return Padding(
@@ -551,8 +564,11 @@ class _InspirationTile extends StatelessWidget {
             child: GestureDetector(
               onTap: project == null ? null : () => onFilterProject(project.id),
               child: Text(
-                project?.title ?? '未分配',
+                projectLabel,
                 style: theme.textTheme.labelSmall,
+                // 全名比原来的项目名长，窄屏上宁可换行也别把它截成
+                // 「GuideLine开发优化 · 功能…」—— 截断之后恰恰丢掉的是**区分的那半段**。
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
             ),

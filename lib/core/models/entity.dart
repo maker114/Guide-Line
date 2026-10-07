@@ -39,13 +39,6 @@ abstract class Entity {
 abstract class EntityNode implements Entity {
   String? get parentId;
 
-  /// 这条记录的**显示名**（项目 / 任务的 `title`、事件的 `name`）。
-  ///
-  /// 放进这个接口是为了让树算法能拼出"全名"（`TreeIndex.fullName`）而不必
-  /// 挨个 `is Project` / `is Event` 去分支；事件的字段在契约里叫 `name`，
-  /// 那边用一个转发 getter 满足它（字段名一个字不动）。
-  String get title;
-
   NodeStatus get status;
 
   bool get archived;
