@@ -165,13 +165,57 @@ void main() {
     expect(find.text('已丢弃'), findsNWidgets(2), reason: '长名字那条的状态也不许丢');
     expect(find.text('还有 30 天自动清除'), findsNWidgets(3), reason: '每条都还看得到保留期');
 
-    // 三样东西分处**不同的行**：状态那一行在归属那一行下面
-    final projectLine = tester.getRect(find.text('项目：工作 · 发布 v1').first);
-    final chipLine = tester.getRect(find.text('已合并'));
+    // 三样东西分处**不同的行**，且**顺序固定**：归属 → 倒计时 → 来源 + 时间。
+    //
+    // 为什么连"行序"也要钉住：这一档是全应用唯一会自己消失的列表，
+    // 倒计时是用户唯一据此做决定的信息 —— 它必须独占一行、且比"来源"更靠前、更显眼
+    // （2026-10-07 第二次反馈"还是不整齐"，根因就是三样同样大小的灰字排成一条）。
+    //
+    // ⚠️ 这里的 y 排序**只对同一条**有意义：列表按更新时间倒序，而且标题可能占三行
+    // —— 拿"某一条的倒计时"去比"另一条的归属"必然错位。
+    // 所以先在**同一条 ListTile** 里把三样的 y 取出来，再断言先后。
+    final tiles = find.byType(ListTile);
+    double? yIn(int tileIndex, String text) {
+      final tileRect = tester.getRect(tiles.at(tileIndex));
+      final finder = find.text(text);
+      for (var i = 0; i < finder.evaluate().length; i += 1) {
+        final center = tester.getCenter(finder.at(i));
+        if (center.dy >= tileRect.top && center.dy <= tileRect.bottom) return center.dy;
+      }
+      return null;
+    }
+
+    // 找一条**三样齐全**的（归属 / 倒计时 / 来源都在同一条里）
+    int? found;
+    for (var i = 0; i < tiles.evaluate().length; i += 1) {
+      if (yIn(i, '项目：工作 · 发布 v1') != null &&
+          yIn(i, '还有 30 天自动清除') != null &&
+          yIn(i, '已合并') != null) {
+        found = i;
+        break;
+      }
+    }
+    expect(found, isNotNull, reason: '应当有一条同时能看到归属 / 倒计时 / 来源');
+
+    final projectY = yIn(found!, '项目：工作 · 发布 v1')!;
+    final countdownY = yIn(found, '还有 30 天自动清除')!;
+    final chipY = yIn(found, '已合并')!;
+    expect(countdownY, greaterThan(projectY), reason: '倒计时在归属下面');
+    expect(chipY, greaterThan(countdownY), reason: '来源在倒计时下面（三样不挤同一行）');
+    // 倒计时比来源标签**更显眼**（大一档）：三样一样大等于没有主次
+    final countdownStyle = tester.widget<Text>(find.text('还有 30 天自动清除').first).style!;
+    final chipTextStyle = tester
+        .widget<Text>(
+          find.descendant(
+            of: find.ancestor(of: find.text('已合并'), matching: find.byType(Container)).first,
+            matching: find.text('已合并'),
+          ),
+        )
+        .style!;
     expect(
-      chipLine.top,
-      greaterThanOrEqualTo(projectLine.bottom - 1),
-      reason: '状态 / 保留期 / 时间另起一行，不再与归属抢同一行的宽度',
+      countdownStyle.fontSize,
+      greaterThan(chipTextStyle.fontSize ?? 0),
+      reason: '"还剩几天"要比来源标签大 —— 前者是要据此做决定的那个数',
     );
   });
 

@@ -340,6 +340,7 @@ class _ProcessedInspirationsPane extends StatelessWidget {
         separatorBuilder: (_, _) => const Divider(height: 1, indent: 16, endIndent: 16),
         itemBuilder: (context, index) {
           final entry = items[index];
+          final metaTheme = Theme.of(context).textTheme;
           // 归档区把灵感与树形实体放在同一个列表里返回，这里按分区语义收回具体类型
           final inspiration = entry.entity as Inspiration;
           final merged = entry.source == ProcessedSource.merged;
@@ -352,18 +353,21 @@ class _ProcessedInspirationsPane extends StatelessWidget {
               ? null
               : describeRetentionCountdown(processedDaysLeft(inspiration.updatedAt));
           return ListTile(
-            // 四行内容（灵感最多 3 行 + 归属 1 行 + 来源/保留期/时间 1 行），
-            // 必须给足高度，否则最后一行会被 `ListTile` 自己的最小高度裁掉。
+            // 内容比默认高（灵感最多 3 行 + 归属 + 倒计时 + 来源/时间三行），
+            // 必须给足内边距，否则最后一行会被 `ListTile` 自己的高度约束裁掉。
             isThreeLine: true,
-            minVerticalPadding: 10,
+            minVerticalPadding: 12,
             leading: const Icon(Icons.lightbulb_outline),
             title: Text(inspiration.text, maxLines: 3, overflow: TextOverflow.ellipsis),
-            // ⚠️ 这三样**必须分行摆**（2026-10-07 用户反馈："项目和剩余天数还有状态
-            // 全部合在一起，看不清，有的甚至被隐藏了"）：
-            //   · 从前挤在一行里（`来源胶囊 + 项目名 · 倒计时 · 相对时间`），
-            //     窄屏上被 `Expanded` 一截，最先没的正是"还剩几天"与状态；
-            //   · 现在归属单独一行（还给了全名 `分类名 · 项目名`），
-            //     第二行只放三样短东西，且用 `Wrap` —— 宽度不够就换行，不再截断。
+            // ⚠️ 这四样**必须各归各位**（2026-10-07 用户两次反馈："项目和剩余天数还有状态
+            // 全部合在一起，看不清，有的甚至被隐藏了" → 拆行之后仍嫌"不整齐"）：
+            //   · 从前四样挤在同一行（`来源胶囊 + 项目名 · 倒计时 · 相对时间`）外加
+            //     `Expanded` 截断，最先没的正是"还剩几天"与状态；
+            //   · 现在拆成三行：**归属**（全名，独占一行）/ **倒计时**（最要紧的那条信息，
+            //     字号与字重都比别人重一档）/ **来源 + 时间**（都比较轻，放一起）。
+            //
+            // 为什么把倒计时单独提出来当主行：这一档是全应用**唯一会自己消失**的列表，
+            // "还有几天"是用户唯一需要据此做决定的信息；来源与"多久以前"都只是注解。
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Column(
@@ -376,21 +380,27 @@ class _ProcessedInspirationsPane extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
+                  if (countdown != null)
+                    Text(
+                      countdown,
+                      // 比周围两行**大一档、重一档**：三样同样大小的灰字排在一起，
+                      // 眼睛没有落点（用户说的"不整齐"，一半是这件事）
+                      style: metaTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  const SizedBox(height: 2),
+                  // 来源与"多久以前"两类注解放一行，用 `Wrap`：窄屏放不下就换行，不截断
                   Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
+                    spacing: 10,
+                    runSpacing: 2,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       _SourceChip(source: entry.source),
-                      if (countdown != null)
-                        Text(
-                          countdown,
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
                       Text(
                         relativeTime(inspiration.updatedAt),
-                        style: Theme.of(context).textTheme.labelSmall,
+                        style: metaTheme.labelSmall,
                       ),
                     ],
                   ),
