@@ -180,6 +180,7 @@ class AppController extends ChangeNotifier {
       if (lastTrashPurgedCount > 0)
         '回收站有 $lastTrashPurgedCount 条已超过 $trashRetentionDays 天',
       if (lastProcessedPurgedCount > 0)
+        // 「已处理的灵感」的保留期是 ADR-098（与回收站分开记：两者清的不是同一种东西）
         '已处理的灵感有 $lastProcessedPurgedCount 条已超过 $processedRetentionDays 天',
     ];
     if (parts.isEmpty) return null;

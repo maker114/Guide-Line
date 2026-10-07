@@ -124,9 +124,14 @@ class _ProjectTabState extends State<ProjectTab> {
           child: ListView(
             padding: const EdgeInsets.only(bottom: 96),
             children: <Widget>[
+              // 根层的入口文案是**「新建项目」**（2026-10-07 用户口径）：
+              // 从前写「新建分类」，但**点这个按钮建出来的永远是一个项目** ——
+              // 「分类 / 目标」是它**事后**的角色判据（有没有下级，见 `_ProjectRow.isCategory`），
+              // 刚建出来的一行二者都还不是。"项目"是这一层的**统称**，
+              // 而逐层的动作名照旧随层级走（分类下新建的仍叫「新建目标」）。
               InlineComposer(
-                label: '新建分类',
-                hint: '分类名',
+                label: '新建项目',
+                hint: '项目名',
                 leading: Icons.create_new_folder_outlined,
                 onCreate: (title) => _create(title: title),
               ),

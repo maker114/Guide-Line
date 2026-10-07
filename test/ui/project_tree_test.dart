@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
+import 'package:guideline/ui/common/inline_editor.dart';
 import 'package:guideline/ui/projects/project_detail_page.dart';
 import 'package:guideline/ui/projects/project_tab.dart';
 
@@ -409,11 +410,44 @@ void main() {
     );
   });
 
-  testWidgets('根层的新建入口文案是「新建分类」（Q2：文案随层级走）', (tester) async {
-    await boot(tester);
+  testWidgets('根层的新建入口文案是「新建项目」，提示语也改（2026-10-07 用户口径）', (tester) async {
+    final app = await boot(tester);
 
-    expect(inTab(find.text('新建分类')), findsOneWidget);
-    expect(inTab(find.text('新建项目')), findsNothing, reason: 'Q2 已改名');
+    // 根层：点它建出来的**永远是一个项目** —— "分类 / 目标"是它事后的角色判据
+    // （有没有下级，见 `_ProjectRow.isCategory`），刚建出来的一行二者都还不是。
+    // 所以这里用统称「项目」而不是「分类」。
+    expect(inTab(find.text('新建项目')), findsOneWidget);
+    expect(inTab(find.text('新建分类')), findsNothing, reason: '根层已改名');
+    // 下级那一档的名字不动（分类下新建的仍是「目标」）—— 它不在这一页上
+    expect(inTab(find.text('新建目标')), findsNothing);
+    expect(inTab(find.text('目标名')), findsNothing);
+
+    // 从**根层这个入口**建出来的是根项目：层级由 `parentId` 决定，
+    // 与"它以后会不会被叫分类"无关。
+    await tester.tap(find.text('新建项目'));
+    await tester.pumpAndSettle();
+    // 提示语在**展开之后**才是可见的：收起时那一行只画 label。
+    expect(
+      tester.widget<TextField>(find.byType(TextField).first).decoration?.hintText,
+      '项目名',
+      reason: '提示语跟着 label 一起改',
+    );
+    final focused = find.byWidgetPredicate(
+      (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+      description: '当前获得焦点的输入框',
+    );
+    await tester.enterText(focused, '从根层建的');
+    await tester.tap(
+      find.descendant(
+        of: find.ancestor(of: focused, matching: find.byType(InlineComposer)),
+        matching: find.byTooltip('添加'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final created =
+        app.ws.liveProjects.firstWhere((p) => p.title == '从根层建的');
+    expect(created.parentId, isNull, reason: '根层入口建出来的是根项目');
   });
 
   testWidgets('分类行只显示 名字 + 汇总：目的与日期都不上树（Q2）', (tester) async {

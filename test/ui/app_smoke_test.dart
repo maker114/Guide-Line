@@ -96,10 +96,11 @@ void main() {
     expect(find.text('把灵感线做成一条链'), findsOneWidget);
     expect(app.ws.inspirationInbox.length, 1);
 
-    // ---- 2. 项目 Tab：页内直接输入建一个根项目（根层的新建入口叫「新建分类」，Q2）
+    // ---- 2. 项目 Tab：页内直接输入建一个根项目（根层的新建入口叫「新建项目」，
+    //          2026-10-07 用户口径：点它建出来的永远是一个项目）
     await switchTab(tester, '项目');
     expect(find.text('还没有项目'), findsOneWidget);
-    await submitInlineComposer(tester, '新建分类', 'Guide Line');
+    await submitInlineComposer(tester, '新建项目', 'Guide Line');
     expect(find.text('Guide Line'), findsOneWidget);
     expect(app.ws.liveProjects.length, 1);
 
