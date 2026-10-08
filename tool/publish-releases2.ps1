@@ -1,4 +1,21 @@
-# 建 Release + 传 APK（经典令牌 / 细粒度令牌都能跑；幂等：已存在就跳过）
+# 建 / 更新 Release（经典令牌 / 细粒度令牌都能跑；幂等：已存在就 PATCH 标题与正文）
+#
+# 发布规则见 `AGENTS.md` §8.1：**一篇 Release 对应一个次位号**，
+# 它之后的修订版并进它后面那一篇（`2.3.1`~`2.3.9` 与 `2.4.1` 都并进 `v2.4.0`）。
+# 正文唯一来源是 `tool/release-notes.md`。
+#
+# 需要令牌：`$env:GH_TOKEN`。只调 REST API，不依赖 gh CLI。
+#
+# 用法：
+#   $env:GH_TOKEN = '…'; pwsh -File tool/publish-releases2.ps1            # 真发
+#   $env:GH_TOKEN = '…'; pwsh -File tool/publish-releases2.ps1 -WhatIfOnly # 干跑，只看取到多少字
+
+param(
+  [switch]$WhatIfOnly
+)
+
+$ErrorActionPreference = 'Stop'
+
 $token = $env:GH_TOKEN
 if (-not $token) { throw '需要 GH_TOKEN' }
 
@@ -11,15 +28,20 @@ $headers = @{
   'User-Agent'           = 'dsh-agent'
 }
 $api = 'https://api.github.com/repos/maker114/Guide-Line'
+$notes = 'tool/release-notes.md'
 
-# 从发行说明里按二级标题切一段（标题行本身不放进正文）
-function Get-Section([string]$file, [string]$headingPrefix) {
-  $lines = (Get-Content -LiteralPath $file -Raw -Encoding UTF8) -split "`n"
+# 从发行说明里按**精确版本号**切一段（标题行本身不放进正文）。
+#
+# ⚠️ 匹配必须锚定行首、且版本号后面跟分隔符：否则 `v2.7.0` 会命中 `## v2.7.11 …`
+# （两个版本号互为前缀），取出来的是别人的正文。
+function Get-Section([string]$file, [string]$version) {
+  $lines = (Get-Content -LiteralPath $file -Raw -Encoding UTF8) -split "`r?`n"
+  $pattern = '^##\s+v' + [regex]::Escape($version) + '(?:\s|—|$)'
   $start = -1
   for ($i = 0; $i -lt $lines.Length; $i++) {
-    if ($lines[$i].StartsWith('## ') -and $lines[$i].Contains($headingPrefix)) { $start = $i; break }
+    if ($lines[$i] -match $pattern) { $start = $i; break }
   }
-  if ($start -lt 0) { throw "找不到小节：$headingPrefix" }
+  if ($start -lt 0) { throw "找不到小节：v$version" }
   $end = $lines.Length
   for ($i = $start + 1; $i -lt $lines.Length; $i++) {
     if ($lines[$i].StartsWith('## ')) { $end = $i; break }
@@ -47,33 +69,56 @@ function Send([string]$method, [string]$url, $body, [string]$contentType) {
   }
 }
 
-$notes = 'tool/release-notes.md'
+# 要发的版本：**只有次位号**。修订版不在这个清单里。
+# `Asset` 留空表示这一版没有可发的安装包（只有最近两版本机有包）。
 $releases = @(
-  # 一个 Release 带**两个附件**（手机 APK + 电脑 zip）—— 用户 2026-10-03 的要求
-  # 是"同步更新 win 版本"，下面那段附件循环因此改成能收数组（见 `$rel.Asset -is [array]`）。
-  # 2026-10-06：条目从 v2.7.0 换成 **v2.7.11**（v2.7.4 那版也没发出去过）——
-  # 与其补一串 Release，不如一次发**当前版本**，正文里把这几版讲的事一起带上。
-  @{ Tag = 'v2.7.11'; Name = 'v2.7.11 — 提醒不再重复弹、到期日显示统一、时间选择器回到系统'; Section = 'v2.7.11'; Asset = @('dist/guideline-2.7.11.apk', 'dist/guideline-windows-2.7.11.zip') },
-  @{ Tag = 'v1.9.3'; Name = 'v1.9.3 — 两条用例不再依赖 Windows 专用命令，CI 首次变绿'; Section = 'v1.9.3'; Asset = 'dist/guideline-1.9.3.apk' },
-  @{ Tag = 'v1.5.1'; Name = 'v1.5.1 — 文案去括号，版本号不再漂移'; Section = 'v1.5.1'; Asset = 'dist/guideline-1.5.1.apk' },
-  @{ Tag = 'v1.5.0'; Name = 'v1.5.0 — 事件详情页改名 + 速记按钮两处修复'; Section = 'v1.5.0'; Asset = 'dist/guideline-1.5.0.apk' },
-  @{ Tag = 'v1.4.0'; Name = 'v1.4.0 — 项目与事件的口径重定，42 项改动落地'; Section = 'v1.4.0'; Asset = 'dist/guideline-1.4.0.apk' },
-  @{ Tag = 'v1.3.0'; Name = 'v1.3.0 — 项目「实现」变成待办清单，并接上 AI'; Section = 'v1.3.0'; Asset = 'dist/guideline-1.3.0.apk' }
+  @{ Tag = 'v2.7.0';  Name = 'v2.7.0 — 到点提醒与 Windows 版发布';        Asset = @('dist/guideline-2.7.0.apk', 'dist/guideline-windows-2.7.0.zip') },
+  @{ Tag = 'v2.6.0';  Name = 'v2.6.0 — 在指定位置插入主线任务';           Asset = @() },
+  @{ Tag = 'v2.5.0';  Name = 'v2.5.0 — 截止时间精确到分钟';               Asset = @() },
+  @{ Tag = 'v2.4.0';  Name = 'v2.4.0 — 同步页自动读取云端';               Asset = @() },
+  @{ Tag = 'v2.3.0';  Name = 'v2.3.0 — 同步状态改为两行对照';             Asset = @() },
+  @{ Tag = 'v2.2.0';  Name = 'v2.2.0 — 数据安全修复';                     Asset = @() },
+  @{ Tag = 'v2.1.0';  Name = 'v2.1.0 — 内部修正';                         Asset = @() },
+  @{ Tag = 'v2.0.0';  Name = 'v2.0.0 — 内部修正';                         Asset = @() },
+  @{ Tag = 'v1.12.0'; Name = 'v1.12.0 — Windows 桌面版发布';              Asset = @() },
+  @{ Tag = 'v1.11.0'; Name = 'v1.11.0 — 同步状态指示器与启动比对';        Asset = @() },
+  @{ Tag = 'v1.10.0'; Name = 'v1.10.0 — GitHub 备份同步';                 Asset = @() },
+  @{ Tag = 'v1.9.0';  Name = 'v1.9.0 — 提交码与键盘收起规则';             Asset = @() },
+  @{ Tag = 'v1.8.0';  Name = 'v1.8.0 — 分类递归展开与多点修复';           Asset = @() },
+  @{ Tag = 'v1.7.0';  Name = 'v1.7.0 — AI 拆分条目与重置入口';            Asset = @() },
+  @{ Tag = 'v1.6.0';  Name = 'v1.6.0 — 主题手选、分类导出与文案精简';     Asset = @() },
+  @{ Tag = 'v1.5.0';  Name = 'v1.5.0 — 事件重命名与速记按钮修复';         Asset = @() },
+  @{ Tag = 'v1.4.0';  Name = 'v1.4.0 — 项目与事件的口径重定';             Asset = @() },
+  @{ Tag = 'v1.3.0';  Name = 'v1.3.0 — 实现清单与 AI 整理';               Asset = @() },
+  @{ Tag = 'v1.2.0';  Name = 'v1.2.0 — 灵感多选、项目标识色与紧迫度色阶'; Asset = @() },
+  @{ Tag = 'v1.1.0';  Name = 'v1.1.0 — 页内输入与任务后续关系';           Asset = @() },
+  @{ Tag = 'v1.0.0';  Name = 'v1.0.0 — 首个手机单机版';                   Asset = @() }
 )
 
 foreach ($rel in $releases) {
+  $version = $rel.Tag.TrimStart('v')
+  $section = Get-Section $notes $version
+  # 下限只用来拦"取错节"（例如取到标题、或取到空段），不拦"本来就短"的版本：
+  # `v2.1.0` 那类内部修正版正文只有一句话。
+  if ($section.Length -lt 10) { throw "$($rel.Tag) 取到的正文过短（$($section.Length) 字），八成取错了节" }
+
+  if ($WhatIfOnly) {
+    Write-Output "$($rel.Tag)  正文 $($section.Length) 字  附件 $(@($rel.Asset | Where-Object { $_ }).Count) 个（干跑，未发送）"
+    continue
+  }
+
   $release = $null
   try {
     $release = Send 'Get' "$api/releases/tags/$($rel.Tag)" $null ''
-    # 已存在：把正文同步成上面那份（幂等 —— 重跑脚本 = 让线上正文与本文件一致）。
+    # 已存在：把标题与正文同步成上面那份（幂等 —— 重跑脚本 = 让线上与本文件一致）。
     # **注意用 id 而不是 `/releases/tags/<tag>` 来 PATCH**：那个路由在 PowerShell 5.1 的
     # `Invoke-RestMethod -Method Patch` 下会 404（GET 同路由却正常），用 id 才通。
-    $json = @{ body = (Get-Section $notes $rel.Section) } | ConvertTo-Json -Depth 3 -Compress
+    $json = @{ name = $rel.Name; body = $section } | ConvertTo-Json -Depth 3 -Compress
     $release = Send 'Patch' "$api/releases/$($release.id)" $json 'application/json; charset=utf-8'
-    Write-Output "Release $($rel.Tag) 已存在（id=$($release.id)），正文已同步：$($release.html_url)"
+    Write-Output "Release $($rel.Tag) 已存在（id=$($release.id)），标题与正文已同步"
   } catch {
     if ("$_" -match 'HTTP 404') {
-      $payload = @{ tag_name = $rel.Tag; name = $rel.Name; body = (Get-Section $notes $rel.Section); draft = $false; prerelease = $false } | ConvertTo-Json -Depth 3 -Compress
+      $payload = @{ tag_name = $rel.Tag; name = $rel.Name; body = $section; draft = $false; prerelease = $false } | ConvertTo-Json -Depth 3 -Compress
       $release = Send 'Post' "$api/releases" $payload 'application/json; charset=utf-8'
       Write-Output "Release $($rel.Tag) 创建成功（id=$($release.id)）：$($release.html_url)"
     } else {
@@ -81,13 +126,15 @@ foreach ($rel in $releases) {
     }
   }
 
-  # 附件可以是**一个路径，也可以是一串**（v2.7.0 起一个 Release 同时带 APK 与 Windows zip）。
-  $assets = if ($rel.Asset -is [array]) { $rel.Asset } else { @($rel.Asset) }
-  foreach ($assetPath in $assets) {
+  foreach ($assetPath in @($rel.Asset | Where-Object { $_ })) {
     $assetName = [System.IO.Path]::GetFileName($assetPath)
     $already = $release.assets | Where-Object { $_.name -eq $assetName }
     if ($already) {
       Write-Output "  附件 $assetName 已存在（$($already.size) 字节），跳过"
+      continue
+    }
+    if (-not (Test-Path -LiteralPath $assetPath)) {
+      Write-Output "  附件 $assetPath 不在本机，跳过"
       continue
     }
     # 内容类型按扩展名给：zip 传成 apk 的 MIME，下载器会照着当安装包处理。
