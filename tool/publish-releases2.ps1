@@ -69,30 +69,36 @@ function Send([string]$method, [string]$url, $body, [string]$contentType) {
   }
 }
 
-# 要发的版本：**只有次位号**。修订版不在这个清单里。
-# `Asset` 留空表示这一版没有可发的安装包（只有最近两版本机有包）。
+# 要发的版本：**只有次位号**，且**只发已经挂过包的那些**。修订版不在这个清单里。
+#
+# `Asset` 列出这一篇要带的安装包，规则是**只挂它自己那一版的包**
+# （`v2.4.0` 只挂 `guideline-2.4.0.apk`，不挂 `2.3.9` 的）。本机 `dist/` 里没有的包
+# 会被跳过并提示，不报错 —— 那说明那一版当时没按次位号存包。
+#
+# ⚠️ **`2.7.0` 及以上暂时不出现在这个清单里**（用户口径 2026-10-08）：
+# 「`2.7.0` 及以上的一切都等到 `2.8.0` 出现之后再发」，而 `v2.7.0` 那一篇 Release
+# 已按用户要求删除。等 `2.8.0` 真正做出来时，再把它加回清单，正文从 `2.6.0` 之后起算。
 $releases = @(
-  @{ Tag = 'v2.7.0';  Name = 'v2.7.0 — 到点提醒与 Windows 版发布';        Asset = @('dist/guideline-2.7.0.apk', 'dist/guideline-windows-2.7.0.zip') },
-  @{ Tag = 'v2.6.0';  Name = 'v2.6.0 — 在指定位置插入主线任务';           Asset = @() },
-  @{ Tag = 'v2.5.0';  Name = 'v2.5.0 — 截止时间精确到分钟';               Asset = @() },
-  @{ Tag = 'v2.4.0';  Name = 'v2.4.0 — 同步页自动读取云端';               Asset = @() },
-  @{ Tag = 'v2.3.0';  Name = 'v2.3.0 — 同步状态改为两行对照';             Asset = @() },
-  @{ Tag = 'v2.2.0';  Name = 'v2.2.0 — 数据安全修复';                     Asset = @() },
-  @{ Tag = 'v2.1.0';  Name = 'v2.1.0 — 内部修正';                         Asset = @() },
-  @{ Tag = 'v2.0.0';  Name = 'v2.0.0 — 内部修正';                         Asset = @() },
-  @{ Tag = 'v1.12.0'; Name = 'v1.12.0 — Windows 桌面版发布';              Asset = @() },
-  @{ Tag = 'v1.11.0'; Name = 'v1.11.0 — 同步状态指示器与启动比对';        Asset = @() },
-  @{ Tag = 'v1.10.0'; Name = 'v1.10.0 — GitHub 备份同步';                 Asset = @() },
-  @{ Tag = 'v1.9.0';  Name = 'v1.9.0 — 提交码与键盘收起规则';             Asset = @() },
-  @{ Tag = 'v1.8.0';  Name = 'v1.8.0 — 分类递归展开与多点修复';           Asset = @() },
-  @{ Tag = 'v1.7.0';  Name = 'v1.7.0 — AI 拆分条目与重置入口';            Asset = @() },
-  @{ Tag = 'v1.6.0';  Name = 'v1.6.0 — 主题手选、分类导出与文案精简';     Asset = @() },
-  @{ Tag = 'v1.5.0';  Name = 'v1.5.0 — 事件重命名与速记按钮修复';         Asset = @() },
-  @{ Tag = 'v1.4.0';  Name = 'v1.4.0 — 项目与事件的口径重定';             Asset = @() },
-  @{ Tag = 'v1.3.0';  Name = 'v1.3.0 — 实现清单与 AI 整理';               Asset = @() },
-  @{ Tag = 'v1.2.0';  Name = 'v1.2.0 — 灵感多选、项目标识色与紧迫度色阶'; Asset = @() },
-  @{ Tag = 'v1.1.0';  Name = 'v1.1.0 — 页内输入与任务后续关系';           Asset = @() },
-  @{ Tag = 'v1.0.0';  Name = 'v1.0.0 — 首个手机单机版';                   Asset = @() }
+  @{ Tag = 'v2.6.0';  Name = 'v2.6.0 — 在指定位置插入主线任务';           Asset = @('dist/guideline-2.6.0.apk') },
+  @{ Tag = 'v2.5.0';  Name = 'v2.5.0 — 截止时间精确到分钟';               Asset = @('dist/guideline-2.5.0.apk') },
+  @{ Tag = 'v2.4.0';  Name = 'v2.4.0 — 同步页自动读取云端';               Asset = @('dist/guideline-2.4.0.apk') },
+  @{ Tag = 'v2.3.0';  Name = 'v2.3.0 — 同步状态改为两行对照';             Asset = @('dist/guideline-2.3.0.apk') },
+  @{ Tag = 'v2.2.0';  Name = 'v2.2.0 — 数据安全修复';                     Asset = @('dist/guideline-2.2.0.apk', 'dist/guideline-windows-2.2.0.zip') },
+  @{ Tag = 'v2.1.0';  Name = 'v2.1.0 — 内部修正';                         Asset = @('dist/guideline-2.1.0.apk') },
+  @{ Tag = 'v2.0.0';  Name = 'v2.0.0 — 内部修正';                         Asset = @('dist/guideline-2.0.0.apk') },
+  @{ Tag = 'v1.12.0'; Name = 'v1.12.0 — Windows 桌面版发布';              Asset = @('dist/guideline-1.12.0.apk') },
+  @{ Tag = 'v1.11.0'; Name = 'v1.11.0 — 同步状态指示器与启动比对';        Asset = @('dist/guideline-1.11.0.apk') },
+  @{ Tag = 'v1.10.0'; Name = 'v1.10.0 — GitHub 备份同步';                 Asset = @('dist/guideline-1.10.0.apk') },
+  @{ Tag = 'v1.9.0';  Name = 'v1.9.0 — 提交码与键盘收起规则';             Asset = @('dist/guideline-1.9.0.apk') },
+  @{ Tag = 'v1.8.0';  Name = 'v1.8.0 — 分类递归展开与多点修复';           Asset = @('dist/guideline-1.8.0.apk') },
+  @{ Tag = 'v1.7.0';  Name = 'v1.7.0 — AI 拆分条目与重置入口';            Asset = @('dist/guideline-1.7.0.apk') },
+  @{ Tag = 'v1.6.0';  Name = 'v1.6.0 — 主题手选、分类导出与文案精简';     Asset = @('dist/guideline-1.6.0.apk') },
+  @{ Tag = 'v1.5.0';  Name = 'v1.5.0 — 事件重命名与速记按钮修复';         Asset = @('dist/guideline-1.5.0.apk') },
+  @{ Tag = 'v1.4.0';  Name = 'v1.4.0 — 项目与事件的口径重定';             Asset = @('dist/guideline-1.4.0.apk') },
+  @{ Tag = 'v1.3.0';  Name = 'v1.3.0 — 实现清单与 AI 整理';               Asset = @('dist/guideline-1.3.0.apk') },
+  @{ Tag = 'v1.2.0';  Name = 'v1.2.0 — 灵感多选、项目标识色与紧迫度色阶'; Asset = @('dist/guideline-1.2.0.apk') },
+  @{ Tag = 'v1.1.0';  Name = 'v1.1.0 — 页内输入与任务后续关系';           Asset = @('dist/guideline-1.1.0.apk') },
+  @{ Tag = 'v1.0.0';  Name = 'v1.0.0 — 首个手机单机版';                   Asset = @('dist/guideline-1.0.0.apk') }
 )
 
 foreach ($rel in $releases) {
