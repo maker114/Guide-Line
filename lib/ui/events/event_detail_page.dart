@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/models/enums.dart';
 import '../../core/models/event.dart';
+import '../../core/models/project_item.dart';
 import '../../core/models/task.dart';
 import '../common/animated_collapse.dart';
 import '../common/color_picker.dart';
@@ -27,6 +28,14 @@ const Duration _foldDuration = Duration(milliseconds: 180);
 /// 为什么需要它：这一页除了任务线，顶上那张卡里也有文字，任务线的断言收在
 /// 这个 key 里就不用担心别处也出现同名字样（`find.descendant(of: find.byKey(eventDetailLineKey), …)`）。
 const Key eventDetailLineKey = Key('event-detail-line');
+
+/// **待办行**的 key 前缀（测试用；界面上看不见）：`taskChecklistRowKeyPrefix + 条目 id`。
+///
+/// 与 [eventDetailLineKey] 同一个理由，但这里要**按条目定位**：待办行的文字
+/// 与任务行、子任务行都可能重名（比如同时有一条待办和一条子任务都叫"写测试"），
+/// 按键找行才不会在那种数据上误判。事件详情页与任务行（`TaskTile`）**共用**这个前缀 ——
+/// 同一个前缀在两处都只有一行，语义是"这条待办的那一行"。
+const String taskChecklistRowKeyPrefix = 'task-check-';
 
 /// 事件详情：**一条任务线的可视化**。
 ///
@@ -166,6 +175,37 @@ class _EventDetailPageState extends State<EventDetailPage> {
     showToast(context, message, error: error);
   }
 
+  // ---------------------------------------------------------------- 待办清单
+  //
+  // 四个动作都只动**那一条任务**的 `checklist`（契约 §3.4.2）：
+  //   · 勾完所有待办**不会**把任务变成已完成 —— 判定只认子任务与主线节点；
+  //   · 待办没勾完也**不阻塞**任务，所以这里不碰 `isTaskBlocked` 那条路；
+  //   · 失败一律走同一句吐司（`app.run` 返回值就是给人看的那句话）。
+
+  void _createTaskChecklistItem(String taskId, String text) {
+    final error = app.run(() => app.ws.addTaskChecklistItem(taskId, text));
+    if (error != null) _toast(error, error: true);
+  }
+
+  void _updateTaskChecklistItemText(String taskId, String itemId, String text) {
+    final error = app.run(
+      () => app.ws.updateTaskChecklistItemText(taskId, itemId, text),
+    );
+    if (error != null) _toast(error, error: true);
+  }
+
+  void _setTaskChecklistItemDone(String taskId, String itemId, bool done) {
+    final error = app.run(
+      () => app.ws.setTaskChecklistItemDone(taskId, itemId, done),
+    );
+    if (error != null) _toast(error, error: true);
+  }
+
+  void _removeTaskChecklistItem(String taskId, String itemId) {
+    final error = app.run(() => app.ws.removeTaskChecklistItem(taskId, itemId));
+    if (error != null) _toast(error, error: true);
+  }
+
   /// 这个事件下**已归档的主线节点**有几个（只在任务线为空时用来解释"为什么空"）。
   int _archivedMainLineCount() => app.ws.liveTasks
       .where((t) => t.eventId == eventId && t.parentId == null && t.archived)
@@ -208,6 +248,10 @@ class _EventDetailPageState extends State<EventDetailPage> {
     moveInLine: moveInLine,
     createTask: _createTask,
     createTaskAfter: _createTaskAfter,
+    createTaskChecklistItem: _createTaskChecklistItem,
+    updateTaskChecklistItemText: _updateTaskChecklistItemText,
+    setTaskChecklistItemDone: _setTaskChecklistItemDone,
+    removeTaskChecklistItem: _removeTaskChecklistItem,
   );
 
   void beginRename(String taskId) => setState(() => _renamingTaskId = taskId);
@@ -508,6 +552,10 @@ class _EventDetailSession {
     required this.moveInLine,
     required this.createTask,
     required this.createTaskAfter,
+    required this.createTaskChecklistItem,
+    required this.updateTaskChecklistItemText,
+    required this.setTaskChecklistItemDone,
+    required this.removeTaskChecklistItem,
   });
 
   /// 控制器。与下面两个状态一样是**取值函数**，不是字段（2026-10-01 核验改）。
@@ -554,6 +602,15 @@ class _EventDetailSession {
   /// 在某个主线节点后面插一条新任务。签名照
   /// `_EventDetailPageState._createTaskAfter`。
   final void Function(String anchorTaskId, String title) createTaskAfter;
+
+  /// 待办清单的四个动作（签名照 `_EventDetailPageState._checklist*`）。
+  ///
+  /// 它们**只动那一条任务的 `checklist`**：不碰任务状态、不碰子任务、
+  /// 也不触发"已完成父节点退回"。见 `WorkspaceTaskChecklist` 的类文档。
+  final void Function(String taskId, String text) createTaskChecklistItem;
+  final void Function(String taskId, String itemId, String text) updateTaskChecklistItemText;
+  final void Function(String taskId, String itemId, bool done) setTaskChecklistItemDone;
+  final void Function(String taskId, String itemId) removeTaskChecklistItem;
 }
 
 /// 事件详情页头（进度 / 标识色 / 搁置 / 归档那一行）。
@@ -657,6 +714,23 @@ class _TaskBox extends StatelessWidget {
     // 所以这里是就地缩成一行，而不是重新分组。
     final expanded = app.isExpanded(task.id, defaultExpanded: !isDone);
     final hasChildren = children.isNotEmpty;
+    // 待办清单（契约 §3.4.2）：任务内部的细则，与子任务是两回事。
+    // **没有待办、或有没勾完的待办 ⇒ 默认展开**，默认值只问一件事：
+    // "这里还有没有活要干"。注意"一条都没有"也算展开 —— 否则新任务里
+    // 那一行「加一条待办」会被自己收起来，第一条细则根本没地方加
+    // （`task_checklist_test` 里那条用例就是冲这个来的）。
+    // 用户显式点过的话以他的选择为准（`isExpanded` 的语义，见 `UiPrefs`）。
+    final checklist = app.ws.taskChecklistOf(task.id);
+    final checklistOpen = app.isExpanded(
+      'checklist-${task.id}',
+      // 默认值只问一件事："这条任务下面还有没有没做完的细则"。
+      //   · 有没勾完的 ⇒ 展开（要看的就是它）；
+      //   · 一条都没有 ⇒ 也展开 —— 那一行「加一条待办」就在展开区里，
+      //     收起来等于"新任务永远加不上第一条细则"
+      //     （`task_checklist_test` 的"就地录入"那条用例抓的就是这个）；
+      //   · 全勾完了 ⇒ 收起，只在摘要行留一个「待办 3/3」。
+      defaultExpanded: checklist.isEmpty || checklist.any((item) => !item.done),
+    );
     final accent =
         isDone ? theme.colorScheme.outlineVariant : theme.colorScheme.primary;
 
@@ -687,6 +761,14 @@ class _TaskBox extends StatelessWidget {
               count: children.length,
               onTap: () => app.setExpanded(task.id, expanded: true),
             ),
+          // 待办清单排在下级**之前**：它是这条任务自己的细则，先细则、后下级。
+          _TaskChecklist(
+            session: session,
+            task: task,
+            items: checklist,
+            expanded: checklistOpen,
+            onToggle: () => app.setExpanded('checklist-${task.id}', expanded: !checklistOpen),
+          ),
           // 子任务列表**长出来**而不是啪地出现（2026-09-28 实机反馈：
           // 给所有展开 / 收起动作加动画）
           AnimatedCollapse(
@@ -771,6 +853,247 @@ class _CollapsedChildrenHint extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 任务框里的**待办清单**（契约 §3.4.2）。
+///
+/// 与子任务的分工（这是整块功能的重点）：
+///   · **没有从属符** —— 这里刻意不画子任务那套"短竖线 + `subdirectory_arrow_right`"。
+///     待办不是从属的节点，它只是这条任务的细则；层级只靠**缩进 + 浅底**表示；
+///   · **圆形勾选** —— 项目实现清单是方形 `Checkbox`、下级清单是圆形，
+///     这里也用圆形：它勾的是"我自己这条任务下面的细则"；
+///   · **勾选不改任务状态** —— 勾完所有待办**不会**把任务变成已完成，
+///     这是数据层的边界（`WorkspaceTaskChecklist`），界面不越权去补一个"自动完成"。
+///
+/// 折叠与摘要：有未勾完的待办时默认展开（由调用方给 `expanded` 的默认值），
+/// 收起时留一行「待办 d/t」——**与任务行那行「下级 d/t」同一套写法**。
+/// 待办本来就空时**不留摘要行**，只留「加一条待办」入口，免得多一行噪音。
+class _TaskChecklist extends StatelessWidget {
+  const _TaskChecklist({
+    required this.session,
+    required this.task,
+    required this.items,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final _EventDetailSession session;
+  final Task task;
+  final List<ProjectItem> items;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  /// 待办自己没有到期日，**继承宿主任务**：任务逾期即待办逾期。
+  ///
+  /// 走的是与任务行、列表页、逾期横幅**同一把尺子** `isTaskRowOverdue`
+  /// （未完成 + 未归档事件 + 过了那个时间点），所以不会出现"任务红了、
+  /// 它下面的待办不红"这种两套说法。日期本身不重复写在每一行上：
+  /// 待办行再挂一遍同一个日期，同一屏里就有五个一样的日期。
+  bool _overdue(BuildContext context, AppController app) => isTaskRowOverdue(
+        task.dueAt,
+        pending: task.status == NodeStatus.pending,
+        muted: app.ws.isEventMutedForDue(task.eventId),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final app = session.app();
+    final theme = Theme.of(context);
+    final overdue = _overdue(context, app);
+    final done = items.where((item) => item.done).length;
+    // 摘要只在"有东西可摘要"时出现（空清单给 null，整行不画）
+    final summary = items.isEmpty ? null : '待办 $done/${items.length}';
+
+    return Padding(
+      // 缩进比子任务**多一档半**：实测子任务行的文字左缘在 113，这里从 44 加到 68，
+      // 文字落在 145 上下 —— 层级只靠这档缩进 + 浅底表示
+      // （子任务那条路还有"竖线 + 从属箭头"两道记号，待办刻意一个都不画）。
+      padding: const EdgeInsets.only(left: 68, top: 2, bottom: 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (summary != null)
+            InkWell(
+              // 点这一行收起 / 展开（与"已折叠 N 个下级"同一套习惯）
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0, 2, 12, 2),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 14,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      summary,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: overdue ? theme.colorScheme.error : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          AnimatedCollapse(
+            expanded: expanded,
+            // 浅底把"这一段是这条任务的细则"圈出来，与子任务行的浅底同源。
+            //
+            // **必须用 `Material` 而不是 `Container(color:)`**：底下的待办行里
+            // 有 `ListTile`（`InlineComposer` 展开时就是），而 `ListTile` 的底色
+            // 与水波纹画在**最近的 `Material`** 上 —— 中间夹一层有底色的
+            // `ColoredBox`，Flutter 会直接断言报错（真机运行时会红屏，
+            // 测试里是 `ListTile background color or ink splashes may be invisible`）。
+            // 同一个坑在子任务行那处注释里记过一次，这次换了个位置又踩到。
+            child: Material(
+              type: MaterialType.transparency,
+              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (final item in items)
+                    KeyedSubtree(
+                      key: ValueKey<String>('$taskChecklistRowKeyPrefix${item.id}'),
+                      child: _TaskChecklistRow(
+                        session: session,
+                        task: task,
+                        item: item,
+                        overdue: overdue,
+                      ),
+                    ),
+                  // 录入**不走任务动作面板**：项目清单是常驻一行「添加条目」，
+                  // 这里照抄那个手感（点行 → 动作面板 → 新建，等于绕一圈）。
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: InlineComposer(
+                      label: '加一条待办',
+                      hint: '这条任务里的一个步骤',
+                      leading: Icons.add,
+                      dense: true,
+                      onCreate: (text) => session.createTaskChecklistItem(task.id, text),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 一行待办：圆形勾选 + 文字。点勾选切换完成，点文字**就地改名**，长按出删除。
+///
+/// 长按才出操作，是照项目清单那一套（点这一行本身就是改名，再挂一个小图标
+/// 只是多一个看不出区别的记号，2026-09-28 实机反馈）。
+class _TaskChecklistRow extends StatelessWidget {
+  const _TaskChecklistRow({
+    required this.session,
+    required this.task,
+    required this.item,
+    required this.overdue,
+  });
+
+  final _EventDetailSession session;
+  final Task task;
+  final ProjectItem item;
+  final bool overdue;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onLongPress: () => _showActions(context),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 12, 0),
+        child: Row(
+          children: <Widget>[
+            // 待办行**不给状态按钮**（那是三态、还带锁），只给两态勾选：
+            // 点它 = 勾上 / 取消，与项目清单的勾选框同一套手感。
+            Tooltip(
+              message: item.done ? '取消勾选' : '勾上',
+              child: IconButton(
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                icon: Icon(
+                  item.done ? Icons.check_circle : Icons.radio_button_unchecked,
+                  size: 20,
+                  color: item.done
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.outline,
+                ),
+                onPressed: () => session.setTaskChecklistItemDone(
+                  task.id,
+                  item.id,
+                  !item.done,
+                ),
+              ),
+            ),
+            Expanded(
+              child: InlineTextField(
+                value: item.text,
+                hint: '这条任务里的一个步骤',
+                maxLines: 2,
+                showEditIcon: false,
+                textStyle: item.done
+                    ? theme.textTheme.bodySmall?.copyWith(
+                        decoration: TextDecoration.lineThrough,
+                        color: theme.colorScheme.outline,
+                      )
+                    : theme.textTheme.bodySmall?.copyWith(
+                        color: overdue ? theme.colorScheme.error : null,
+                      ),
+                onSubmitted: (text) =>
+                    session.updateTaskChecklistItemText(task.id, item.id, text),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 长按：只放删除。
+  ///
+  /// **改名不在这里**：点这一行的文字本身就是改名（`InlineTextField`），
+  /// 再挂一个"重命名"只是把同一件事说两遍 —— 项目清单那边也把行尾那支小铅笔
+  /// 删掉过（2026-09-28 实机反馈）。要不要能改、改成什么，都由那一行自己回答。
+  ///
+  /// **删除不弹二次确认**：待办是轻量内容，误删重打一句就好，弹确认反而烦
+  /// （与项目清单同一条口径）。
+  Future<void> _showActions(BuildContext context) async {
+    final value = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                item.text,
+                style: Theme.of(sheetContext).textTheme.titleMedium,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('删除这条待办'),
+              subtitle: const Text('点这一行的文字可以直接改；删除不弹二次确认'),
+              onTap: () => Navigator.of(sheetContext).pop('delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (value == null || !context.mounted) return;
+    if (value == 'delete') session.removeTaskChecklistItem(task.id, item.id);
   }
 }
 

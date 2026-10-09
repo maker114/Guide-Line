@@ -1,6 +1,7 @@
 import '../json/canonical.dart';
 import 'entity.dart';
 import 'enums.dart';
+import 'project_item.dart';
 
 /// 任务（《数据契约》§3.4）。
 ///
@@ -11,6 +12,13 @@ import 'enums.dart';
 /// 让人得同时理解"支路""分叉点""合流点"三个概念 —— 与"快速理清一件事的脉络"
 /// 这条初心是冲突的。**并行两条线请开两个事件**，或者把两条并成同一节点下的
 /// 两条子任务。细节见《数据契约》§3.4.1 与 §7 的 v3 说明。
+///
+/// **任务内部还有一份「待办清单」**（[checklist]，2026-10-09 加，契约 §3.4.2）：
+/// 它是这条任务的细则，与子任务是两回事 —— 子任务是**参与完成判定**的节点，
+/// 待办只是打勾。所以待办：
+///   · **仅两态**（勾 / 不勾），没有 `ignored`；
+///   · **没有自己的 `due_at`**，到期日**继承宿主任务**：任务逾期即待办逾期；
+///   · **不参与任何判定** —— 全勾完也不会把任务变成 `done`，未勾完也不阻塞任务。
 class Task implements EntityNode {
   const Task({
     required this.id,
@@ -26,6 +34,7 @@ class Task implements EntityNode {
     required this.createdAt,
     required this.updatedAt,
     required this.deleted,
+    this.checklist = const <ProjectItem>[],
     this.extra = const <String, dynamic>{},
   }) : parentId = parentTaskId;
 
@@ -43,6 +52,7 @@ class Task implements EntityNode {
     'created_at',
     'updated_at',
     'deleted',
+    'checklist',
   };
 
   /// v3 删掉的字段：读老文件时**丢掉**，并且不再透传（`extra`）——
@@ -86,6 +96,16 @@ class Task implements EntityNode {
   @override
   final bool deleted;
 
+  /// 这条任务的**待办清单**（细则，契约 §3.4.2）。空数组 = 没有待办。
+  ///
+  /// 条目结构用的是 [ProjectItem] —— 那个类名来自"项目实现清单"，但它的结构
+  /// （`{id, text, done}`）就是"清单条目"的通用结构，两处逐字同构，
+  /// 所以**共用一套**而不另立一个类：两套结构早晚会在解析容错上分叉。
+  /// 名字带 `Project` 是历史原因，不代表它只能用在项目里。
+  ///
+  /// **顺序 := 数组下标**（与项目清单同一条口径）：条目没有 `order` 字段。
+  final List<ProjectItem> checklist;
+
   final Map<String, dynamic> extra;
 
   String? get parentTaskId => parentId;
@@ -121,6 +141,7 @@ class Task implements EntityNode {
     Object? completedAt = _unset,
     int? updatedAt,
     bool? deleted,
+    Object? checklist = _unset,
   }) {
     return Task(
       id: id,
@@ -136,6 +157,15 @@ class Task implements EntityNode {
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       deleted: deleted ?? this.deleted,
+      // `checklist` 走哨兵值而不是 `?? this.checklist`：**清空清单是合法操作**，
+      // 用空数组当"没传"会让清空永远写不下去（与 `dueAt` / `completedAt` 同一个坑）。
+      // 转换用 `List<ProjectItem>.from(...)` 而**不是** `as List<ProjectItem>`：
+      // 后者在调用方传 `const []`（推断成 `List<dynamic>`）时会直接抛类型错 ——
+      // "清空清单"偏偏最可能就用那个写法传（这行是 `task_checklist_model_test`
+      // 里那条用例逼出来的）。
+      checklist: checklist == _unset
+          ? this.checklist
+          : List<ProjectItem>.from(checklist as Iterable<Object?>),
       extra: extra,
     );
   }
@@ -159,6 +189,7 @@ class Task implements EntityNode {
       createdAt: Canonical.readInt(json['created_at'], 'task.created_at', issues) ?? 0,
       updatedAt: Canonical.readInt(json['updated_at'], 'task.updated_at', issues) ?? 0,
       deleted: Canonical.readBool(json['deleted'], 'task.deleted', issues) ?? false,
+      checklist: readProjectItems(json['checklist'], 'task.checklist', issues),
       extra: extra,
     );
   }
@@ -179,6 +210,12 @@ class Task implements EntityNode {
       'created_at': createdAt,
       'updated_at': updatedAt,
       'deleted': deleted,
+      // 空清单也照写 `[]`：**字段在不在**本身是信息（"这条任务有清单这个概念"），
+      // 写成条件键会让"读过老文件再写出"与"新建的任务"两份数据长得不一样，
+      // 而契约的首个样本要求同一形态。见《数据契约》§3.4.2。
+      'checklist': <Map<String, dynamic>>[
+        for (final item in checklist) item.toJson(),
+      ],
     };
     out.addAll(extra);
     return out;

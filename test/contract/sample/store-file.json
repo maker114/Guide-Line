@@ -17,7 +17,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788307200000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "2a7c9e14-5b3d-4f61-8c02-3d5e7a9b1c22",
@@ -32,7 +33,8 @@
           "completed_at": 1788480000000,
           "created_at": 1788220800000,
           "updated_at": 1788480000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "3b8d0f25-6c4e-4a72-9d13-4e6f8b0c2d33",
@@ -47,7 +49,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788307200000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "4c9e1a36-7d5f-4b83-ae24-5f708c1d3e44",
@@ -153,7 +156,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788480000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "d58ba3cf-06e8-441c-b3bd-e86975061733",
@@ -164,7 +168,8 @@
           "completed_at": 1788480000000,
           "created_at": 1788220800000,
           "updated_at": 1788480000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         }
       ]
     },
@@ -183,7 +188,8 @@
           "completed_at": 1788400000000,
           "created_at": 1788220800000,
           "updated_at": 1788400000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "f7adc5e1-280a-463e-95df-0a8b97283955",
@@ -198,7 +204,19 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788307200000,
-          "deleted": false
+          "deleted": false,
+          "checklist": [
+            {
+              "id": "5d3f8a71-9c02-4b6e-8f31-7a0e2d94c118",
+              "text": "先写契约再写实现",
+              "done": true
+            },
+            {
+              "id": "6e4a9b82-ad13-4c7f-9024-8b1f3ea5d229",
+              "text": "补一条往回兼容的用例",
+              "done": false
+            }
+          ]
         },
         {
           "id": "08bed6f2-391b-474f-a6e0-1b9ca8394a66",
@@ -213,7 +231,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788307200000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "19cfe703-4a2c-4850-b7f1-2cadb94a5b77",
@@ -228,7 +247,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788480000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "2ad0f814-5b3d-4961-c802-3dbec05b6c88",
@@ -243,7 +263,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788307200000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "3be10925-6c4e-4a72-d913-4ecfd16c7d99",
@@ -258,7 +279,8 @@
           "completed_at": null,
           "created_at": 1788220800000,
           "updated_at": 1788480000000,
-          "deleted": false
+          "deleted": false,
+          "checklist": []
         },
         {
           "id": "4cf21a36-7d5f-4b83-ea24-5fd0e27d8e00",

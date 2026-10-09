@@ -21,6 +21,7 @@ import '../core/store/ui_prefs.dart';
 import '../core/tree/tree_index.dart';
 import 'workspace_checklist.dart';
 import 'workspace_state.dart';
+import 'workspace_task_checklist.dart';
 
 // 状态与共享词汇搬到 `workspace_state.dart`、清单那一块搬到
 // `workspace_checklist.dart` 之后，`Workspace` 对外**仍然要看起来和以前一样**：
@@ -31,6 +32,7 @@ export '../core/store/app_storage.dart' show AppStorage, LoadReport, StoreLocked
 export '../core/store/ui_prefs.dart' show UiPrefs;
 export 'workspace_checklist.dart' show WorkspaceChecklist;
 export 'workspace_state.dart' show RuleViolation, WorkspaceState;
+export 'workspace_task_checklist.dart' show WorkspaceTaskChecklist;
 
 /// 「并列任务」已经废除：它是当年"框内并排两条线"的做法，与
 /// "一条线就是一件事的脉络"这条主线是两套心智。
@@ -198,6 +200,14 @@ class Workspace {
   /// 把刚切开的耦合又接回去，而且会绕成循环依赖。
   late final WorkspaceChecklist _checklist =
       WorkspaceChecklist(_state, (String id) => findProject(id));
+
+  /// 任务内部的**待办清单**那一块业务（`workspace_task_checklist.dart`）。
+  ///
+  /// 同样懒建、同样只传 `findTask` 这个函数。它与 [_checklist] 是两块业务：
+  /// 那块管项目「实现」里的条目，这块管任务里的细则 —— 结构一样、归属与
+  /// 判定权完全不同，所以是两个文件而不是一个。
+  late final WorkspaceTaskChecklist _taskChecklist =
+      WorkspaceTaskChecklist(_state, (String id) => findTask(id));
 
   Map<DocName, Document> get _docs => _state.documents;
 
@@ -1272,6 +1282,42 @@ class Workspace {
         createTask: ({required String eventId, required String title}) =>
             createTask(eventId: eventId, title: title),
       );
+
+  // -------------------------------------------------------- 任务待办清单（转发）
+
+  /// 下面 6 个方法是**转发**：实体在 `workspace_task_checklist.dart` 的
+  /// [WorkspaceTaskChecklist] 里，这里只保留同名同签名的一层壳 ——
+  /// 与上面「实现清单」那一批同一个理由：**搬家的判据是"身子在哪儿"**。
+  ///
+  /// 两块清单**结构一样、归属不同**：项目清单挂在项目上，任务待办挂在任务上，
+  /// 而后者与完成判定、子任务、归档级联全都不相干（见那一块的类文档）。
+  /// 库里这几行同样不含业务规则。
+
+  /// 这条任务的待办条目；任务不存在时给空表（读取不抛）。
+  List<ProjectItem> taskChecklistOf(String taskId) =>
+      _taskChecklist.taskChecklistOf(taskId);
+
+  /// 已完成 / 总数，给"待办 2/5"这类摘要用。
+  ({int done, int total}) taskChecklistSummary(String taskId) =>
+      _taskChecklist.taskChecklistSummary(taskId);
+
+  ProjectItem addTaskChecklistItem(String taskId, String text) =>
+      _taskChecklist.addTaskChecklistItem(taskId, text);
+
+  void updateTaskChecklistItemText(String taskId, String itemId, String text) =>
+      _taskChecklist.updateTaskChecklistItemText(taskId, itemId, text);
+
+  /// 勾上 / 取消一条待办。**不碰任务状态、不碰子任务、不触发反向传播。**
+  void setTaskChecklistItemDone(String taskId, String itemId, bool done) =>
+      _taskChecklist.setTaskChecklistItemDone(taskId, itemId, done);
+
+  /// 删一条待办（轻量内容，**不弹二次确认**）。
+  void removeTaskChecklistItem(String taskId, String itemId) =>
+      _taskChecklist.removeTaskChecklistItem(taskId, itemId);
+
+  /// 清空一条任务的待办；本来就空时不落盘。
+  void clearTaskChecklist(String taskId) => _taskChecklist.clearTaskChecklist(taskId);
+
   /// 用整理后的正文替换「实现」文本（AI 整理写回走这里）。
   ///
   /// **没有跟着清单那一块搬走**：它动的是 `implementation`（正文），
