@@ -1033,18 +1033,24 @@ class _ChecklistHeader extends StatelessWidget {
       // 点这一行收起 / 展开（与"已折叠 N 个下级"同一套习惯）
       onTap: onToggle,
       child: Padding(
-        // 22 + 16 + 8 = 46 ⇒ 摘要文字落在 74，条目文字 86 —— 摘要读起来是这一块的标题。
-        // 上下 4：摘要与条目是一件事的两行，中间不留空档（实机截图里那 55px 的空档
-        // 就是这里给的 6 + 6 加上条目行自己的留白堆出来的）。
-        padding: const EdgeInsets.fromLTRB(22, 4, 12, 4),
+        // **摘要与任务标题、日期同一条竖线**（2026-10-11 修"收起时很不协调"）：
+        //   · 图标与条目勾选圈共用 36 宽的那一槽（图标居中 ⇒ 落在 14+18 = 32，
+        //     勾选圈落在 14+6 = 20，两者竖着看是"一列标记"）；
+        //   · 摘要文字接在槽位之后 ⇒ 与任务标题、到期日同一条左缘。
+        // 之前给的是 22/8 的固定间距，摘要正好落在标题与条目**中间**那一档，
+        // 收起时就成了一行"不靠左也不靠右"的字，截图里看着最刺眼的就是它。
+        // 上下 4：摘要与条目是一件事的两行，中间不留空档。
+        padding: const EdgeInsets.fromLTRB(14, 4, 12, 4),
         child: Row(
           children: <Widget>[
-            Icon(
-              expanded ? Icons.expand_less : Icons.expand_more,
-              size: 16,
-              color: theme.colorScheme.outline,
+            SizedBox(
+              width: 36,
+              child: Icon(
+                expanded ? Icons.expand_less : Icons.expand_more,
+                size: 16,
+                color: theme.colorScheme.outline,
+              ),
             ),
-            const SizedBox(width: 8),
             Text(
               summary,
               style: theme.textTheme.labelMedium?.copyWith(
