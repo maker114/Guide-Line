@@ -960,7 +960,11 @@ class _TaskChecklist extends StatelessWidget {
       //   · 换成不透明的 `surfaceContainerHighest`，仍然没画出来；
       //   · 最后用 `onSurface@4.5%` 的遮罩**确实画出来了**（取色 `#eaeaea`），
       //     但用户看着不好看 —— 所以这条路整条撤掉。
-      padding: const EdgeInsets.only(left: 28, right: 16, top: 6, bottom: 4),
+      //
+      // 上下留白**收到最小**（2026-10-11 用户口径："待办有点靠下了，不够紧凑"）：
+      // 实机逐行量过 —— 任务行内容到 816、第一条待办从 1022 才开始，中间 206px
+      // 全是空的，其中"摘要行下方 → 条目"那一段就占 55px。现在 top 2 / bottom 2。
+      padding: const EdgeInsets.only(left: 28, right: 16, top: 2, bottom: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -1029,8 +1033,10 @@ class _ChecklistHeader extends StatelessWidget {
       // 点这一行收起 / 展开（与"已折叠 N 个下级"同一套习惯）
       onTap: onToggle,
       child: Padding(
-        // 22 + 16 + 8 = 46 ⇒ 摘要文字落在 74，条目文字 86 —— 摘要读起来是这一块的标题
-        padding: const EdgeInsets.fromLTRB(22, 6, 12, 6),
+        // 22 + 16 + 8 = 46 ⇒ 摘要文字落在 74，条目文字 86 —— 摘要读起来是这一块的标题。
+        // 上下 4：摘要与条目是一件事的两行，中间不留空档（实机截图里那 55px 的空档
+        // 就是这里给的 6 + 6 加上条目行自己的留白堆出来的）。
+        padding: const EdgeInsets.fromLTRB(22, 4, 12, 4),
         child: Row(
           children: <Widget>[
             Icon(
@@ -1129,10 +1135,9 @@ class _TaskChecklistRow extends StatelessWidget {
     return InkWell(
       onLongPress: () => _showActions(context),
       child: Padding(
-        // 行距收紧到 2：第一版给的是 4，加上 34 高的按钮，一行占掉 113px ——
-        // 比任务行还高，截图里三条待办就把任务框撑得又长又空。
-        // 左内边距 22 + 按钮 24 + 间距 8 = 54 ⇒ 圈在 46+22=68 那条线上（见标题行注释）。
-        padding: const EdgeInsets.fromLTRB(22, 2, 12, 2),
+        // 行距收到 1（2026-10-11 再一次收紧）：按钮 24 高 + 上下各 1 ⇒ 一行约 26dp，
+        // 三行待办不再把任务框撑长。第一版是 4 + 34 高的按钮，一行占掉 113px。
+        padding: const EdgeInsets.fromLTRB(22, 1, 12, 1),
         child: Row(
           children: <Widget>[
             // 待办行**不给状态按钮**（那是三态、还带锁），只给两态勾选：
