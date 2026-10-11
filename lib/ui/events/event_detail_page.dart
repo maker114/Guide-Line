@@ -86,8 +86,15 @@ class _EventDetailPageState extends State<EventDetailPage> {
   /// 正在为哪个任务录子任务
   String? _subtaskParentId;
 
-  /// 正在为哪个主线节点录"插在它后面"的新任务（没有则为 `null`）
+  /// 正在为哪个任务录"插在它后面"的新任务（没有则为 `null`）
   String? _insertAfterTaskId;
+
+  /// 正在为哪个任务**录一条待办**（没有则为 `null`）。
+  ///
+  /// 待办与子任务一样走"页内输入行"，但入口在**任务动作面板**里（2026-10-11
+  /// 用户口径）：任务框里不再常驻一行「加一条待办」——那一行在实机截图里
+  /// 比三条待办本身还显眼，把细则区压成了"一个输入框加几条字"。
+  String? _checklistParentId;
 
   /// 是否把**自动收起的已完成节点**全部展开（临时状态，不进偏好）。
   ///
@@ -181,6 +188,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
   //   · 勾完所有待办**不会**把任务变成已完成 —— 判定只认子任务与主线节点；
   //   · 待办没勾完也**不阻塞**任务，所以这里不碰 `isTaskBlocked` 那条路；
   //   · 失败一律走同一句吐司（`app.run` 返回值就是给人看的那句话）。
+  //
+  // 录入这条路（`beginChecklistItem` → 框内输入行 → `endChecklistItem`）与
+  // 「新建子任务」是同一个模式，两个 id 各自独立：一屏里不会有两条同时开着。
 
   void _createTaskChecklistItem(String taskId, String text) {
     final error = app.run(() => app.ws.addTaskChecklistItem(taskId, text));
@@ -252,6 +262,9 @@ class _EventDetailPageState extends State<EventDetailPage> {
     updateTaskChecklistItemText: _updateTaskChecklistItemText,
     setTaskChecklistItemDone: _setTaskChecklistItemDone,
     removeTaskChecklistItem: _removeTaskChecklistItem,
+    addingChecklistTo: () => _checklistParentId,
+    beginChecklistItem: beginChecklistItem,
+    endChecklistItem: endChecklistItem,
   );
 
   void beginRename(String taskId) => setState(() => _renamingTaskId = taskId);
@@ -261,6 +274,12 @@ class _EventDetailPageState extends State<EventDetailPage> {
   void beginSubtask(String taskId) => setState(() => _subtaskParentId = taskId);
 
   void beginInsertAfter(String taskId) => setState(() => _insertAfterTaskId = taskId);
+
+  /// 动作面板里点了「添加待办」：把那一行的输入框展开。
+  void beginChecklistItem(String taskId) => setState(() => _checklistParentId = taskId);
+
+  /// 录完 / 取消：把输入行收起来（提交与取消**都走这里**，行为一致）。
+  void endChecklistItem() => setState(() => _checklistParentId = null);
 
   /// 这条任务是不是**链上的节点**（parent_task_id == null）。
   bool isInMainLine(Task task) => task.parentId == null;
@@ -556,6 +575,9 @@ class _EventDetailSession {
     required this.updateTaskChecklistItemText,
     required this.setTaskChecklistItemDone,
     required this.removeTaskChecklistItem,
+    required this.addingChecklistTo,
+    required this.beginChecklistItem,
+    required this.endChecklistItem,
   });
 
   /// 控制器。与下面两个状态一样是**取值函数**，不是字段（2026-10-01 核验改）。
@@ -611,6 +633,14 @@ class _EventDetailSession {
   final void Function(String taskId, String itemId, String text) updateTaskChecklistItemText;
   final void Function(String taskId, String itemId, bool done) setTaskChecklistItemDone;
   final void Function(String taskId, String itemId) removeTaskChecklistItem;
+
+  /// 正在为哪个任务录待办（没有则为 `null`）。
+  ///
+  /// 与 [subtaskParentId] 同一个套路：入口在动作面板，落到任务框里的一行输入。
+  final String? Function() addingChecklistTo;
+
+  final void Function(String taskId) beginChecklistItem;
+  final void Function() endChecklistItem;
 }
 
 /// 事件详情页头（进度 / 标识色 / 搁置 / 归档那一行）。
@@ -768,6 +798,10 @@ class _TaskBox extends StatelessWidget {
             items: checklist,
             expanded: checklistOpen,
             onToggle: () => app.setExpanded('checklist-${task.id}', expanded: !checklistOpen),
+            // 正在录待办时**不受折叠状态影响**：已完成的任务默认是折叠的，
+            // 如果这里再串上 `checklistOpen`，「添加待办」就会什么都不发生 ——
+            // 与子任务那处同一条教训（见下面 `addingSubtask` 的注释）。
+            adding: session.addingChecklistTo() == task.id,
           ),
           // 子任务列表**长出来**而不是啪地出现（2026-09-28 实机反馈：
           // 给所有展开 / 收起动作加动画）
@@ -868,7 +902,10 @@ class _CollapsedChildrenHint extends StatelessWidget {
 ///
 /// 折叠与摘要：有未勾完的待办时默认展开（由调用方给 `expanded` 的默认值），
 /// 收起时留一行「待办 d/t」——**与任务行那行「下级 d/t」同一套写法**。
-/// 待办本来就空时**不留摘要行**，只留「加一条待办」入口，免得多一行噪音。
+/// 待办本来就空时**不留摘要行**（空清单没有进度可写）。
+///
+/// 录入：**这一块自己不常驻输入行**，只有 [adding] 为真（动作面板里点了
+/// 「添加待办」）时才在末行长出一个输入框 —— 见 `_ChecklistComposer` 的注释。
 class _TaskChecklist extends StatelessWidget {
   const _TaskChecklist({
     required this.session,
@@ -876,6 +913,7 @@ class _TaskChecklist extends StatelessWidget {
     required this.items,
     required this.expanded,
     required this.onToggle,
+    required this.adding,
   });
 
   final _EventDetailSession session;
@@ -883,6 +921,9 @@ class _TaskChecklist extends StatelessWidget {
   final List<ProjectItem> items;
   final bool expanded;
   final VoidCallback onToggle;
+
+  /// 正在给这条任务录一条待办（`_checklistParentId == task.id`）。
+  final bool adding;
 
   /// 待办自己没有到期日，**继承宿主任务**：任务逾期即待办逾期。
   ///
@@ -899,87 +940,167 @@ class _TaskChecklist extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = session.app();
-    final theme = Theme.of(context);
     final overdue = _overdue(context, app);
     final done = items.where((item) => item.done).length;
     // 摘要只在"有东西可摘要"时出现（空清单给 null，整行不画）
     final summary = items.isEmpty ? null : '待办 $done/${items.length}';
 
     return Padding(
-      // 缩进比子任务**多一档半**：实测子任务行的文字左缘在 113，这里从 44 加到 68，
-      // 文字落在 145 上下 —— 层级只靠这档缩进 + 浅底表示
-      // （子任务那条路还有"竖线 + 从属箭头"两道记号，待办刻意一个都不画）。
-      padding: const EdgeInsets.only(left: 68, top: 2, bottom: 2),
+      // **整块缩进一档**（左 28 / 右 16）：`Padding` 是"往内缩"，之前写成 `left: 40`
+      // 时这一块比卡片还宽，直接压在卡片边框外面（截图里左边多出一截）。
+      // 缩进由**里面**再分三级：标题图标 36、勾选圈 60、条目文字 86，
+      // 而子任务行的文字在 113 —— 四档从外到内排开，"谁挂在谁下面"一眼看得出来。
+      //
+      // **没有底色**（2026-10-11 用户口径："若无必要，不要搞这个浅灰色的底"）：
+      // 层级只靠缩进表达。这一条踩过三次，记在这里免得再来一次 ——
+      //   · `surfaceContainerHighest@35%` 叠在卡片底 `surfaceContainerLow` 上：
+      //     这两档在本主题里是**同一个值**（`app_theme.dart` 的 `_neutralize`
+      //     把 surface 家族统一成中性灰，截图取色卡片底与"块底"都是 `#f3f3f3`），
+      //     等于没画；
+      //   · 换成不透明的 `surfaceContainerHighest`，仍然没画出来；
+      //   · 最后用 `onSurface@4.5%` 的遮罩**确实画出来了**（取色 `#eaeaea`），
+      //     但用户看着不好看 —— 所以这条路整条撤掉。
+      padding: const EdgeInsets.only(left: 28, right: 16, top: 6, bottom: 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (summary != null)
-            InkWell(
-              // 点这一行收起 / 展开（与"已折叠 N 个下级"同一套习惯）
-              onTap: onToggle,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 2, 12, 2),
-                child: Row(
-                  children: <Widget>[
-                    Icon(
-                      expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 14,
-                      color: theme.colorScheme.outline,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      summary,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: overdue ? theme.colorScheme.error : null,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            _ChecklistHeader(
+              summary: summary,
+              expanded: expanded,
+              overdue: overdue,
+              onToggle: onToggle,
             ),
+          // 条目区**单独一层**收起壳，录入行在它外面 —— 正在录待办时
+          // 不能被"全勾完 ⇒ 默认收起"那条规则收走（收了就等于点了没反应）。
           AnimatedCollapse(
-            expanded: expanded,
-            // 浅底把"这一段是这条任务的细则"圈出来，与子任务行的浅底同源。
-            //
-            // **必须用 `Material` 而不是 `Container(color:)`**：底下的待办行里
-            // 有 `ListTile`（`InlineComposer` 展开时就是），而 `ListTile` 的底色
-            // 与水波纹画在**最近的 `Material`** 上 —— 中间夹一层有底色的
-            // `ColoredBox`，Flutter 会直接断言报错（真机运行时会红屏，
-            // 测试里是 `ListTile background color or ink splashes may be invisible`）。
-            // 同一个坑在子任务行那处注释里记过一次，这次换了个位置又踩到。
-            child: Material(
-              type: MaterialType.transparency,
-              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  for (final item in items)
-                    KeyedSubtree(
-                      key: ValueKey<String>('$taskChecklistRowKeyPrefix${item.id}'),
-                      child: _TaskChecklistRow(
-                        session: session,
-                        task: task,
-                        item: item,
-                        overdue: overdue,
-                      ),
-                    ),
-                  // 录入**不走任务动作面板**：项目清单是常驻一行「添加条目」，
-                  // 这里照抄那个手感（点行 → 动作面板 → 新建，等于绕一圈）。
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: InlineComposer(
-                      label: '加一条待办',
-                      hint: '这条任务里的一个步骤',
-                      leading: Icons.add,
-                      dense: true,
-                      onCreate: (text) => session.createTaskChecklistItem(task.id, text),
+            expanded: expanded || adding,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (final item in items)
+                  KeyedSubtree(
+                    key: ValueKey<String>('$taskChecklistRowKeyPrefix${item.id}'),
+                    child: _TaskChecklistRow(
+                      session: session,
+                      task: task,
+                      item: item,
+                      overdue: overdue,
                     ),
                   ),
-                ],
-              ),
+                // 录入行**平时不画**（2026-10-11 用户口径）：入口是任务动作面板里的
+                // 「添加待办」，点完才在这里展开输入框 —— 确认（非空才真的加）
+                // 与取消都把它收回去。
+                if (adding)
+                  _ChecklistComposer(
+                    taskId: task.id,
+                    onCreate: session.createTaskChecklistItem,
+                    onDone: session.endChecklistItem,
+                  ),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 待办区的标题行：`⌄ 待办 0/3`，点它收起 / 展开。
+///
+/// 它**没有自己的底色**：这一块整体都靠缩进与字号分层（见 `_TaskChecklist` 的注释）。
+class _ChecklistHeader extends StatelessWidget {
+  const _ChecklistHeader({
+    required this.summary,
+    required this.expanded,
+    required this.overdue,
+    required this.onToggle,
+  });
+
+  final String summary;
+  final bool expanded;
+  final bool overdue;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      // 点这一行收起 / 展开（与"已折叠 N 个下级"同一套习惯）
+      onTap: onToggle,
+      child: Padding(
+        // 22 + 16 + 8 = 46 ⇒ 摘要文字落在 74，条目文字 86 —— 摘要读起来是这一块的标题
+        padding: const EdgeInsets.fromLTRB(22, 6, 12, 6),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              expanded ? Icons.expand_less : Icons.expand_more,
+              size: 16,
+              color: theme.colorScheme.outline,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              summary,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: overdue
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 待办区的**录入入口**：收起时一行轻量的「+ 加一条待办」，点开就地变输入框。
+///
+/// 为什么不直接用 `InlineComposer`：它收起时是一个整行 `ListTile` ——
+/// 加号 24、上下内边距按列表项给，**比它上面那几条待办本身还重**。实机截图里
+/// 那一行"+"抢在三条细则前面，读起来像这页的主按钮。
+///
+/// 换成自己这一行之后：加号 16、颜色取 `outline`（与待办圈的灰度同一档）、
+/// 上下各 6 —— 重量落在待办行**之下**，位置与文字左缘同一条竖线。
+/// 展开之后仍然复用 `InlineTextField` 那一套提交语义（确认 / 取消两个键、
+/// 收键盘即提交），与全应用别的输入行一致。
+class _ChecklistComposer extends StatelessWidget {
+  const _ChecklistComposer({
+    required this.taskId,
+    required this.onCreate,
+    required this.onDone,
+  });
+
+  final String taskId;
+  final void Function(String taskId, String text) onCreate;
+
+  /// 收起这一行（提交与取消都走它）。父 State 据此清掉"正在录待办"的 id。
+  final VoidCallback onDone;
+
+  @override
+  Widget build(BuildContext context) {
+    // 键盘顶上来时把这一行抬到键盘之上：输入行贴着屏幕底、又被键盘盖住的话，
+    // 用户根本看不见自己在打什么（`InlineComposer` 那边也做同一件事）。
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    return Padding(
+      // 与待办行同一档左内边距：输入的文字与上面的条目对齐
+      padding: EdgeInsets.only(left: 22, right: 12, bottom: keyboard > 0 ? keyboard : 0),
+      child: InlineTextField(
+        value: '',
+        hint: '这条任务里的一个步骤',
+        maxLines: 2,
+        showEditIcon: false,
+        autofocus: true,
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        onSubmitted: (text) {
+          // **空的什么都不加**：`InlineTextField` 的确认键在这种情况下本来就不
+          // 回调（必填项清空时恢复原值），这里再兜一道，语义写在明面上。
+          final trimmed = text.trim();
+          if (trimmed.isNotEmpty) onCreate(taskId, trimmed);
+          onDone();
+        },
+        // 点取消 / 收键盘：不加、直接收起（同一个出口）
+        onEditClosed: onDone,
       ),
     );
   }
@@ -1008,21 +1129,27 @@ class _TaskChecklistRow extends StatelessWidget {
     return InkWell(
       onLongPress: () => _showActions(context),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 0, 12, 0),
+        // 行距收紧到 2：第一版给的是 4，加上 34 高的按钮，一行占掉 113px ——
+        // 比任务行还高，截图里三条待办就把任务框撑得又长又空。
+        // 左内边距 22 + 按钮 24 + 间距 8 = 54 ⇒ 圈在 46+22=68 那条线上（见标题行注释）。
+        padding: const EdgeInsets.fromLTRB(22, 2, 12, 2),
         child: Row(
           children: <Widget>[
             // 待办行**不给状态按钮**（那是三态、还带锁），只给两态勾选：
             // 点它 = 勾上 / 取消，与项目清单的勾选框同一套手感。
+            //
+            // 按钮压到 24×24（图标 18）：它只勾一条细则，掂量与待办的字号相称；
+            // 任务行那颗 22 的完成钮仍是全页最"重"的一颗，主次不会颠倒。
             Tooltip(
               message: item.done ? '取消勾选' : '勾上',
               child: IconButton(
                 visualDensity: VisualDensity.compact,
-                iconSize: 20,
+                iconSize: 18,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                 icon: Icon(
                   item.done ? Icons.check_circle : Icons.radio_button_unchecked,
-                  size: 20,
+                  size: 18,
                   color: item.done
                       ? theme.colorScheme.primary
                       : theme.colorScheme.outline,
@@ -1034,18 +1161,20 @@ class _TaskChecklistRow extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 8),
             Expanded(
               child: InlineTextField(
                 value: item.text,
                 hint: '这条任务里的一个步骤',
                 maxLines: 2,
                 showEditIcon: false,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 textStyle: item.done
-                    ? theme.textTheme.bodySmall?.copyWith(
+                    ? theme.textTheme.bodyMedium?.copyWith(
                         decoration: TextDecoration.lineThrough,
                         color: theme.colorScheme.outline,
                       )
-                    : theme.textTheme.bodySmall?.copyWith(
+                    : theme.textTheme.bodyMedium?.copyWith(
                         color: overdue ? theme.colorScheme.error : null,
                       ),
                 onSubmitted: (text) =>
@@ -1319,6 +1448,10 @@ class _TaskLine extends StatelessWidget {
       case 'sub':
         session.beginSubtask(task.id);
         break;
+      case 'checklist':
+        // 与「新建子任务」同一个套路：把输入行在框内展开（这里就在待办区末尾）。
+        session.beginChecklistItem(task.id);
+        break;
       case 'rename':
         session.beginRename(task.id);
         break;
@@ -1476,6 +1609,10 @@ List<TaskAction> taskActions(Task task, {bool inLine = false}) {
       const TaskAction('sub', '新建子任务', Icons.subdirectory_arrow_right),
     );
   }
+  // 待办：**入口在这里**（2026-10-11 用户口径），任务框里不再常驻一行
+  // 「加一条待办」—— 那一行在实机截图里比三条待办本身还显眼。
+  // 子任务也是"框里的下级"，两项挨着放，正好把"两种下级"摆在同一处比较。
+  actions.add(const TaskAction('checklist', '添加待办', Icons.checklist_outlined));
   actions.add(const TaskAction('rename', '重命名', Icons.edit_outlined));
   if (inLine) {
     actions.add(const TaskAction('moveUp', '往上挪一格', Icons.arrow_upward));

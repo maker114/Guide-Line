@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
-import 'package:guideline/ui/common/inline_editor.dart';
 import 'package:guideline/ui/events/event_detail_page.dart';
 import 'package:guideline/ui/more/all_tasks_page.dart';
 
@@ -102,32 +101,78 @@ void main() {
       );
     });
 
-    testWidgets('就地录入：任务框里常驻一行「加一条待办」，点开就能写', (tester) async {
+    testWidgets('录入走动作面板：点任务行 →「添加待办」→ 框内直接是输入框 → 确认加一条', (tester) async {
       final app = await boot();
       final event = app.ws.createEvent(name: '演示事件');
       final task = app.ws.createTask(eventId: event.id, title: '写解析层');
 
       await openEvent(tester, app, '演示事件');
 
-      // 一条待办都没有的新任务，也必须能看到这个入口 ——
-      // 否则第一条细则根本没地方加（默认收起的坑就是这条用例抓出来的）
-      expect(find.text('加一条待办'), findsOneWidget);
+      // 任务框里**平时不画**录入行（2026-10-11 用户口径）
+      expect(find.text('加一条待办'), findsNothing, reason: '录入入口已挪进动作面板');
 
-      await tester.tap(find.text('加一条待办'));
+      // 点任务行 → 动作面板 → 「添加待办」
+      await tester.tap(find.text('写解析层'));
       await tester.pumpAndSettle();
+      expect(find.text('添加待办'), findsOneWidget, reason: '动作面板里要有这一项');
+      await tester.tap(find.text('添加待办'));
+      await tester.pumpAndSettle();
+
+      // 点完就是输入框（不需要再点一次），而且自动聚焦
       final focused = find.byWidgetPredicate(
         (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
         description: '当前获得焦点的输入框',
       );
-      expect(focused, findsOneWidget, reason: '点它就展开一个输入框，不经过任务动作面板');
+      expect(focused, findsOneWidget, reason: '点完「添加待办」就直接能打字');
 
       await tester.enterText(focused, '先写契约');
-      final composer = find.ancestor(of: focused, matching: find.byType(InlineComposer));
-      await tester.tap(find.descendant(of: composer, matching: find.byTooltip('添加')));
+      await tester.tap(find.byTooltip('确认'));
       await tester.pumpAndSettle();
 
       expect(app.ws.taskChecklistOf(task.id).map((i) => i.text), <String>['先写契约']);
       expect(find.text('待办 0/1'), findsOneWidget, reason: '摘要跟着出来');
+      expect(
+        find.byWidgetPredicate(
+          (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+        ),
+        findsNothing,
+        reason: '加完要收起来，不留一个常驻的输入框',
+      );
+    });
+
+    testWidgets('录入：空的按确认什么都不加；按取消也不加，两者都收起输入行', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '演示事件');
+      final task = app.ws.createTask(eventId: event.id, title: '写解析层');
+
+      await openEvent(tester, app, '演示事件');
+
+      Future<Finder> openComposer() async {
+        await tester.tap(find.text('写解析层'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('添加待办'));
+        await tester.pumpAndSettle();
+        return find.byWidgetPredicate(
+          (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+          description: '当前获得焦点的输入框',
+        );
+      }
+
+      // ① 空 + 确认 ⇒ 不加，且收起
+      var focused = await openComposer();
+      expect(focused, findsOneWidget);
+      await tester.tap(find.byTooltip('确认'));
+      await tester.pumpAndSettle();
+      expect(app.ws.taskChecklistOf(task.id), isEmpty, reason: '空的不许建出一条待办');
+      expect(find.byTooltip('确认'), findsNothing, reason: '空确认也要把输入行收掉');
+
+      // ② 有字 + 取消 ⇒ 不加，且收起
+      focused = await openComposer();
+      await tester.enterText(focused, '这条不算数');
+      await tester.tap(find.byTooltip('取消'));
+      await tester.pumpAndSettle();
+      expect(app.ws.taskChecklistOf(task.id), isEmpty, reason: '取消就是不要它');
+      expect(find.byTooltip('取消'), findsNothing, reason: '取消要把输入行收掉');
     });
 
     testWidgets('勾一条待办：只改它自己 —— 任务状态与子任务一律不动', (tester) async {
