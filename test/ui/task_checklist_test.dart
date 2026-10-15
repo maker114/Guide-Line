@@ -62,6 +62,31 @@ void main() {
       .checked;
 
   group('事件详情页', () {
+    testWidgets('待办行的行距不许再涨回去（用户 2026-10-16："间距太高了"）', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '演示事件');
+      final task = app.ws.createTask(eventId: event.id, title: '写解析层');
+      app.ws.addTaskChecklistItem(task.id, '第一条');
+      app.ws.addTaskChecklistItem(task.id, '第二条');
+      app.ws.addTaskChecklistItem(task.id, '第三条');
+
+      await openEvent(tester, app, '演示事件');
+
+      // 相邻两条待办**文字的 top 之差**就是这一行的实际行距 ——
+      // 比量某个内部控件的高度可靠：用户看到的就是这个数。
+      final first = tester.getRect(find.text('第一条')).top;
+      final second = tester.getRect(find.text('第二条')).top;
+      final third = tester.getRect(find.text('第三条')).top;
+
+      expect(second - first, lessThanOrEqualTo(28),
+          reason: '一行待办不许超过 28dp（实测 26）；'
+              '涨回去多半是勾选那一格又用了 `IconButton` —— 它会自己撑到 48dp，'
+              '`constraints` 压不住（见 event_detail_page 里那段注释）');
+      expect(third - second, lessThanOrEqualTo(28), reason: '行距要一致');
+      expect(second - first, greaterThan(18),
+          reason: '太挤也不行：记号 18 + 四周留白，一行至少 20 出头');
+    });
+
     testWidgets('待办排在任务与它的下级之间，用缩进表示层级、没有从属符', (tester) async {
       final app = await boot();
       final event = app.ws.createEvent(name: '演示事件');

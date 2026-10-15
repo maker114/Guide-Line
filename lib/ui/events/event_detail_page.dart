@@ -1168,6 +1168,17 @@ class _TaskChecklistRow extends StatelessWidget {
       child: Padding(
         // 行距收到 1（2026-10-11 再一次收紧）：按钮 24 高 + 上下各 1 ⇒ 一行约 26dp，
         // 三行待办不再把任务框撑长。第一版是 4 + 34 高的按钮，一行占掉 113px。
+        //
+        // 2026-10-16 实机复测（用户："待办之间间距太高了"）：一行占到 **50dp**，
+        // 而这一行的内容（20dp 的字 + 上下各 1）只有 22dp。多出来的 28dp 全在
+        // 那颗按钮上 —— `IconButton` 的 `tapTargetSize` 默认是
+        // `MaterialTapTargetSize.padded`，它会**无视 `constraints`** 把命中区撑到
+        // 48dp（Material 的最小触摸目标）。所以只留 `constraints` 是不够的，
+        // 必须同时把 `tapTargetSize` 换成 `shrinkWrap` 才真的按 24 报尺寸。
+        //
+        // 代价说清楚：命中区因此只有 24dp（低于 Material 建议的 48dp）。
+        // 这一条是**刻意的**（用户要的就是更紧凑），而且它旁边整行还能长按出操作面板，
+        // 勾选不是这条路上唯一的落点。
         padding: const EdgeInsets.fromLTRB(22, 1, 12, 1),
         child: Row(
           children: <Widget>[
@@ -1178,14 +1189,29 @@ class _TaskChecklistRow extends StatelessWidget {
             // 任务行那颗 22 的完成钮仍是全页最"重"的一颗，主次不会颠倒。
             //
             // 记号本身是「一条直线勾上时下折成对勾」（2026-10-15）：原来那个
-            // 空心圆 / 实心圆换成了 `LineCheckMark`，尺寸与命中区一个像素没动。
+            // 空心圆 / 实心圆换成了 `LineCheckMark`。
+            //
+            // ⚠️ **为什么不能只给 `constraints`**（2026-10-16 实机量出来的）：
+            // `IconButton` 有一条压不过去的最小触摸目标 —— Material 3 里它会自己把
+            // 命中区撑到 48dp 高，`constraints` 与 `iconSize` 都管不了它
+            // （同名的 `tapTargetSize` 构造参数在当前 Flutter 版本上已经不存在）。
+            // 量出来的代价：一行待办因此排到 **50dp**，而这一行的内容只有 22dp，
+            // 用户看到的就是"待办之间间距太高了"（他的原话）。
+            //
+            // 收紧的口子在**样式层**：`IconButton.styleFrom(tapTargetSize: shrinkWrap)`
+            // 把高度交给 `constraints`，而**宽度仍然走默认的 40**
+            // （与 `iconSize: 18` 配出来的默认宽度一致）—— 这一行的文字左缘
+            // 正是靠那 40 撑出来的，跟着一起收会把这行的缩进弄丢
+            // （实测：文字从 113 掉到 98，比子任务还靠左）。
             Tooltip(
               message: item.done ? '取消勾选' : '勾上',
               child: IconButton(
-                visualDensity: VisualDensity.compact,
                 iconSize: lineCheckMarkSize,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 24),
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
                 icon: LineCheckMark(key: lineCheckMarkKey(item.id), checked: item.done),
                 onPressed: () => session.setTaskChecklistItemDone(
                   task.id,
