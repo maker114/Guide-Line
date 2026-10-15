@@ -6,6 +6,8 @@ import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/common/color_picker.dart';
 import 'package:guideline/ui/common/inline_editor.dart';
+import 'package:guideline/ui/common/line_check_mark.dart';
+import 'package:guideline/ui/projects/project_detail_page.dart';
 
 import 'scroll_finders.dart';
 
@@ -46,6 +48,18 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text(title).first);
+    await tester.pumpAndSettle();
+  }
+
+  /// 直接打开某一页的详情（**第二次进详情时用**）。
+  ///
+  /// 为什么不能重复用 [openProject]：它推的是**一条新路由**，第一次那条还留在栈上，
+  /// 页面上就再也找不到底栏了（底栏被详情页盖住）。这条用例要在两个项目之间来回，
+  /// 所以显式给一个"从零起一个 MaterialApp + 详情页"的入口。
+  Future<void> pumpDetail(WidgetTester tester, AppController app, String projectId) async {
+    await tester.pumpWidget(
+      MaterialApp(home: ProjectDetailPage(app: app, projectId: projectId)),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -375,13 +389,20 @@ void main() {
     expect(find.text('打开这个目标'), findsNothing);
 
     // 就地打勾：与项目页同一个口径（只是打勾，不参与任何判定）
-    // 展开区用的是**圆形**勾选（实机反馈：确认框改成圆形），不是方形 `Checkbox`
+    // 展开区用的是**自绘的一条线**（勾上时下折成对勾，2026-10-15 换掉了原来的圆），
+    // 不是方形 `Checkbox`
     expect(find.byType(Checkbox), findsNothing, reason: '展开区不该再出现方形勾选框');
-    await tester.tap(find.byIcon(Icons.radio_button_unchecked));
+    // 从数据里现取那一份（`target` 是建条目**之前**的快照，`items` 还是空的）
+    final itemId = app.ws.findProject(target.id)!.items.single.id;
+    await tester.tap(find.byKey(lineCheckMarkKey(itemId)));
     await tester.pumpAndSettle();
     expect(app.ws.findProject(target.id)!.items.single.done, isTrue);
     expect(app.ws.findProject(target.id)!.itemsDoneCount, 1);
-    expect(find.byIcon(Icons.check_circle), findsOneWidget, reason: '勾上之后换成实心圆');
+    expect(
+      tester.widget<LineCheckMark>(find.byKey(lineCheckMarkKey(itemId))).checked,
+      isTrue,
+      reason: '勾上之后记号变成对勾',
+    );
     expect(find.text('已完成'), findsNothing, reason: '项目没有完成态（Q1）');
 
     // 勾完不会自己收起来（展开状态挂在 State 上）
@@ -493,14 +514,31 @@ void main() {
     expect(find.text('已选 2 条'), findsNothing, reason: '动作完要退出多选');
   });
 
-  testWidgets('空态只剩计数：下级 0 与"待处理灵感 0"，不再配说明性文字', (tester) async {
+  testWidgets('空态只剩计数：转成分类后是「下级 0」与"待处理灵感 0"，不再配说明性文字', (tester) async {
     final app = await boot();
-    app.ws.createProject(title: '光杆目标');
+    final project = app.ws.createProject(title: '光杆目标');
+
+    // 2026-10-15 起目标页**不给**「下级」这一块（ADR-100）：
+    // 它带着「新建目标」那一行，正是"添加下级的操作存在歧义"的来源。
+    // 所以要看这一块，先把它转成分类。
+    app.setProjectCategory(project.id, category: true);
 
     await openProject(tester, app, '光杆目标');
 
     // 说明性文字整批收掉（用户自己做教程）：空态只留标题里的计数
     expect(find.text('下级'), findsOneWidget);
+    expect(find.textContaining('还没有下级'), findsNothing);
+    // 目标页那一份「待处理灵感 0」在分类页不出现（分类不装灵感，Q2）
+    expect(find.text('待处理灵感 0'), findsNothing);
+  });
+
+  testWidgets('目标页没有「待处理灵感」以外的空态说明，且不画下级那一块', (tester) async {
+    final app = await boot();
+    app.ws.createProject(title: '光杆目标');
+
+    await openProject(tester, app, '光杆目标');
+
+    expect(find.text('下级'), findsNothing, reason: '目标页不画下级那一块');
     expect(find.textContaining('还没有下级'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('待处理灵感 0'),
@@ -512,17 +550,33 @@ void main() {
     expect(find.textContaining('去灵感页记一句'), findsNothing);
   });
 
-  testWidgets('新建入口文案随层级：分类下是「新建目标」（复用 InlineComposer）', (tester) async {
+  testWidgets('分类页的「新建目标」：只在**转成分类之后**才出现（2026-10-15）', (tester) async {
     final app = await boot();
-    final category = app.ws.createProject(title: '工作');
-    app.ws.createProject(title: '发布 v1', parentId: category.id);
+    // 一个光秃秃的目标：**没有下级**，也没有被转过
+    final target = app.ws.createProject(title: '发布 v1');
 
-    await openProject(tester, app, '工作');
+    await openProject(tester, app, '发布 v1');
 
+    // 它是目标 ⇒ 一整套目标字段，底部**没有**「新建目标」那一行。
+    // 这正是用户反馈的"添加下级的操作存在歧义"：从前那一行在目标页也画。
+    expect(find.text('有什么问题 / 思路'), findsOneWidget);
+    expect(find.text('新建目标'), findsNothing);
+    expect(find.text('下级'), findsNothing, reason: '目标页不该有建下级的入口');
+
+    // 走 ⋮ →「转为分类…」
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('转为分类…'), findsOneWidget);
+    await tester.tap(find.text('转为分类…'));
+    await tester.pumpAndSettle();
+
+    // 版式换成分类那一套：总纲领 + 下级列表 + 「新建目标」
+    expect(find.text('总纲领'), findsOneWidget);
+    expect(find.text('有什么问题 / 思路'), findsNothing);
     expect(find.text('新建目标'), findsOneWidget);
-    expect(find.text('新建子项目'), findsNothing, reason: 'Q2：这一层建出来的是目标');
-    expect(find.byType(InlineComposer), findsOneWidget, reason: '用现成控件，不新增');
+    expect(app.isProjectCategory(target.id), isTrue);
 
+    // 在那一行里建出来的，真的挂在它下面
     await tester.tap(find.text('新建目标'));
     await tester.pumpAndSettle();
     final composer = find.ancestor(
@@ -531,12 +585,41 @@ void main() {
     );
     await tester.enterText(
       find.descendant(of: composer, matching: find.byType(TextField)),
-      '发布 v2',
+      '第一条下级',
     );
     await tester.tap(find.descendant(of: composer, matching: find.byTooltip('添加')));
     await tester.pumpAndSettle();
 
-    final created = app.ws.liveProjects.firstWhere((p) => p.title == '发布 v2');
-    expect(created.parentId, category.id, reason: '真的挂在分类下面');
+    final created = app.ws.liveProjects.firstWhere((p) => p.title == '第一条下级');
+    expect(created.parentId, target.id, reason: '真的挂在刚转过来的分类下面');
+  });
+
+  testWidgets('「转为分类…」只在还不是分类时给；「转为目标」只在还没有下级时给', (tester) async {
+    final app = await boot();
+    final category = app.ws.createProject(title: '工作');
+    final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
+
+    // 已经有下级 ⇒ 它本来就是分类：没有「转为分类…」，
+    // 也没有「转为目标」（撤不掉，给个按不动的项更糟）
+    await pumpDetail(tester, app, category.id);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('转为分类…'), findsNothing);
+    expect(find.text('转为目标'), findsNothing);
+    await tester.tapAt(const Offset(4, 4)); // 关掉菜单
+    await tester.pumpAndSettle();
+
+    // 转过来但还没有下级 ⇒ 「转为目标」在（可以反悔）
+    app.setProjectCategory(target.id, category: true);
+    await pumpDetail(tester, app, target.id);
+    await tester.tap(find.byTooltip('更多'));
+    await tester.pumpAndSettle();
+    expect(find.text('转为分类…'), findsNothing);
+    expect(find.text('转为目标'), findsOneWidget);
+
+    await tester.tap(find.text('转为目标'));
+    await tester.pumpAndSettle();
+    expect(app.isProjectCategory(target.id), isFalse);
+    expect(find.text('有什么问题 / 思路'), findsOneWidget, reason: '退回目标版式');
   });
 }

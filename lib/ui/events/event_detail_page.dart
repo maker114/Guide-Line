@@ -13,6 +13,7 @@ import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/keyboard_dismiss_guard.dart';
 import '../common/labels.dart';
+import '../common/line_check_mark.dart';
 import '../common/status_selector.dart';
 import '../common/task_status_button.dart';
 import '../theme/shape_tokens.dart';
@@ -1066,17 +1067,16 @@ class _ChecklistHeader extends StatelessWidget {
   }
 }
 
-/// 待办区的**录入入口**：收起时一行轻量的「+ 加一条待办」，点开就地变输入框。
+/// 待办区的**录入行**：点任务动作面板里的「添加待办」才在这里长出来。
 ///
 /// 为什么不直接用 `InlineComposer`：它收起时是一个整行 `ListTile` ——
 /// 加号 24、上下内边距按列表项给，**比它上面那几条待办本身还重**。实机截图里
 /// 那一行"+"抢在三条细则前面，读起来像这页的主按钮。
 ///
-/// 换成自己这一行之后：加号 16、颜色取 `outline`（与待办圈的灰度同一档）、
-/// 上下各 6 —— 重量落在待办行**之下**，位置与文字左缘同一条竖线。
-/// 展开之后仍然复用 `InlineTextField` 那一套提交语义（确认 / 取消两个键、
-/// 收键盘即提交），与全应用别的输入行一致。
-class _ChecklistComposer extends StatelessWidget {
+/// **连着一路录**（2026-10-15 用户要求）：按确认键建出一条之后输入框**不收起**，
+/// 清空接着录下一条；退出只有三条路 —— **点空白处 / 点叉号 / 收起键盘**。
+/// 从前每建一条就收一次（`onDone` 在提交里被调），录五条要点五次「添加待办」。
+class _ChecklistComposer extends StatefulWidget {
   const _ChecklistComposer({
     required this.taskId,
     required this.onCreate,
@@ -1086,33 +1086,58 @@ class _ChecklistComposer extends StatelessWidget {
   final String taskId;
   final void Function(String taskId, String text) onCreate;
 
-  /// 收起这一行（提交与取消都走它）。父 State 据此清掉"正在录待办"的 id。
+  /// 收起这一行（**取消 / 收键盘 / 点空白**走它）。父 State 据此清掉"正在录待办"的 id。
+  ///
+  /// ⚠️ **提交那条路不再走它**：建完一条要继续录（见类注释）。
   final VoidCallback onDone;
+
+  @override
+  State<_ChecklistComposer> createState() => _ChecklistComposerState();
+}
+
+class _ChecklistComposerState extends State<_ChecklistComposer> {
+  void _done() {
+    if (!mounted) return;
+    widget.onDone();
+  }
 
   @override
   Widget build(BuildContext context) {
     // 键盘顶上来时把这一行抬到键盘之上：输入行贴着屏幕底、又被键盘盖住的话，
     // 用户根本看不见自己在打什么（`InlineComposer` 那边也做同一件事）。
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-    return Padding(
-      // 与待办行同一档左内边距：输入的文字与上面的条目对齐
-      padding: EdgeInsets.only(left: 22, right: 12, bottom: keyboard > 0 ? keyboard : 0),
-      child: InlineTextField(
-        value: '',
-        hint: '这条任务里的一个步骤',
-        maxLines: 2,
-        showEditIcon: false,
-        autofocus: true,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        onSubmitted: (text) {
-          // **空的什么都不加**：`InlineTextField` 的确认键在这种情况下本来就不
-          // 回调（必填项清空时恢复原值），这里再兜一道，语义写在明面上。
-          final trimmed = text.trim();
-          if (trimmed.isNotEmpty) onCreate(taskId, trimmed);
-          onDone();
-        },
-        // 点取消 / 收键盘：不加、直接收起（同一个出口）
-        onEditClosed: onDone,
+    return TapRegion(
+      // **点这一小块之外**就收起来（用户列出的三个退出条件之一）。
+      //
+      // 为什么用 `onTapOutside` 而不是 `onTap`：它按"渲染对象"判内外，
+      // 所以点输入框自己的内边距、点它两个按钮都不算"外面"，
+      // 而点这一块以外的任何地方（别人一行、卡片、页面留白）都算。
+      onTapOutside: (_) => _done(),
+      child: Padding(
+        // 与待办行同一档左内边距：输入的文字与上面的条目对齐
+        padding: EdgeInsets.only(
+          left: 22,
+          right: 12,
+          bottom: keyboard > 0 ? keyboard : 0,
+        ),
+        child: InlineTextField(
+          value: '',
+          hint: '这条任务里的一个步骤',
+          maxLines: 2,
+          showEditIcon: false,
+          autofocus: true,
+          // 建完一条**留在编辑态**、清空接着录（见类注释）
+          submitKeepsEditing: true,
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          onSubmitted: (text) {
+            // **空的什么都不加**：空提交已经在 `InlineTextField` 里走成"收起"，
+            // 不会走到这里；这里再兜一道，语义写在明面上。
+            final trimmed = text.trim();
+            if (trimmed.isNotEmpty) widget.onCreate(widget.taskId, trimmed);
+          },
+          // 点取消 / 收键盘：收起这一行（同一个出口）
+          onEditClosed: _done,
+        ),
       ),
     );
   }
@@ -1149,22 +1174,19 @@ class _TaskChecklistRow extends StatelessWidget {
             // 待办行**不给状态按钮**（那是三态、还带锁），只给两态勾选：
             // 点它 = 勾上 / 取消，与项目清单的勾选框同一套手感。
             //
-            // 按钮压到 24×24（图标 18）：它只勾一条细则，掂量与待办的字号相称；
+            // 按钮压到 24×24（记号 18）：它只勾一条细则，掂量与待办的字号相称；
             // 任务行那颗 22 的完成钮仍是全页最"重"的一颗，主次不会颠倒。
+            //
+            // 记号本身是「一条直线勾上时下折成对勾」（2026-10-15）：原来那个
+            // 空心圆 / 实心圆换成了 `LineCheckMark`，尺寸与命中区一个像素没动。
             Tooltip(
               message: item.done ? '取消勾选' : '勾上',
               child: IconButton(
                 visualDensity: VisualDensity.compact,
-                iconSize: 18,
+                iconSize: lineCheckMarkSize,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                icon: Icon(
-                  item.done ? Icons.check_circle : Icons.radio_button_unchecked,
-                  size: 18,
-                  color: item.done
-                      ? theme.colorScheme.primary
-                      : theme.colorScheme.outline,
-                ),
+                icon: LineCheckMark(key: lineCheckMarkKey(item.id), checked: item.done),
                 onPressed: () => session.setTaskChecklistItemDone(
                   task.id,
                   item.id,

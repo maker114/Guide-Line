@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/core/models/enums.dart';
 import 'package:guideline/ui/app_shell.dart';
+import 'package:guideline/ui/common/line_check_mark.dart';
 import 'package:guideline/ui/events/event_detail_page.dart';
 import 'package:guideline/ui/more/all_tasks_page.dart';
 
@@ -45,20 +46,20 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 点某一行待办的**圆形勾选**（不是点整行：列表页里点整行也是勾，
+  /// 点某一行待办的**勾选记号**（不是点整行：列表页里点整行也是勾，
   /// 详情页里点文字是改名 —— 两种落点都要按得到）。
+  ///
+  /// 2026-10-15 起这个记号是**自绘的一条线**（勾上时下折成对勾，`LineCheckMark`），
+  /// 不再是 `Icons.radio_button_unchecked` —— 所以改按它自己的 Key 找。
   Future<void> tapCircle(WidgetTester tester, String itemId) async {
-    final circle = find.descendant(
-      of: rowKey(itemId),
-      matching: find.byIcon(Icons.radio_button_unchecked),
-    );
-    final checked = find.descendant(
-      of: rowKey(itemId),
-      matching: find.byIcon(Icons.check_circle),
-    );
-    await tester.tap(circle.evaluate().isNotEmpty ? circle : checked);
+    await tester.tap(find.byKey(lineCheckMarkKey(itemId)));
     await tester.pumpAndSettle();
   }
+
+  /// 某一条的记号**勾上没有**（读那个自绘控件的入参）。
+  bool markChecked(WidgetTester tester, String itemId) => tester
+      .widget<LineCheckMark>(find.byKey(lineCheckMarkKey(itemId)))
+      .checked;
 
   group('事件详情页', () {
     testWidgets('待办排在任务与它的下级之间，用缩进表示层级、没有从属符', (tester) async {
@@ -131,13 +132,108 @@ void main() {
 
       expect(app.ws.taskChecklistOf(task.id).map((i) => i.text), <String>['先写契约']);
       expect(find.text('待办 0/1'), findsOneWidget, reason: '摘要跟着出来');
+      // 2026-10-15 起：建完一条**留在编辑态接着录**（用户要求"连续输入"），
+      // 退出只有点空白 / 点叉号 / 收键盘三条路
       expect(
         find.byWidgetPredicate(
           (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
         ),
-        findsNothing,
-        reason: '加完要收起来，不留一个常驻的输入框',
+        findsOneWidget,
+        reason: '加完不收起来，接着录下一条',
       );
+      expect(
+        tester.widget<TextField>(focused).controller!.text,
+        isEmpty,
+        reason: '上一条已经建出去了，框里要清空',
+      );
+    });
+
+    testWidgets('连续录入：确认三次建出三条，中途不收输入框（2026-10-15 用户要求）', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '演示事件');
+      final task = app.ws.createTask(eventId: event.id, title: '写解析层');
+
+      await openEvent(tester, app, '演示事件');
+      await tester.tap(find.text('写解析层'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加待办'));
+      await tester.pumpAndSettle();
+
+      final focused = find.byWidgetPredicate(
+        (Widget w) => w is TextField && (w.focusNode?.hasFocus ?? false),
+        description: '当前获得焦点的输入框',
+      );
+
+      for (final text in <String>['第一条', '第二条', '第三条']) {
+        await tester.enterText(focused, text);
+        await tester.tap(find.byTooltip('确认'));
+        await tester.pumpAndSettle();
+        // 每建一条之后**都还在编辑态**，不必再点一次「添加待办」
+        expect(focused, findsOneWidget, reason: '建完「$text」之后还该接着录');
+      }
+
+      expect(
+        app.ws.taskChecklistOf(task.id).map((i) => i.text),
+        <String>['第一条', '第二条', '第三条'],
+        reason: '三次确认 = 三条待办',
+      );
+      expect(find.text('待办 0/3'), findsOneWidget);
+    });
+
+    testWidgets('退出连续录入的三条路：点叉号 / 点空白 / 收键盘', (tester) async {
+      final app = await boot();
+      final event = app.ws.createEvent(name: '演示事件');
+      final task = app.ws.createTask(eventId: event.id, title: '写解析层');
+
+      await openEvent(tester, app, '演示事件');
+
+      Future<void> openComposer() async {
+        await tester.tap(find.text('写解析层'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('添加待办'));
+        await tester.pumpAndSettle();
+      }
+
+      // ① 点**叉号**：收起，不加
+      await openComposer();
+      await tester.enterText(
+        find.byWidgetPredicate((Widget w) => w is TextField && w.focusNode!.hasFocus),
+        '这条不要',
+      );
+      await tester.tap(find.byTooltip('取消'));
+      await tester.pumpAndSettle();
+      expect(app.ws.taskChecklistOf(task.id), isEmpty);
+      expect(find.byTooltip('取消'), findsNothing, reason: '叉号要把它收掉');
+
+      // ② 点**空白**（输入框那一块之外）：收起
+      await openComposer();
+      await tester.enterText(
+        find.byWidgetPredicate((Widget w) => w is TextField && w.focusNode!.hasFocus),
+        '半截话',
+      );
+      // 点卡片左上角那片留白 —— 它在录入行之外
+      await tester.tapAt(tester.getTopLeft(find.byType(EventDetailPage)) + const Offset(4, 200));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('取消'), findsNothing, reason: '点空白也要收掉');
+      expect(app.ws.taskChecklistOf(task.id), isEmpty, reason: '没按确认的不算数');
+
+      // ③ 收起键盘：框里剩的那句**照样建出去**（与全应用同一条"收键盘 = 我写完了"），
+      //    然后这一行收起
+      await openComposer();
+      await tester.enterText(
+        find.byWidgetPredicate((Widget w) => w is TextField && w.focusNode!.hasFocus),
+        '最后一条',
+      );
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pumpAndSettle();
+      tester.view.viewInsets = FakeViewPadding.zero;
+      await tester.pumpAndSettle();
+      expect(
+        app.ws.taskChecklistOf(task.id).map((i) => i.text),
+        <String>['最后一条'],
+        reason: '收键盘 = 确认：打了一半的那句不该丢',
+      );
+      expect(find.byTooltip('取消'), findsNothing, reason: '收键盘要把它收掉');
     });
 
     testWidgets('录入：空的按确认什么都不加；按取消也不加，两者都收起输入行', (tester) async {
@@ -241,14 +337,7 @@ void main() {
         find.descendant(of: rowKey(item.id), matching: find.byType(Text)),
       );
       expect(text.style?.decoration, TextDecoration.lineThrough, reason: '勾完的条目要划掉');
-      expect(
-        find.descendant(
-          of: rowKey(item.id),
-          matching: find.byIcon(Icons.check_circle),
-        ),
-        findsOneWidget,
-        reason: '圆形勾选要变成实心对勾',
-      );
+      expect(markChecked(tester, item.id), isTrue, reason: '勾选记号要变成对勾');
       expect(app.ws.findTask(task.id)!.status, NodeStatus.pending,
           reason: '待办全勾完也不许自动完成任务');
 

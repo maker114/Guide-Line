@@ -10,6 +10,7 @@ import 'color_picker.dart';
 import 'dialogs.dart';
 import 'due_label.dart';
 import 'format.dart';
+import 'line_check_mark.dart';
 import 'task_status_button.dart';
 import 'urgency.dart';
 
@@ -279,13 +280,10 @@ class _TaskChecklistRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 1),
         child: Row(
           children: <Widget>[
-            // 圆形勾选（与事件详情页、下级清单同一套记号）：未勾是空心圈、
-            // 勾上是实心对勾 —— 方形的 `Checkbox` 专属项目自己的清单。
-            Icon(
-              item.done ? Icons.check_circle : Icons.radio_button_unchecked,
-              size: 18,
-              color: item.done ? theme.colorScheme.primary : theme.colorScheme.outline,
-            ),
+            // 清单勾选（与事件详情页、下级清单同一套记号）：未勾是一条直线、
+            // 勾上时下折成对勾（`LineCheckMark`，2026-10-15 换掉了原来的圆圈）
+            // —— 方形的 `Checkbox` 专属项目自己的清单。
+            LineCheckMark(key: lineCheckMarkKey(item.id), checked: item.done),
             const SizedBox(width: 8),
             Expanded(
               child: Text(

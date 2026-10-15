@@ -87,21 +87,18 @@ class _ProjectTabState extends State<ProjectTab> {
   /// 正在重命名的项目 id
   String? _renamingId;
 
-  /// 正在为哪个项目录子项目
-  String? _addingChildOf;
-
   AppController get _app => widget.app;
 
-  void _create({String? parentId, required String title}) {
-    final error = _app.run(
-      () => _app.ws.createProject(title: title, parentId: parentId),
-    );
-    if (error != null) {
-      if (mounted) showToast(context, error, error: true);
-      return;
-    }
-    // 加完子项目就把那一行的输入框收起来，避免列表里挂着一排展开的输入
-    if (parentId != null) setState(() => _addingChildOf = null);
+  /// 建一个**根项目**。
+  ///
+  /// 从前这里还有一个 `parentId` 形参和一条"某个分类下就地新建下级"的行 ——
+  /// 它已经整批去掉了（2026-10-15）：那一行与详情页的「新建目标」是同一件事的
+  /// 两个入口，而用户反馈的正是"添加下级的操作存在歧义"。
+  /// 现在建下级**只有一条路**：进那个项目的详情页，用 `⋮ → 转为分类…`
+  /// 把它变成分类，再在那个「新建目标」行里建（见 `project_detail_page.dart`）。
+  void _create({required String title}) {
+    final error = _app.run(() => _app.ws.createProject(title: title));
+    if (error != null && mounted) showToast(context, error, error: true);
   }
 
   @override
@@ -167,23 +164,6 @@ class _ProjectTabState extends State<ProjectTab> {
                                     key: ValueKey<String>(child.project.id),
                                     child: _buildTile(child),
                                   ),
-                                if (_addingChildOf == group.root.project.id)
-                                  Padding(
-                                    padding: const EdgeInsets.only(
-                                      left: _childContentLeft,
-                                      bottom: 6,
-                                    ),
-                                    child: InlineComposer(
-                                      label: '新建目标',
-                                      hint: '目标名',
-                                      leading: Icons.subdirectory_arrow_right,
-                                      dense: true,
-                                      onCreate: (title) => _create(
-                                        parentId: group.root.project.id,
-                                        title: title,
-                                      ),
-                                    ),
-                                  ),
                               ],
                             ),
                           ),
@@ -220,7 +200,6 @@ class _ProjectTabState extends State<ProjectTab> {
       app: _app,
       row: row,
       onStartRename: () => setState(() => _renamingId = project.id),
-      onStartAddChild: () => setState(() => _addingChildOf = project.id),
     );
   }
 }
@@ -232,6 +211,7 @@ class _ProjectRow {
     required this.depth,
     required this.childCount,
     required this.expanded,
+    required this.isCategory,
   });
 
   final Project project;
@@ -239,11 +219,14 @@ class _ProjectRow {
   final int childCount;
   final bool expanded;
 
-  /// 角色判据（《定义与边界》§2.1）：**有下级 = 分类，没有下级 = 目标**。
+  /// 这个项目**按分类摆**吗。判据只有一处：`AppController.isProjectCategory`
+  /// —— 它同时管着"有下级"这个推导出来的角色，与「⋮ → 转为分类…」那一下
+  /// 明确转过来的意图（2026-10-15，ADR-100）。这里只把算好的结果带下来，
+  /// **不自己判 `childCount > 0`**：那正是会与详情页各说各话的老写法。
   ///
-  /// 这一条同时决定两件事：标题前放**色条**（根行，分类与根目标一样）
-  /// 还是放**色点**（子行）；以及 ⋮ 菜单里**有没有**「展开下级 / 收起下级」。
-  bool get isCategory => childCount > 0;
+  /// 它同时决定两件事：标题前放**色条**（根行）还是放**色点**（子行）；
+  /// 以及 ⋮ 菜单里**有没有**「展开下级 / 收起下级」。
+  final bool isCategory;
 }
 
 /// 一个主项目 + 它当前可见的下级（展开时才有）。
@@ -291,16 +274,20 @@ List<_ProjectRow> _flatten(AppController app) {
   void walk(String? parentId, int depth) {
     for (final project in tree.childrenOf(parentId).whereType<Project>()) {
       if (project.archived) continue;
-      // 角色与下级列表同源：都用 `Workspace.childProjectsOf`（未归档、未删除的直属下级）
+      // 角色判据**只有一处**（`AppController.isProjectCategory`）：它包含
+      // "有未归档下级"这个推导出来的角色，与「⋮ → 转为分类…」那一下明确转过来的意图。
+      // 从前这里写的是 `children.isNotEmpty`，与详情页各算各的 —— 一旦有了"空分类"，
+      // 两处就会一个说分类、一个说目标。
       final children = app.ws.childProjectsOf(project.id);
       final expanded = app.isExpanded(project.id);
-      final isCategory = children.isNotEmpty;
+      final isCategory = app.isProjectCategory(project.id);
       rows.add(
         _ProjectRow(
           project: project,
           depth: depth,
           childCount: children.length,
           expanded: expanded,
+          isCategory: isCategory,
         ),
       );
       if (isCategory && expanded) walk(project.id, depth + 1);
@@ -316,13 +303,11 @@ class _ProjectTile extends StatelessWidget {
     required this.app,
     required this.row,
     required this.onStartRename,
-    required this.onStartAddChild,
   });
 
   final AppController app;
   final _ProjectRow row;
   final VoidCallback onStartRename;
-  final VoidCallback onStartAddChild;
 
   @override
   Widget build(BuildContext context) {

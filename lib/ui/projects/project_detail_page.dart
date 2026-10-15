@@ -14,6 +14,7 @@ import '../common/due_sheet.dart';
 import '../common/format.dart';
 import '../common/inline_editor.dart';
 import '../common/keyboard_dismiss_guard.dart';
+import '../common/line_check_mark.dart';
 import '../common/selection.dart';
 import '../common/status_selector.dart';
 import '../inspiration/inspiration_selection.dart';
@@ -99,8 +100,11 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 
         final parent = project.parentId == null ? null : ws.findProject(project.parentId!);
         final children = ws.childProjectsOf(widget.projectId);
-        // 有下级 = 分类（Q2）；分类不装灵感，所以这一页不为它取灵感
-        final isCategory = children.isNotEmpty;
+        // 角色判据**只有一处**（`AppController.isProjectCategory`）：有下级，
+        // 或者被「⋮ → 转为分类…」明确转过一次（2026-10-15，ADR-100）。
+        // 从前这里写的是 `children.isNotEmpty` —— 那样"空分类"一按就退回目标版式，
+        // 而项目列表那边还按分类画，两处各说各话。
+        final isCategory = app.isProjectCategory(widget.projectId);
         final inspirations = isCategory
             ? const <Inspiration>[]
             : (ws.liveInspirations
@@ -181,6 +185,23 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             if (!context.mounted) return;
                             await _reset(context, project);
                             break;
+                          case 'category':
+                            // 「转为分类…」（2026-10-15）：把这一条从目标版式
+                            // 换成分类版式（总纲领 + 下级列表 + 「新建目标」行）。
+                            //
+                            // 它只写一笔**意图**（`UiPrefs.categoryIds`），
+                            // 一个项目字段都不动 —— 详见 `AppController.setProjectCategory`。
+                            app.setProjectCategory(project.id, category: true);
+                            if (context.mounted) {
+                              showToast(context, '已转为分类，在下面「新建目标」里加第一条下级');
+                            }
+                            break;
+                          case 'target':
+                            // 撤销那一下。**只有在它还没有下级时**才给这个入口：
+                            // 有下级时角色由结构决定，这一下撤不掉什么，
+                            // 给一个没有效果的菜单项只会让人以为坏了。
+                            app.setProjectCategory(project.id, category: false);
+                            break;
                           case 'clearDone':
                             if (!context.mounted) return;
                             await _clearDoneItems(context, project);
@@ -230,6 +251,23 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                             isCategory ? '重置下级所有实现…' : '重置所有实现…',
                           ),
                         ),
+                        // 「转为分类…」（2026-10-15，用户要求）：把这一条从目标
+                        // 变成分类 —— 就是换一份版式（总纲领 + 下级列表），
+                        // 并在下面给出「新建目标」那一行。
+                        //
+                        // **只在它还不是分类时给**：已经是分类的再点一次没有效果。
+                        // 反过来那一项（「转为目标」）只在**还没有下级**时给 ——
+                        // 有下级时角色由结构决定，撤不掉，给个空按钮更糟。
+                        if (!isCategory)
+                          const PopupMenuItem<String>(
+                            value: 'category',
+                            child: Text('转为分类…'),
+                          ),
+                        if (isCategory && children.isEmpty)
+                          const PopupMenuItem<String>(
+                            value: 'target',
+                            child: Text('转为目标'),
+                          ),
                         const PopupMenuItem<String>(value: 'archive', child: Text('归档')),
                         const PopupMenuItem<String>(value: 'delete', child: Text('删除')),
                       ],
@@ -281,7 +319,10 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                   onSplitFromImplementation: () => _splitIntoItems(context, project),
                   onChecklistActions: () => _showChecklistActions(context, project),
                 ),
-                _ChildrenField(app: app, project: project, children: children),
+                // 「下级」这一块**只在分类那一侧画**（2026-10-15，ADR-100）：
+                // 它里面带着那一行「新建目标」，从前在目标页也画 ——
+                // 用户说的"添加下级的操作存在歧义"就是它。要给一个目标建下级，
+                // 只能先走 `⋮ → 转为分类…`。
                 _InspirationsField(
                   app: app,
                   project: project,
@@ -1223,6 +1264,12 @@ class _ChildrenFieldState extends State<_ChildrenField> {
         // 刻意**不**塞进上面那一行标题 `Row` 里：`InlineComposer` 展开后内部是
         // `Row + Expanded`，而 `Row` 里的非弹性子节点拿到的是**无界宽度**，
         // 一展开就会抛 "non-zero flex but incoming width constraints are unbounded"。
+        //
+        // 2026-10-15：整块 `_ChildrenField`（含这一行）**只画在分类那一侧**
+        // （见 `build` 里 `if (isCategory)` 那段）。从前它在目标那一侧也画，
+        // 于是目标页底部也躺着一条「新建目标」—— 用户说的"添加下级的操作存在歧义"
+        // 就是它。现在要给一个目标建下级，只能走 `⋮ → 转为分类…`，
+        // 转完这一行才出现。
         InlineComposer(
           label: '新建目标',
           hint: '目标名',
@@ -1414,6 +1461,7 @@ class _ChildChecklist extends StatelessWidget {
         children: <Widget>[
           for (final item in child.items)
             _RoundCheckRow(
+              itemId: item.id,
               done: item.done,
               text: item.text,
               onChanged: (value) => _setDone(context, item.id, value),
@@ -1451,17 +1499,21 @@ class _ChildEmptyHint extends StatelessWidget {
   }
 }
 
-/// 一条**圆形**勾选行（分类展开区用）。
+/// 一条**清单勾选**行（分类展开区用）。
 ///
-/// 为什么是圆的而项目页的清单是方的：这里是"下级目标里的一条"，
-/// 点到的是**别人的**清单（实机反馈：确认框改成圆形）—— 形状不同，
-/// 一眼就知道自己不在改自己那一层。方块/圆块的区分比再加一行说明省地方。
+/// 记号是**一条线**（未勾是横线、勾上时下折成对勾，`LineCheckMark`），
+/// 而项目页自己那份清单是**方形 `Checkbox`** —— 形状不同，
+/// 一眼就知道自己不在改自己那一层。方块 / 线条的区分比再加一行说明省地方。
 class _RoundCheckRow extends StatelessWidget {
   const _RoundCheckRow({
+    required this.itemId,
     required this.done,
     required this.text,
     required this.onChanged,
   });
+
+  /// 这一条清单的 id：只用来给勾选记号挂一个稳定的 Key（见 `lineCheckMarkKey`）。
+  final String itemId;
 
   final bool done;
   final String text;
@@ -1478,12 +1530,10 @@ class _RoundCheckRow extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            // 圆形勾选：选中画对勾、未选中画空心圈，与方形的 `Checkbox` 区分开
-            Icon(
-              done ? Icons.check_circle : Icons.radio_button_unchecked,
-              size: 20,
-              color: done ? theme.colorScheme.primary : theme.colorScheme.outline,
-            ),
+            // 清单勾选：未勾是一条直线、勾上时下折成对勾
+            // （`LineCheckMark`，2026-10-15 换掉了原来的圆圈），
+            // 与方形的 `Checkbox`（项目自己的清单）区分开
+            LineCheckMark(key: lineCheckMarkKey(itemId), checked: done, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Text(

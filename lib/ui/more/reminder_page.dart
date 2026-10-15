@@ -65,7 +65,7 @@ class _ReminderPageState extends State<ReminderPage> {
                   title: const Text('到点提醒我'),
                   subtitle: Text(
                     '只提醒设了具体时间的任务（例如 10-03 18:00）。'
-                    '只写到哪天、没写钟点的不提醒。',
+                    '只写到哪天、没写钟点的走下面那条「今日事」。',
                     style: theme.textTheme.labelSmall,
                   ),
                   value: prefs.reminderEnabled,
@@ -82,6 +82,21 @@ class _ReminderPageState extends State<ReminderPage> {
                     onPickMinutes: (minutes) =>
                         _app.setReminderLeadMinutes(slot, minutes),
                   ),
+
+                // 「今日事」是**另一条通知**，不是上面那两档的第三档（2026-10-15）：
+                // 它固定零点、没有提前量，管的也是另一类任务（只写到天的那种）。
+                // 所以它单独占一节，且与总开关**并列** —— 关掉总开关不影响它。
+                const SectionHeader('今日事'),
+                SwitchListTile(
+                  title: const Text('零点摘要今天到期的事'),
+                  subtitle: Text(
+                    '只写到期日、没写钟点的那种任务，当天零点汇总一句「今天有 N 件事到期」。'
+                    '带钟点的仍走上一条。',
+                    style: theme.textTheme.labelSmall,
+                  ),
+                  value: prefs.dailyDigestEnabled,
+                  onChanged: (value) => _app.setDailyDigestEnabled(value),
+                ),
 
                 const SectionHeader('系统那边还要两件事'),
                 _PermissionTile(app: _app),

@@ -45,6 +45,7 @@ class InlineTextField extends StatefulWidget {
     this.showEditIcon = true,
     this.editorActions = true,
     this.decorated = false,
+    this.submitKeepsEditing = false,
   });
 
   /// 当前值（外部真源）
@@ -90,6 +91,20 @@ class InlineTextField extends StatefulWidget {
   /// 正文是一整段自由高度的内容，需要与清单侧的勾选骨架对称的"自己的容器"
   /// （2026-09-28 实机反馈：正文那一侧看着像"一半有设计一半没有"）。
   final bool decorated;
+
+  /// 提交之后**留在编辑态**、把输入框清空接着录下一条（2026-10-15）。
+  ///
+  /// 默认关 —— 多数字段是"改一处 → 走人"（项目名、事件名、正文），提交即离开编辑态。
+  /// 开着的是**连续录入**那种：一条任务下面的待办
+  /// （用户原话："按下确认键创造一条，直到点击空白部分 / 点击叉号 / 收起键盘时才退出输入框"）。
+  ///
+  /// 三条配套语义（都在 [_InlineTextFieldState] 里）：
+  ///   · **点确认键**：提交、**把内容清空**、**不收焦点** —— 下一条接着打；
+  ///   · **框里是空的**时按确认键：按"我不录了"处理，收起（留一个空框在那儿
+  ///     只会让人再点一次叉号）；
+  ///   · **收键盘**：仍按"我写完了"提交（框里剩下的那句不丢），
+  ///     然后**收起**这一行 —— 用户列的第三个退出条件正是它。
+  final bool submitKeepsEditing;
 
   @override
   State<InlineTextField> createState() => _InlineTextFieldState();
@@ -187,8 +202,26 @@ class _InlineTextFieldState extends State<InlineTextField> {
     });
   }
 
-  void _commit() {
+  /// [keepsEditing] 只在连续录入那一档有意义（见 [InlineTextField.submitKeepsEditing]）：
+  ///   · `true`（**点确认键**）—— 建一条、清空、留在编辑态接着录；
+  ///   · `false`（**收键盘**）—— 把框里剩下的那句建出去，然后按"录完了"收起。
+  void _commit({bool keepsEditing = true}) {
     final next = _controller.text.trim();
+    // **连续录入**那一路：先落回调、再清空自己。
+    if (widget.submitKeepsEditing && keepsEditing) {
+      // 空的确认键意思是"我不录了" ⇒ 收起（这一条与有字的那条路分开写，
+      // 免得"清空接着录"把空框一直留在那儿）
+      if (next.isEmpty) {
+        _cancel();
+        return;
+      }
+      widget.onSubmitted(next);
+      if (mounted) {
+        _controller.clear();
+        _scrollIntoView();
+      }
+      return;
+    }
     setState(() => _editing = false);
     // **提交之后必须自己放掉焦点**（2026-09-28 实机反馈："点确认之后输入框不会消失，
     // 手动关掉键盘后每次切回该界面就会弹出键盘"）。
@@ -239,7 +272,11 @@ class _InlineTextFieldState extends State<InlineTextField> {
       // 与点键盘上那个完成键一模一样 —— 用户敲完一句、按返回键收键盘，
       // 意思通常是"我写完了"，再让他点一次「确认」是多余的。
       // 代价：收键盘等于保存，想放弃改动只能点「取消」。
-      onKeyboardDismissed: _commit,
+      //
+      // 连续录入那一档同样"收键盘 = 我录完了"，并**按退出处理**：先把框里
+      // 剩下的那句建出去（不丢字），再走 [onEditClosed] 收起这个输入行 ——
+      // 这正是用户列的第三个退出条件（见 `submitKeepsEditing`）。
+      onKeyboardDismissed: () => _commit(keepsEditing: false),
       child: AnimatedSize(
         duration: expandCollapseDuration,
         curve: Curves.easeOutCubic,

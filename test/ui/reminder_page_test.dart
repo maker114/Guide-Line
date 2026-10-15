@@ -42,6 +42,9 @@ void main() {
   /// 总开关那一格。
   Finder masterTile() => find.widgetWithText(SwitchListTile, '到点提醒我');
 
+  /// 「今日事」那一格。
+  Finder digestTile() => find.widgetWithText(SwitchListTile, '零点摘要今天到期的事');
+
   /// 第 N 档那一格里的开关 / 下拉。
   Finder slotSwitch(int slot) => find.descendant(
         of: find.widgetWithText(ListTile, '第 ${slot + 1} 档'),
@@ -65,6 +68,7 @@ void main() {
 
     expect(find.text('电脑端不做提醒'), findsOneWidget);
     expect(find.text('到点提醒我'), findsNothing);
+    expect(find.text('零点摘要今天到期的事'), findsNothing);
     expect(find.byType(DropdownButton<int>), findsNothing);
   });
 
@@ -133,10 +137,45 @@ void main() {
     expect(prefsFile().readAsStringSync(), contains('"minutes": 120'));
   });
 
+  testWidgets('「今日事」：默认关，打开就写进偏好文件，且**不动总开关**', (tester) async {
+    final app = await boot(tester, supported: true);
+    await pumpPage(tester, app);
+
+    expect(tester.widget<SwitchListTile>(digestTile()).value, isFalse);
+
+    await tester.tap(digestTile());
+    await tester.pumpAndSettle();
+
+    expect(app.prefs.dailyDigestEnabled, isTrue);
+    expect(app.prefs.reminderEnabled, isFalse, reason: '两条通知互不隶属');
+    expect(prefsFile().readAsStringSync(), contains('"dailyDigestEnabled": true'));
+    expect(
+      tester.widget<SwitchListTile>(masterTile()).value,
+      isFalse,
+      reason: '总开关不该被这一下带着打开',
+    );
+  });
+
+  testWidgets('总开关关着时「今日事」照样能开（它不是总开关的下级）', (tester) async {
+    final app = await boot(tester, supported: true);
+    await pumpPage(tester, app);
+
+    // 两档提前量在总开关关着时是灰的 —— 这一格不该跟着灰
+    expect(tester.widget<Switch>(slotSwitch(0)).onChanged, isNull);
+    expect(tester.widget<SwitchListTile>(digestTile()).onChanged, isNotNull);
+  });
+
   testWidgets('「自启动」那一条：点开给出步骤与那份实测记录', (tester) async {
     final app = await boot(tester, supported: true);
     await pumpPage(tester, app);
 
+    // 这一格现在排在「今日事」下面，小屏上落到视野外了 —— 先滚到它
+    await tester.scrollUntilVisible(
+      find.text('自启动（小米 / HyperOS 必开）'),
+      120,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('自启动（小米 / HyperOS 必开）'));
     await tester.pumpAndSettle();
 

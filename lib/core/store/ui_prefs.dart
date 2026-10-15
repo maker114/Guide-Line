@@ -30,6 +30,9 @@ class UiPrefs {
     this.reminderEnabled = false,
     this.reminderLeads = ReminderLead.defaults,
     this.reminderCatchUpShown = const <String>{},
+    this.dailyDigestEnabled = false,
+    this.dailyDigestShown = const <String>{},
+    this.categoryIds = const <String>{},
   });
 
   /// **已经补发过**的提醒档，键是 `任务 id|到期值`。
@@ -212,6 +215,51 @@ class UiPrefs {
   /// 换台设备带过去只会得到一个"开着但没权限"的假象。
   final List<ReminderLead> reminderLeads;
 
+  /// 「今日事」那条零点汇总的开关（**默认关**，2026-10-15）。
+  ///
+  /// 它和 [reminderEnabled] 是**两个开关**，不是一条链上的主从：
+  ///   · 总开关管的是"到点之前提醒我"（ADR-097 那两档）；
+  ///   · 这一条管的是"每天零点摘要一句今天有哪些事到期"，**固定零点、没有提前量**。
+  ///
+  /// 为什么必须分开：两件事的取舍方向相反 —— 会有人要"到期前提醒我，
+  /// 但别每天零点吵我"，也会有人只要后面这一条。共用一个开关时，
+  /// 这两种人都只能二选一。
+  ///
+  /// 默认关的理由与 [reminderEnabled] 同一条：装完就自己弹东西，是用户没答应过的事。
+  final bool dailyDigestEnabled;
+
+  /// **已经弹过**「今日事」的日期（键是 `"YYYY-MM-DD"`，即那条汇总额度的日期）。
+  ///
+  /// 为什么按日期记账、而不是像 [reminderCatchUpShown] 那样按"任务 + 到期值"记：
+  /// 这条汇总是**一天一条**，键就是那一天；记下之后，同一天里无论重开几次 App、
+  /// 无论排期重算多少遍，都只弹那一次。
+  ///
+  /// 键就是日期 ⇒ 这套集合**自己会随天数增长**，所以每次重排都会把不是今天的
+  /// 那些键清掉（见 `AppController._refreshRemindersOnce`）——
+  /// 与 [reminderCatchUpShown] 那套"顺手清过期键"同一个做法。
+  final Set<String> dailyDigestShown;
+
+  /// **被明确转成分类**的项目 id（2026-10-15）。
+  ///
+  /// 为什么要这么一份东西：角色判据（Q2 / ADR-069）是**有下级 = 分类**，
+  /// 而"把一个目标转成分类"这件事在它**还没有第一条下级**时无从表达 ——
+  /// 那份"总纲领 + 下级列表"的版式会立刻退回目标版式，等于按下去没反应。
+  /// 这一份记的就是用户那次明确的意图。
+  ///
+  /// **为什么落在偏好里、而不是数据契约里**：它决定的只有"这一页怎么摆"
+  /// （见《界面规范》口径）——
+  ///   · 契约里加一个 `kind` 字段，等于同一件事有两个真源
+  ///     （字段说分类、实际没下级），而这个仓库一贯的口径是**角色靠推导**；
+  ///   · 加字段还要动 `knownKeys` / `extra` 兼容与"老文件读入→写出逐字节一致"，
+  ///     为一件纯展示的事付这个代价不划算。
+  ///
+  /// 代价说清楚：它**不进导出、不进备份**（`ui_prefs.json` 本来就不进），
+  /// 所以换台设备导入数据之后，一个"还没有下级的空分类"会显示成目标 ——
+  /// 有下级之后角色自己就回来了（这也是不给它做迁移的原因）。
+  ///
+  /// 这一条整体记在 **ADR-100**。
+  final Set<String> categoryIds;
+
   bool get hasBackground => backgroundImagePath != null && backgroundImagePath!.isNotEmpty;
 
   /// 节点是否展开：显式展开 > 显式收起 > [defaultExpanded]。
@@ -259,6 +307,9 @@ class UiPrefs {
     bool? reminderEnabled,
     List<ReminderLead>? reminderLeads,
     Set<String>? reminderCatchUpShown,
+    bool? dailyDigestEnabled,
+    Set<String>? dailyDigestShown,
+    Set<String>? categoryIds,
   }) =>
       UiPrefs(
         collapsedIds: collapsedIds ?? this.collapsedIds,
@@ -290,6 +341,9 @@ class UiPrefs {
         reminderEnabled: reminderEnabled ?? this.reminderEnabled,
         reminderLeads: reminderLeads ?? this.reminderLeads,
         reminderCatchUpShown: reminderCatchUpShown ?? this.reminderCatchUpShown,
+        dailyDigestEnabled: dailyDigestEnabled ?? this.dailyDigestEnabled,
+        dailyDigestShown: dailyDigestShown ?? this.dailyDigestShown,
+        categoryIds: categoryIds ?? this.categoryIds,
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -321,6 +375,12 @@ class UiPrefs {
         // 于是每次重排提醒都白白重写一遍偏好文件（`collapsedIds` 那两处同理）。
         'reminderCatchUpShown':
             reminderCatchUpShown.toList(growable: false)..sort(),
+        'dailyDigestEnabled': dailyDigestEnabled,
+        // 与 `reminderCatchUpShown` 同一条理由：先排序再落盘，
+        // 否则"内容没变"也会写出不同的字节，白重写一遍偏好文件。
+        'dailyDigestShown': dailyDigestShown.toList(growable: false)..sort(),
+        // 同一条理由：排序后再落盘
+        'categoryIds': categoryIds.toList(growable: false)..sort(),
       };
 
   static UiPrefs fromJson(Map<String, dynamic> json) {
@@ -366,6 +426,16 @@ class UiPrefs {
       // 只是这一档还没被补发过而已，下一次重排照常补一次。
       // 与其它集合字段同一套"坏值只丢那一项"的读法（复用 `_readIdSet`）。
       reminderCatchUpShown: _readIdSet(json['reminderCatchUpShown']),
+      // 「今日事」：开关**缺键即关**（与上面两条同一条口径 ——
+      // 老偏好文件里没有它，不该因此凭空开始每天零点弹一条）；
+      // 已弹过的日期缺键则是空集：那一天还没弹过而已，下一次重排照常弹一次。
+      dailyDigestEnabled: json['dailyDigestEnabled'] == true,
+      dailyDigestShown: _readIdSet(json['dailyDigestShown']),
+      // 缺键 ⇒ 空集：老偏好文件里没有它，那所有项目就照旧按"有没有下级"判角色
+      // （这正是加它之前的行为，不需要迁移）。
+      // 这一份**不清过期键**：一个项目有没有被转成分类，跟"今天几号"无关；
+      // 项目删掉之后留一个不存在的 id 也无害（查找一律按 id 比对）。
+      categoryIds: _readIdSet(json['categoryIds']),
     );
   }
 

@@ -11,6 +11,7 @@ import '../core/models/entity.dart';
 import '../core/models/github_backup_config.dart';
 import '../core/models/project.dart';
 import '../core/models/reminder.dart';
+import '../core/models/task.dart';
 import '../core/rules/archive_zone.dart';
 import '../core/rules/reminder_schedule.dart';
 import '../core/store/app_paths.dart';
@@ -556,8 +557,16 @@ class AppController extends ChangeNotifier {
     final service = NotificationService.instance;
     if (!service.supported) return;
     try {
-      if (!prefs.reminderEnabled) {
-        // 关掉时只做一次收尾（撤掉之前排下的），之后这条路彻底静默。
+      // 两个开关各有各的收尾：总开关关掉时撤掉**只属于它的**那些排期，
+      // 「今日事」关掉时同理。为什么要分开（而不是"两个都关才撤"）：
+      // 它们本来就是两条独立的通知（见 `UiPrefs.dailyDigestEnabled`），
+      // 一个关掉不该把另一个也带走。
+      //
+      // 实现上仍然是**全撤 + 重排**这一套幂等做法（ADR-097）：
+      // "要排什么"由下面算出来，`replaceAll` 一次对齐；
+      // 这里只处理"一个都不排"时那次多余的撤销。
+      final anyOn = prefs.reminderEnabled || prefs.dailyDigestEnabled;
+      if (!anyOn) {
         if (_hasScheduledReminders) {
           await service.cancelAllPending();
           _hasScheduledReminders = false;
@@ -575,27 +584,66 @@ class AppController extends ChangeNotifier {
       // 因为「提前 1 小时」那一档的触发时刻在这段时间里已经过去了。
       final shown = prefs.reminderCatchUpShown;
       final nextShown = <String>{};
-      for (final task in workspace.openTasks()) {
-        // "放下的线不该继续催"：事件已搁置 ⇒ 线下的任务不排、也不补。
-        // 提醒正是"催"的地方之一，所以与 `Workspace.overdueTasks()` 同一口径
-        // （那一页的理由写在 `openTasks()` 的文档里）。
-        if (workspace.isEventMutedForDue(task.eventId)) continue;
-        final plan = planTaskReminders(
-          taskId: task.id,
-          taskTitle: task.title,
-          eventName: workspace.findEvent(task.eventId)?.name ?? '',
-          dueAt: task.dueAt,
-          open: true,
-          leads: leads,
+      // 开着、且所属事件没被搁置的任务：下面两条通知都按同一份清单算。
+      // "放下的线不该继续催"：事件已搁置 ⇒ 线下的任务不排、也不补。
+      // 提醒正是"催"的地方之一，所以与 `Workspace.overdueTasks()` 同一口径
+      // （那一页的理由写在 `openTasks()` 的文档里）。
+      final candidates = prefs.reminderEnabled || prefs.dailyDigestEnabled
+          ? workspace.openTasks()
+              .where((task) => !workspace.isEventMutedForDue(task.eventId))
+              .toList(growable: false)
+          : const <Task>[];
+      // 总开关关着就只撤不排：两档提前量属于它（「今日事」走下面另一条路）
+      if (prefs.reminderEnabled) {
+        for (final task in candidates) {
+          final plan = planTaskReminders(
+            taskId: task.id,
+            taskTitle: task.title,
+            eventName: workspace.findEvent(task.eventId)?.name ?? '',
+            dueAt: task.dueAt,
+            open: true,
+            leads: leads,
+            now: now,
+          );
+          fires.addAll(plan.fires);
+          final catchUp = plan.catchUp;
+          if (catchUp == null) continue; // 还没错过任何一档：不记键
+          // 键里带 `dueAt`：改期后键就变了，于是允许重新补发一次（语义与从前一致）
+          final key = '${task.id}|${task.dueAt}';
+          if (!shown.contains(key)) catchUps.add(catchUp);
+          nextShown.add(key);
+        }
+      }
+      // 「今日事」：**当天一条汇总**（用户 2026-10-15）。
+      //
+      // 它与上面那两档是**并列的另一条**，所以：
+      //   · 不读 `reminderEnabled`，只读自己的开关；
+      //   · 不数带时刻的任务（那些已经由两档各催过一次，见 `planDailyDigest`）；
+      //   · **已搁置事件下的不算**（与上面同一条"放下的线不该继续催"）。
+      //
+      // 记账按**日期**：同一天里重排多少次、重开多少次 App，都只弹那一次。
+      // 每次重排顺手把不是今天的键清掉 —— 这个集合按天增长，不清就会一直涨。
+      final today = Ids.todayDate(now);
+      final nextDigestShown = <String>{};
+      if (prefs.dailyDigestEnabled) {
+        final digest = planDailyDigest(
+          dueDates: <String?>[for (final task in candidates) task.dueAt],
           now: now,
         );
-        fires.addAll(plan.fires);
-        final catchUp = plan.catchUp;
-        if (catchUp == null) continue; // 还没错过任何一档：不记键
-        // 键里带 `dueAt`：改期后键就变了，于是允许重新补发一次（语义与从前一致）
-        final key = '${task.id}|${task.dueAt}';
-        if (!shown.contains(key)) catchUps.add(catchUp);
-        nextShown.add(key);
+        if (digest != null) {
+          if (prefs.dailyDigestShown.contains(today)) {
+            // 今天已经弹过：只把这个键留到下一轮，不再弹
+            nextDigestShown.add(today);
+          } else if (digest.at.isAfter(now)) {
+            // 零点还没到（只在"刚过午夜就重排"这种边界上出现）
+            fires.add(digest);
+            nextDigestShown.add(today);
+          } else {
+            // 零点已经过去（今天第一次跑到这里）：立刻补一条，并记账
+            catchUps.add(digest);
+            nextDigestShown.add(today);
+          }
+        }
       }
       // 顺手清掉过期键（任务已删 / 已完成 / 已搁置 / 已改期 ⇒ 它的键不再进 nextShown），
       // 免得这个集合随用随涨。**内容没变就不写**：排期会被反复重算（勾一下清单也会），
@@ -603,6 +651,10 @@ class AppController extends ChangeNotifier {
       if (nextShown.length != prefs.reminderCatchUpShown.length ||
           !nextShown.containsAll(prefs.reminderCatchUpShown)) {
         updatePrefs(prefs.copyWith(reminderCatchUpShown: nextShown));
+      }
+      if (nextDigestShown.length != prefs.dailyDigestShown.length ||
+          !nextDigestShown.containsAll(prefs.dailyDigestShown)) {
+        updatePrefs(prefs.copyWith(dailyDigestShown: nextDigestShown));
       }
       await service.replaceAll(fires);
       _hasScheduledReminders = fires.isNotEmpty;
@@ -623,6 +675,23 @@ class AppController extends ChangeNotifier {
   /// 而不是启动就弹框：权限框只在用户表达出"我要这个"的地方出现。
   Future<void> setReminderEnabled(bool enabled) async {
     updatePrefs(prefs.copyWith(reminderEnabled: enabled));
+    if (enabled) {
+      await NotificationService.instance.requestPermission();
+    }
+    await refreshReminders();
+  }
+
+  /// 打开 / 关掉**「今日事」**那条零点汇总（2026-10-15）。
+  ///
+  /// 与 [setReminderEnabled] 是同一条口径、但**互不隶属**：
+  ///   · 打开时同样当场申请通知权限（这条也要发通知，没权限就是白开）；
+  ///   · 关掉时**不动**总开关与两档，也不清 `dailyDigestShown`——
+  ///     开关只决定"排不排"，不决定"记不记得住"（与 AI / GitHub 那几个开关一致）。
+  ///
+  /// 打开那一刻如果今天已经过了零点，重排会**立刻补一条**（今天第一次跑到这里），
+  /// 这是刻意的：用户刚打开它，就该看到它长什么样。
+  Future<void> setDailyDigestEnabled(bool enabled) async {
+    updatePrefs(prefs.copyWith(dailyDigestEnabled: enabled));
     if (enabled) {
       await NotificationService.instance.requestPermission();
     }
@@ -667,6 +736,41 @@ class AppController extends ChangeNotifier {
 
   void setLastTab(int index) {
     workspace.setLastTab(index);
+    notifyListeners();
+  }
+
+  /// 这个项目**按分类摆**吗（`⋮ → 转为分类…` 那一下）。
+  ///
+  /// 判据两段、缺一不可（2026-10-15）：
+  ///   1. **有未归档、未删除的直属下级** —— 推导出来的角色，Q2 / ADR-069 一个字没改；
+  ///   2. 或者**被明确转过一次**（[UiPrefs.categoryIds]）—— 让它"还没有下级"时
+  ///      也能立住那份版式（见那边的注释）。
+  ///
+  /// **全仓只用这一个判据**：详情页按它选正文版式，项目列表按它选副标题与色标。
+  /// 从前 `project_detail_page` 与 `project_tab` 各算各的（都写 `children.isNotEmpty`），
+  /// 加了这一段之后如果还各算各的，就会出现"详情页是分类、列表里是目标"。
+  ///
+  /// 这一条整体记在 **ADR-100**。
+  bool isProjectCategory(String projectId) =>
+      prefs.categoryIds.contains(projectId) ||
+      workspace.childProjectsOf(projectId).isNotEmpty;
+
+  /// 转成分类 / 取消分类。写入的是**意图**，不是数据字段（见 [UiPrefs.categoryIds]）。
+  ///
+  /// 取消之后若它已经有下级，它**仍然是分类** —— 那时角色由结构决定，
+  /// 这一下只是把"明确的意图"收回来，不动任何项目。
+  void setProjectCategory(String projectId, {required bool category}) {
+    final next = Set<String>.from(prefs.categoryIds);
+    if (category) {
+      next.add(projectId);
+    } else {
+      next.remove(projectId);
+    }
+    if (next.length == prefs.categoryIds.length &&
+        next.containsAll(prefs.categoryIds)) {
+      return; // 没变就不写盘（与其它偏好同一条口径）
+    }
+    updatePrefs(prefs.copyWith(categoryIds: next));
     notifyListeners();
   }
 
