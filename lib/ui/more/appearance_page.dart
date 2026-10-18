@@ -34,6 +34,10 @@ class _AppearancePageState extends State<AppearancePage> {
         final theme = Theme.of(context);
         final prefs = _app.prefs;
         final followSeed = parseHexColor(prefs.backgroundSeedHex);
+        // 色块显示**实际会生效**的强调色：深色下主题色会被抬明度到可读那一档
+        // （见 `effectiveAccent`），若这里仍画种子原色，选的与看到的对不上。
+        final pageSurface = theme.colorScheme.surface;
+        final brightness = theme.brightness;
 
         return Scaffold(
           appBar: AppBar(title: const Text('外观')),
@@ -72,7 +76,9 @@ class _AppearancePageState extends State<AppearancePage> {
               const SectionHeader('主题'),
               for (final preset in appThemePresets)
                 ListTile(
-                  leading: _Swatch(color: preset.seed),
+                  leading: _Swatch(
+                    color: effectiveAccent(preset.seed, pageSurface, brightness),
+                  ),
                   title: Text(preset.name),
                   subtitle: Text(preset.mood, style: theme.textTheme.labelSmall),
                   trailing: prefs.themeId == preset.id ? const Icon(Icons.check) : null,
@@ -81,7 +87,9 @@ class _AppearancePageState extends State<AppearancePage> {
               ListTile(
                 enabled: prefs.hasBackground && followSeed != null,
                 leading: _Swatch(
-                  color: followSeed ?? theme.colorScheme.outlineVariant,
+                  color: followSeed == null
+                      ? theme.colorScheme.outlineVariant
+                      : effectiveAccent(followSeed, pageSurface, brightness),
                 ),
                 title: const Text('跟随背景图'),
                 subtitle: Text(

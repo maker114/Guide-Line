@@ -34,10 +34,13 @@ void main() {
   ///
   /// **不含 `onPrimary`**：它按强调色的明暗取黑或白，是"压在强调色上的字"，
   /// 本来就不该随主题变（见下面那条单独的测试）。
+  ///
+  /// **不含 `outline`**：2026-10-18 起它是中性灰（描边与次级文字，
+  /// 含已完成 / 划掉的标题），不跟主题色走 —— 它由下面那条单独守。
   const List<String> foregroundRoles = <String>[
     'primary',
     'primaryContainer',
-    'outline',
+    'onSecondaryContainer',
   ];
 
   Color roleOf(ColorScheme scheme, String name) {
@@ -68,6 +71,8 @@ void main() {
         return scheme.primary;
       case 'primaryContainer':
         return scheme.primaryContainer;
+      case 'onSecondaryContainer':
+        return scheme.onSecondaryContainer;
       case 'outline':
         return scheme.outline;
       case 'tertiary':
@@ -115,7 +120,131 @@ void main() {
         );
       }
     });
+
+    test('$label：描边 / 次级文字（outline）是中性灰，不跟主题色走', () {
+      // 完成 / 划掉的标题、未勾记号、没设标识色的描边都取它 ——
+      // 2026-10-18 被对比度测试与实机反馈一起钉住：灰就是灰，不能是主题色。
+      final outlines = <String, Color>{
+        for (final id in <String>['default', 'ink', 'sand', 'plum'])
+          id: themeOf(id, brightness).colorScheme.outline,
+      };
+      expect(
+        outlines.values.toSet().length,
+        1,
+        reason: 'outline 不该随主题色变化（$label）',
+      );
+      final color = outlines['default']!;
+      final r = (color.r * 255).round();
+      final g = (color.g * 255).round();
+      final b = (color.b * 255).round();
+      expect(
+        (r - g).abs() <= 1 && (g - b).abs() <= 1,
+        isTrue,
+        reason: 'outline 在「default」/$label 下是 rgb=$r,$g,$b，应当是中性灰',
+      );
+    });
   }
+
+  test('深色：每个主题的强调色都抬到与页面底 ≥ 4.5:1', () {
+    // 主题种子是给浅底设计的：墨黑 #37474F、梅紫 #7B3FA0 直接放到深底上
+    // 只有 1.9:1 / 2.7:1，文字、图标、选中态全糊在页面底里（用户反馈）。
+    // 深色统一抬明度到 WCAG AA 的正文门槛，浅色不动。
+    for (final preset in appThemePresets) {
+      final scheme = themeOf(preset.id, Brightness.dark).colorScheme;
+      final ratio = contrastRatio(scheme.primary, scheme.surface);
+      expect(
+        ratio,
+        greaterThanOrEqualTo(minDarkAccentContrast),
+        reason: '「${preset.name}」在深色下的强调色对比度只有 '
+            '${ratio.toStringAsFixed(2)}:1，低于 $minDarkAccentContrast:1',
+      );
+    }
+  });
+
+  test('深色：页面底与面板拉开，容器族逐档递增', () {
+    final scheme = themeOf('default', Brightness.dark).colorScheme;
+    final levels = <Color>[
+      scheme.surfaceContainerLowest,
+      scheme.surface,
+      scheme.surfaceContainerLow,
+      scheme.surfaceContainer,
+      scheme.surfaceContainerHigh,
+      scheme.surfaceContainerHighest,
+    ];
+    for (var i = 1; i < levels.length; i++) {
+      expect(
+        levels[i].computeLuminance(),
+        greaterThan(levels[i - 1].computeLuminance()),
+        reason: '第 $i 档面板色没有比上一档亮 —— 层级会被压平',
+      );
+    }
+    // 卡片取 surfaceContainerLow：M3 默认只比页面底亮 8 个灰阶（≈1.08:1），
+    // 深色屏幕上几乎同色，这就是"面板不突出"的根因。
+    final ratio = contrastRatio(scheme.surfaceContainerLow, scheme.surface);
+    expect(
+      ratio,
+      greaterThanOrEqualTo(1.25),
+      reason: '卡片与页面底只有 ${ratio.toStringAsFixed(2)}:1，面板会糊进页面底',
+    );
+    for (final color in levels) {
+      final r = (color.r * 255).round();
+      final g = (color.g * 255).round();
+      final b = (color.b * 255).round();
+      expect(
+        (r - g).abs() <= 1 && (g - b).abs() <= 1,
+        isTrue,
+        reason: '面板色阶必须仍是中性灰（rgb=$r,$g,$b）',
+      );
+    }
+  });
+
+  test('底栏底色：深色取面板色（不再与页面底同色），浅色仍与页面底同色', () {
+    final dark = themeOf('default', Brightness.dark).colorScheme;
+    expect(bottomNavColorOf(dark), dark.surfaceContainerHigh);
+    expect(
+      bottomNavColorOf(dark),
+      isNot(dark.surface),
+      reason: '深色下底栏画成 surface 会与页面底一模一样（实机反馈"融为一体"）',
+    );
+    final light = themeOf('default', Brightness.light).colorScheme;
+    expect(bottomNavColorOf(light), light.surface, reason: '浅色靠阴影浮起，不动');
+  });
+
+  test('外观页色块 = 当前亮暗下实际生效的强调色', () {
+    // 深色下主题色会被抬明度（见 `effectiveAccent`），外观页那个色块必须画同一档，
+    // 否则"选的深灰、界面是浅灰蓝"，对不上号。
+    for (final preset in appThemePresets) {
+      final light = themeOf(preset.id, Brightness.light).colorScheme;
+      final dark = themeOf(preset.id, Brightness.dark).colorScheme;
+      expect(
+        effectiveAccent(preset.seed, light.surface, Brightness.light),
+        preset.seed,
+        reason: '浅色下色块应当就是种子原色（「${preset.name}」）',
+      );
+      expect(
+        effectiveAccent(preset.seed, dark.surface, Brightness.dark),
+        dark.primary,
+        reason: '深色下色块应当等于实际生效的 primary（「${preset.name}」）',
+      );
+    }
+  });
+
+  test('深色：选中胶囊上的字与胶囊淡底对比度 ≥ 3:1', () {
+    for (final preset in appThemePresets) {
+      final scheme = themeOf(preset.id, Brightness.dark).colorScheme;
+      final pill = Color.alphaBlend(
+        scheme.secondaryContainer,
+        bottomNavColorOf(scheme),
+      );
+      final ratio = contrastRatio(scheme.onSecondaryContainer, pill);
+      expect(
+        ratio,
+        greaterThanOrEqualTo(3.0),
+        reason: '「${preset.name}」选中那一格的字与胶囊只有 '
+            '${ratio.toStringAsFixed(2)}:1',
+      );
+    }
+  });
 
   test('压在强调色上的文字足够醒目（onPrimary 是黑或白，不随主题偏色）', () {
     for (final brightness in Brightness.values) {

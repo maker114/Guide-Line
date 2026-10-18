@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../core/json/canonical.dart';
@@ -124,48 +126,111 @@ const List<String> cjkFontFallback = <String>[
   'PingFang SC',
 ];
 
+/// WCAG 相对亮度对比度（`(亮 + 0.05) / (暗 + 0.05)`）。
+///
+/// 用对比度而不是"明度差"：后者对中间调的颜色会误判
+/// （白字压在 #2F6FEB 上明度差只有 0.17，对比度却有 4.1）。
+double contrastRatio(Color a, Color b) {
+  final la = a.computeLuminance();
+  final lb = b.computeLuminance();
+  final light = math.max(la, lb);
+  final dark = math.min(la, lb);
+  return (light + 0.05) / (dark + 0.05);
+}
+
+/// 深色模式下强调色的最低对比度（WCAG AA 的**正文**标准）。
+///
+/// 为什么深色需要单独一档：主题种子是给浅底设计的，同一支色搬到深底上
+/// 对比度会掉到 1.9:1（墨黑 #37474F）~ 2.7:1（梅紫 #7B3FA0）——
+/// 文字、图标、选中态全糊在页面底里（2026-10-18 用户反馈）。
+const double minDarkAccentContrast = 4.5;
+
+/// 深色下把强调色抬到与页面底至少 [minDarkAccentContrast]。
+///
+/// 做法是**只抬明度、不动色相与饱和**：这样"墨黑"在深色下仍是蓝灰、
+/// "松绿"仍是绿，只是亮到读得清；比把种子直接交给 M3 推导更能保住预设的辨识度。
+/// 已经够亮的色原样返回（沙金这类浅色不会被压暗）。
+Color _readableOnDark(Color accent, Color surface) {
+  if (contrastRatio(accent, surface) >= minDarkAccentContrast) return accent;
+  final hsl = HSLColor.fromColor(accent);
+  // 明度越高对比度越高（同一色相 / 饱和下单调），二分找**刚好达标**的那一档，
+  // 少抬一分都会显得发白。
+  var low = hsl.lightness.clamp(0.0, 1.0);
+  var high = 1.0;
+  for (var i = 0; i < 16; i++) {
+    final mid = (low + high) / 2;
+    if (contrastRatio(hsl.withLightness(mid).toColor(), surface) >=
+        minDarkAccentContrast) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+  return hsl.withLightness(high).toColor();
+}
+
+/// 某个种子在**当前亮暗下实际生效**的强调色（深色会抬明度，见 [_readableOnDark]）。
+///
+/// 外观页的色块也用它：否则用户选的深灰在深色下变成浅灰蓝时，
+/// 设置页那个色块还是原色，对不上号。
+Color effectiveAccent(Color seed, Color pageSurface, Brightness brightness) =>
+    brightness == Brightness.dark ? _readableOnDark(seed, pageSurface) : seed;
+
 /// 只换**前景**：把主题色装进那些"文字 / 图标 / 选中态"的 role，
 /// **一个 surface / background 相关的字段都不碰**。
 ///
 /// 哪些算前景（会换）：
 ///   · 主 / 次 / 三色及其 `on` 色 —— 按钮文字、图标、选中胶囊、链接；
-///   · `outline` / `outlineVariant` —— 描边与次级文字；
 ///   · `error` / `onError` / `errorContainer` / `onErrorContainer` —— 报错与危险动作；
 ///   · `inversePrimary` / `onInverseSurface` / `inverseSurface` 那一组。
 /// 哪些算背景（**保持中性灰**）：surface 家族全部、`background`、
 /// 各种 `*Container`（它们给卡片/面板当底）。
+///
+/// **`outline` / `outlineVariant` 不在这里覆盖**（2026-10-18 收回）：
+/// 它们同时是"已完成 / 划掉的标题"（`event_tab`、`task_tile`、两处清单共 9 处）
+/// 与未勾记号、无标识色的描边 —— 都该是中性灰。从前把它们染成主题色 55%，
+/// 于是勾完的标题是主题色而不是灰色（用户反馈）。主题色只留给 `primary` 一组。
 ///
 /// 唯一的例外是 `primaryContainer` / `secondaryContainer` / `tertiaryContainer`
 /// 与 `inverseSurface`：它们既当"底"又必须跟着主色走（选中胶囊、FilledButton
 /// 的底色就是它们，纯中性灰会看不出选中）。这是刻意保留的三个，
 /// 它们的**对比伙伴** `onPrimaryContainer` 等也一起换，保证读得清。
 ColorScheme applyAccent(ColorScheme neutral, Color accent, Brightness brightness) {
+  // 深色先把种子抬到可读那一档，后面所有派生色都跟着它走
+  final effective = effectiveAccent(accent, neutral.surface, brightness);
+
   // 压在强调色上的字取纯黑或纯白 —— **判据只能是强调色自己的明暗**，
-  // 不能看整体是浅色还是深色主题：墨黑主题的强调色是深灰（#37474F），
-  // 配白字对比度只有 1.8，读不清（这条是被对比度测试抓出来的）。
+  // 不能看整体是浅色还是深色主题：浅色模式下的墨黑主题是深灰（#37474F），
+  // 按"浅色主题就配黑字"去推会得出黑字，压在深灰上只有 2.2:1，读不清；
+  // 深色模式下同一支色会被抬到浅灰蓝，仍然按这个阈值取。
   //
-  // 阈值取 0.5（感知中点）：12 个预设里只有沙金（#9A7B31，明度 0.30）在临界附近，
-  // 取白字仍有 3.0:1，够读。
-  final onAccent = accent.computeLuminance() > 0.5
+  // 阈值取 0.5（感知中点）：当前 7 个预设里只有沙金（#9A7B31，明度 0.30）
+  // 在临界附近，取白字仍有 3.0:1，够读。
+  final onAccent = effective.computeLuminance() > 0.5
       ? const Color(0xFF1A1A1A)
       : Colors.white;
 
+  // 选中胶囊是强调色 22% 的淡底（底栏上那格），字若也用同一个色，
+  // 深色下只有 2.5:1 上下。深色里把字再往 `onSurface` 抬一档 ——
+  // 与 M3 "onSecondaryContainer 取浅色" 的口径一致，浅色模式不动。
+  final onTint = brightness == Brightness.dark
+      ? Color.lerp(effective, neutral.onSurface, 0.4)!
+      : effective;
+
   return neutral.copyWith(
-    primary: accent,
+    primary: effective,
     onPrimary: onAccent,
-    primaryContainer: accent,
+    primaryContainer: effective,
     onPrimaryContainer: onAccent,
-    secondary: accent,
+    secondary: effective,
     onSecondary: onAccent,
-    secondaryContainer: accent.withValues(alpha: 0.22),
-    onSecondaryContainer: accent,
-    tertiary: accent,
+    secondaryContainer: effective.withValues(alpha: 0.22),
+    onSecondaryContainer: onTint,
+    tertiary: effective,
     onTertiary: onAccent,
-    tertiaryContainer: accent.withValues(alpha: 0.18),
-    onTertiaryContainer: accent,
-    outline: accent.withValues(alpha: 0.55),
-    outlineVariant: neutral.outlineVariant,
-    inversePrimary: accent,
+    tertiaryContainer: effective.withValues(alpha: 0.18),
+    onTertiaryContainer: effective,
+    inversePrimary: effective,
   );
 }
 
@@ -181,6 +246,62 @@ Color _neutralize(Color color) {
   return hsl.withSaturation(0).toColor();
 }
 
+/// 深色下面板与页面底**必须分得开**（2026-10-18 实机反馈"面板不突出、底栏融为一体"）。
+///
+/// Material 3 深色默认的页面底是 tone 6、卡片是 tone 10，两者只差 8 个灰阶
+/// （对比度约 1.08:1）—— 深色屏幕上几乎同色，卡片、面板、底部导航会一起糊进
+/// 页面底里。这里**不动页面底**（它与 AppBar 同色，动了会重新引出"顶栏变色"），
+/// 只把上面四档按"叠白纱"抬亮：白纱叠在纯灰上仍是纯灰，层级递增与 `R=G=B`
+/// 都保得住，也不用写死一串灰值。
+///
+/// 数值按实测比对定：卡片与页面底的对比度从约 1.08:1 提到约 1.3:1，
+/// 输入框（Highest）再高两档；浅色模式不套这一层 —— 浅色下卡片本来就靠阴影浮起。
+const double _darkPanelLowVeil = 0.10;
+const double _darkPanelContainerVeil = 0.13;
+const double _darkPanelHighVeil = 0.165;
+const double _darkPanelHighestVeil = 0.20;
+
+/// 把 M3 推导出来的一套配色**统一去色**；深色下再把面板色阶抬开一档。
+ColorScheme _neutralScheme(ColorScheme from, Brightness brightness) {
+  final surface = _neutralize(from.surface);
+  final base = from.copyWith(
+    surface: surface,
+    surfaceDim: _neutralize(from.surfaceDim),
+    surfaceBright: _neutralize(from.surfaceBright),
+    surfaceContainerLowest: _neutralize(from.surfaceContainerLowest),
+    surfaceContainerLow: _neutralize(from.surfaceContainerLow),
+    surfaceContainer: _neutralize(from.surfaceContainer),
+    surfaceContainerHigh: _neutralize(from.surfaceContainerHigh),
+    surfaceContainerHighest: _neutralize(from.surfaceContainerHighest),
+    onSurface: _neutralize(from.onSurface),
+    onSurfaceVariant: _neutralize(from.onSurfaceVariant),
+    // 描边与次级文字（含已完成 / 划掉的标题）一律中性灰，不跟主题色走
+    outline: _neutralize(from.outline),
+    outlineVariant: _neutralize(from.outlineVariant),
+    inverseSurface: _neutralize(from.inverseSurface),
+    onInverseSurface: _neutralize(from.onInverseSurface),
+  );
+  if (brightness != Brightness.dark) return base;
+  Color lift(double veil) =>
+      Color.alphaBlend(Colors.white.withValues(alpha: veil), surface);
+  return base.copyWith(
+    surfaceContainerLow: lift(_darkPanelLowVeil),
+    surfaceContainer: lift(_darkPanelContainerVeil),
+    surfaceContainerHigh: lift(_darkPanelHighVeil),
+    surfaceContainerHighest: lift(_darkPanelHighestVeil),
+  );
+}
+
+/// 底部导航胶囊的底色。
+///
+/// 浅色：与页面底同色，靠那层阴影浮起来；深色：阴影在深底上等于没有，
+/// 若仍画成 `surface` 就与页面底一模一样（用户原话"底下导航栏已经融为一体"），
+/// 所以改用高一档的面板色 —— 与卡片同一套"面板"语汇。
+Color bottomNavColorOf(ColorScheme scheme) =>
+    scheme.brightness == Brightness.dark
+        ? scheme.surfaceContainerHigh
+        : scheme.surface;
+
 /// 由偏好生成一整套主题（浅色 / 深色由 [brightness] 决定）。
 ///
 /// **底色全中性、主题色只上前景**（见 [applyAccent]）：
@@ -193,21 +314,8 @@ ThemeData buildAppTheme(UiPrefs prefs, Brightness brightness) {
   final seed = resolveSeedColor(prefs);
   // 底色永远从中性灰推导；主题色只往上叠前景 role
   final fromNeutral = ColorScheme.fromSeed(seedColor: _neutralSeed, brightness: brightness);
-  // 再把 surface 家族统一去色，保证是**真中性灰**而不是"几乎中性"
-  final neutral = fromNeutral.copyWith(
-    surface: _neutralize(fromNeutral.surface),
-    surfaceDim: _neutralize(fromNeutral.surfaceDim),
-    surfaceBright: _neutralize(fromNeutral.surfaceBright),
-    surfaceContainerLowest: _neutralize(fromNeutral.surfaceContainerLowest),
-    surfaceContainerLow: _neutralize(fromNeutral.surfaceContainerLow),
-    surfaceContainer: _neutralize(fromNeutral.surfaceContainer),
-    surfaceContainerHigh: _neutralize(fromNeutral.surfaceContainerHigh),
-    surfaceContainerHighest: _neutralize(fromNeutral.surfaceContainerHighest),
-    onSurface: _neutralize(fromNeutral.onSurface),
-    onSurfaceVariant: _neutralize(fromNeutral.onSurfaceVariant),
-    inverseSurface: _neutralize(fromNeutral.inverseSurface),
-    onInverseSurface: _neutralize(fromNeutral.onInverseSurface),
-  );
+  // 再把 surface 家族统一去色（深色还要把面板色阶抬开，见 `_neutralScheme`）
+  final neutral = _neutralScheme(fromNeutral, brightness);
   final base = ThemeData(
     colorScheme: applyAccent(neutral, seed, brightness),
     brightness: brightness,

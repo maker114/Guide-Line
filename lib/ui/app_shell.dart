@@ -18,6 +18,7 @@ import 'nav_icon_motion.dart';
 import 'projects/project_tab.dart';
 import 'shell_banners.dart';
 import 'shell_title.dart';
+import 'theme/app_theme.dart';
 import 'theme/shape_tokens.dart';
 
 /// 底部导航的形状参数（自绘，改动时这几个要一起看）。
@@ -1100,7 +1101,9 @@ class _AppShellState extends State<AppShell> {
             ),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
+                // 浅色与页面底同色、靠阴影浮起；深色阴影看不见，
+                // 改用面板色，否则底栏与页面底是同一个色（见 `bottomNavColorOf`）
+                color: bottomNavColorOf(Theme.of(context).colorScheme),
                 borderRadius: BorderRadius.circular(_navRadius),
                 boxShadow: <BoxShadow>[
                   BoxShadow(

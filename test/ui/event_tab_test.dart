@@ -8,6 +8,7 @@ import 'package:guideline/core/models/task.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/events/event_detail_page.dart';
 import 'package:guideline/ui/events/task_fold.dart';
+import 'package:guideline/ui/theme/app_theme.dart';
 
 /// 事件页改成"与项目页同一套观感"之后的接线：
 ///   · 一个事件一张卡，卡里嵌着主线任务（不用点进去就能看到做到哪）；
@@ -128,6 +129,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('时间与任务'), findsNothing);
     expect(find.text('最近到期'), findsNothing);
+  });
+
+  testWidgets('已完成 / 划掉的标题是中性灰，不是主题色', (tester) async {
+    // 2026-10-18 用户反馈：事件页里勾完的标题被划掉了，但颜色还是主题色。
+    // 根因是 `outline` 被 `applyAccent` 染成强调色 55% —— 这条用例同时钉住
+    // "完成态取 outline" 与 "outline 是中性灰" 两件事。
+    final app = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    final event = app.ws.createEvent(name: '收尾的事');
+    final task = app.ws.createTask(eventId: event.id, title: '已经做完的一步');
+    app.run(() => app.ws.setTaskStatus(task.id, NodeStatus.done));
+    app.run(() => app.ws.setEventStatus(event.id, NodeStatus.done));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        // 用应用自己的主题：默认的 `MaterialApp` 主题里 outline 是带紫的灰，
+        // 会把这轮"中性灰"的断言测成假阳性。
+        theme: buildAppTheme(app.prefs, Brightness.light),
+        home: AppShell(app: app),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('事件'));
+    await tester.pumpAndSettle();
+
+    final scheme = Theme.of(tester.element(find.text('收尾的事'))).colorScheme;
+    for (final label in <String>['收尾的事', '已经做完的一步']) {
+      final text = tester.widget<Text>(find.text(label));
+      expect(
+        text.style?.decoration,
+        TextDecoration.lineThrough,
+        reason: '$label 是完成态，应当被划掉',
+      );
+      expect(
+        text.style?.color,
+        scheme.outline,
+        reason: '$label 的完成态应当取 outline（中性灰）',
+      );
+      final color = text.style!.color!;
+      final r = (color.r * 255).round();
+      final g = (color.g * 255).round();
+      final b = (color.b * 255).round();
+      expect(
+        (r - g).abs() <= 1 && (g - b).abs() <= 1,
+        isTrue,
+        reason: '$label 的颜色是 rgb=$r,$g,$b，应当是中性灰而不是主题色',
+      );
+    }
+    expect(
+      scheme.outline,
+      isNot(scheme.primary),
+      reason: 'outline 不能再被主题色覆盖，否则完成态又会变回主题色',
+    );
   });
 
   testWidgets('卡头能收起整条线，再点一次展开', (tester) async {
