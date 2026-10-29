@@ -5,7 +5,6 @@ import '../../core/models/ai_config.dart';
 import '../../core/rules/reminder_schedule.dart';
 import '../../core/store/github_sync.dart';
 import '../../core/store/ui_prefs.dart';
-import '../../platform/data_directory.dart';
 import '../common/format.dart';
 import '../common/section_header.dart';
 import '../projects/ai_settings_page.dart';
@@ -20,10 +19,15 @@ import 'reminder_page.dart';
 import 'search_page.dart';
 import 'upcoming_page.dart';
 
-/// 更多 Tab：**浏览入口 + 数据安全 + 关于**。
+/// 更多 Tab：**浏览入口 + 数据安全**。
 ///
 /// 「灵感 / 项目 / 事件」三个 Tab 只放最高频的操作，
 /// 聚合视图（到期、全部任务、搜索、归档区）与数据安全都收在这里。
+///
+/// 列表尾部**不再单独摆一段「关于」**（名称 / 版本 / 数据目录）：这三项已在
+/// 右上角「关于」弹窗里（手机外壳是「更多」页 AppBar 的按钮、电脑外壳是标题栏
+/// 的入口，见 `shell_banners.dart` 的 `showAboutApp`）—— 同一份信息在同一个页面上
+/// 摆两遍，只会让"该看哪个"变成新问题。
 class MoreTab extends StatefulWidget {
   const MoreTab({super.key, required this.app});
 
@@ -135,17 +139,6 @@ class _MoreTabState extends State<MoreTab> {
           title: 'GitHub 备份同步',
           subtitle: _gitHubSubtitle(context),
           page: GitHubBackupPage(app: app),
-        ),
-        const SectionHeader('关于'),
-        ListTile(
-          leading: const Icon(Icons.folder_outlined),
-          title: const Text('数据目录'),
-          subtitle: Text(app.dataDirectory.path),
-        ),
-        const ListTile(
-          leading: Icon(Icons.info_outline),
-          title: Text('版本'),
-          subtitle: Text('${AppInfo.versionLabel} · Android 单机版'),
         ),
       ],
     );

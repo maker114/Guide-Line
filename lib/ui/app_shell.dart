@@ -1021,10 +1021,13 @@ class _AppShellState extends State<AppShell> {
                         messages: app.startupWarnings,
                         onTap: () => showDataIncident(context, app),
                       ),
-                    // 到期清理（Q12 + 2026-10-07「已处理的灵感保存 30 天」）：清了多少条
+                    // 到期清理（Q12 的「回收站半句」已由 ADR-102 撤销，剩下的
+                    // 「已处理的灵感」那档 + 2026-10-07 定的 30 天）：清了多少条
                     // 必须让人看得见 —— 数据被自动删掉却一声不吭，是"损坏永不静默"
                     // 那条规矩的漏网之鱼。句子由 `AppController.retentionNotice` 出，
                     // 手机与电脑两套外壳共用同一份（写两处必然会漂）。
+                    // 2026-10-29 用户口径：「回收站已经清除的条目不要弹提示」——
+                    // 那句现在只报「已处理的灵感」那一档，回收站清掉的不再出现。
                     if (app.retentionNotice != null && !_retentionNoticeClosed)
                       ShellWarningBanner(
                         messages: <String>[app.retentionNotice!],

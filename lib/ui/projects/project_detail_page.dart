@@ -1733,7 +1733,8 @@ class _InspirationsFieldState extends State<_InspirationsField> {
     );
   }
 
-  /// 与灵感页走的是同一个 `MergeEditorPage`（三种选择都在那一页里），
+  /// 与灵感页走的是同一个 `MergeEditorPage`（2026-10-29 起那一页只做
+  /// 「已有清单 + 本次新增」的预览与确认，落点只剩清单，见 ADR-101），
   /// 只是入口在项目侧。
   Future<void> _merge(BuildContext context, Inspiration inspiration) async {
     final result = await Navigator.of(context).push<MergeResult>(

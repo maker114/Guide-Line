@@ -66,9 +66,28 @@ const int slotDailyDigest = 3;
 /// 万一将来有人把它当成一条真任务去 `findTask`，这里要一眼看出它不是一个 id。
 const String dailyDigestTaskId = 'daily-digest';
 
+/// 「今日事」的一条输入：一个任务的到期值，加上它所属事件的名字。
+///
+/// 为什么要带事件名进来：通知正文要说清"今天到期的是哪几条线的事"
+/// （用户 2026-10-29 要求："提醒当天的事件时，需要在通知里附上事件名称"）。
+/// 这个函数是**纯的** —— 事件名只能由调用方先查库、再随任务一起传进来。
+class DailyDigestTask {
+  const DailyDigestTask({required this.dueAt, this.eventName = ''});
+
+  /// 任务的 `due_at`：只有「日期」、没有时刻的那一类才会进汇总。
+  final String? dueAt;
+
+  /// 所属事件的名字。查不到（悬挂引用 / 事件已删）时是空串，正文里就不列它。
+  final String eventName;
+}
+
 /// 一条「今日事」通知：**到期日就是今天、而没设具体时刻**的任务有几条。
 ///
 /// 口径（用户 2026-10-15 定）："没有设置准确时间时在当天早上零点发消息表示今日事件"。
+///
+/// 正文（用户 2026-10-29 加）：`今天有 N 件事到期：事件甲、事件乙` ——
+/// 事件名**去重、保持输入顺序、全列不截断**；一条事件名都查不到时退回原句
+/// `今天有 N 件事到期`，不硬凑一个空冒号。
 ///
 /// ```
 /// due_at 落在今天
@@ -94,15 +113,22 @@ const String dailyDigestTaskId = 'daily-digest';
 ///
 /// 这一条整体记在 **ADR-099**：它是"与那两档并列的第三条通知"，不是第三档。
 ReminderFire? planDailyDigest({
-  required Iterable<String?> dueDates,
+  required Iterable<DailyDigestTask> tasks,
   required DateTime now,
 }) {
   final today = Ids.todayDate(now);
   var count = 0;
-  for (final due in dueDates) {
+  // 事件名按**任务顺序**去重收进来：同一个事件下有三件今天到期的事，
+  // 正文里只该出现一次这个事件的名字（否则一行里重复三遍，反而看不清有哪几条线）。
+  final eventNames = <String>[];
+  for (final task in tasks) {
+    final due = task.dueAt;
     // 带时刻的不算（见上）；`due` 为 `null` 或空串自然也被这一条挡掉
     if (due == null || Ids.hasTimeOfDay(due)) continue;
-    if (due == today) count += 1;
+    if (due != today) continue;
+    count += 1;
+    final name = task.eventName.trim();
+    if (name.isNotEmpty && !eventNames.contains(name)) eventNames.add(name);
   }
   if (count == 0) return null;
 
@@ -113,8 +139,18 @@ ReminderFire? planDailyDigest({
     // 换算在平台层做，见 `notification_service.dart`）
     at: DateTime(now.year, now.month, now.day),
     title: '今日事',
-    body: '今天有 $count 件事到期',
+    body: _dailyDigestBody(count, eventNames),
   );
+}
+
+/// 「今日事」的正文：条数是主体，事件名接在后面。
+///
+/// `今天有 3 件事到期：备考、健身`；一条事件名都没有时就只说前半句。
+/// 用**全角冒号 + 顿号**：与界面里其它「A：B」句式、以及事件名的中文习惯一致。
+String _dailyDigestBody(int count, List<String> eventNames) {
+  final head = '今天有 $count 件事到期';
+  if (eventNames.isEmpty) return head;
+  return '$head：${eventNames.join('、')}';
 }
 
 /// 算一条任务该排哪些提醒。

@@ -4,62 +4,45 @@ import '../../app/app_controller.dart';
 import '../../core/models/inspiration.dart';
 import '../../core/models/project.dart';
 import '../../core/models/project_item.dart';
-import '../../features/workspace.dart';
 import '../common/dialogs.dart';
-import '../common/keyboard_dismiss_guard.dart';
 import '../common/project_picker.dart';
 
-/// 合并编辑器交回去的结果：**这次并的灵感落在哪、落了什么文本**。
+/// 合并编辑器交回去的结果：**这次要并进清单的条目文本**（顺序即落盘顺序）。
+///
+/// 2026-10-29 重做合并界面后，合并只剩**一个落点：目标的「实现清单」** ——
+/// 从前那三种选择（手改正文 / 追加原文 / 作为清单条目）连同"新正文"这个字段
+/// 一起删掉了，所以这里只带回一件事：按顺序的条目文本。
 class MergeResult {
-  /// 落点一 / 二：写进「如何解决」的**新正文**。
-  ///
-  /// 多条一起并时，"追加原文"已经在编辑器里按顺序接好了，这里拿到的就是
-  /// 最终的整段正文 —— 落盘的是一条相同的路（替换正文）。
-  const MergeResult.intoImplementation(this.text)
-      : asChecklistItem = false,
-        itemTexts = const <String>[];
+  const MergeResult({required this.itemTexts});
 
-  /// 落点三：作为「实现清单」的新条目，**一条灵感一条**，顺序即顺序。
-  const MergeResult.intoChecklist({required this.itemTexts})
-      : asChecklistItem = true,
-        text = '';
-
-  /// 落点一 / 二的新正文（落点三用不到它，那时正文一个字都不动）。
-  final String text;
-
-  /// 落点三要追加的清单条目文本，与带进编辑器的灵感**一一对应**。
+  /// 与带进编辑器的灵感**一一对应**，顺序就是落进清单的顺序。
   final List<String> itemTexts;
-
-  /// `true` = 作为清单的新条目追加；`false` = 写进「如何解决」
-  final bool asChecklistItem;
 }
 
-/// 合并编辑器（**手机端形态**）：把灵感并进**目标**，页面上给**三种选择**。
+/// 合并预览页（**手机端形态**）：把灵感并进目标，页面只做**预览 + 确认**。
+///
+/// 用户口径（2026-10-29 重做合并界面，ADR-101）：「在合并界面中，永远只作为清单被合并，
+/// 界面中显示已有的清单，随后将这次合并的内容以不同颜色衔接在这份清单后面」。
 ///
 /// ```
-/// 如何解决（可编辑）                    ← 一进来就是当前正文
-/// ┌──────────────────────────────────┐
-/// │ （正文原文，编辑框）                │
-/// └──────────────────────────────────┘
-///  [追加原文]   [作为清单条目]
-///  灵感原文（参考）                     ← 多条一起并时按顺序列出来、默认展开
+/// 项目已有的清单 1/2                 ← 只读；已完成的保持划线 + 灰
+///   ☑ 已经做完的一条
+///   ☐ 还没做的一条
+/// ── 本次合并新增 2 条 ──────────     ← 用主题色画分隔
+///   + 灵感原文甲                     ← 接在清单后面，用主题色
+///   + 灵感原文乙
 /// ```
 ///
-///   1. **手改正文**：照着灵感把正文改清楚，改完点右上角「保存」→ 替换
-///      「如何解决」；
-///   2. **追加原文**：把灵感文本原封不动**另起一行**接到正文末尾（多条则
-///      **按顺序各占一行**；只改编辑框，仍要点保存才写盘；不润色、不改写）；
-///   3. **作为清单条目**：不碰正文，直接把它追加成「实现清单」的新一条
-///      （多条则**各成一条**，顺序就是带进来的顺序）。
-///
-/// 三个动作都以"这些灵感已经处理掉"收尾（置为 `merged`，原文可在归档区
-/// 「已合并」找回）。第 3 种是**立刻结束**的：编辑框里没保存的改动不会写回，
-/// 所以它单独做成一个按钮，而不是混进「保存」。
+/// 这一页**不再有可编辑的正文**：合并的产物就是"项目里多出几条待办"，
+/// 正文归 AI 整理与正文编辑（旧行为是点「保存」会替换「如何解决」，
+/// 用户已明确不要那条路）。所以右上角那个「合并」只把原文按顺序交回去，
+/// 真正的落盘由 [applyMergeResultFor] 统一做 —— 界面这一层不直接写数据。
 ///
 /// **落点只能是目标**（Q2）：走到这一页的项目若已经有下级（= 分类），
-/// 这一页不给任何合并动作，只说明原因 —— 分类只回答"归哪一类"，不装灵感。
-class MergeEditorPage extends StatefulWidget {
-  /// 单条合并（项目详情页那条老路）：一条灵感，行为一字不变。
+/// 这一页不给任何合并动作，只说明原因、并把已有清单摆出来 ——
+/// 分类只回答"归哪一类"，不装灵感。
+class MergeEditorPage extends StatelessWidget {
+  /// 单条合并（项目详情页 / 灵感页那条老路）：一条灵感。
   MergeEditorPage({
     super.key,
     required this.project,
@@ -67,11 +50,10 @@ class MergeEditorPage extends StatefulWidget {
     this.isCategory = false,
   }) : inspirations = <Inspiration>[inspiration];
 
-  /// **多选合并**：一次把选中的多条带进来（新版修改计划 Q37 的那一条）。
+  /// **多选合并**：一次把选中的多条带进来（Q37）。
   ///
-  /// [inspirations] 的顺序**就是**灵感列表上从上到下的顺序 ——
-  /// 「追加原文」各占一行、「作为清单条目」各成一条，都按它来；
-  /// 编辑器里的「灵感原文（参考）」也照它列，让用户看得出这次并的是哪几条。
+  /// [inspirations] 的顺序**就是**灵感列表上从上到下的顺序，也就是落进清单的
+  /// 顺序 —— 一条灵感一条，不拼成一条。
   const MergeEditorPage.many({
     super.key,
     required this.project,
@@ -81,377 +63,180 @@ class MergeEditorPage extends StatefulWidget {
 
   final Project project;
 
-  /// 这次要并的灵感（至少一条）。
+  /// 这次要并进清单的灵感（至少一条）。
   final List<Inspiration> inspirations;
 
   /// 这个项目**此刻是不是分类**（有未归档、未删除的直属下级）。
   ///
-  /// 分类不装灵感（Q2）：为 `true` 时这一页**不给任何合并动作**，只说明原因。
+  /// 分类不装灵感（Q2）：为 `true` 时这一页**不给合并动作**，只说明原因。
   /// 由调用方传 —— 这一页只拿得到一个 `Project` 快照，而"有没有下级"要看整棵树。
   /// 默认 `false` 只覆盖"灵感页那条入口"的历史数据：那条路走 `pickProject`，
   /// 选择器已经把分类挡在外面了。
   final bool isCategory;
 
   @override
-  State<MergeEditorPage> createState() => _MergeEditorPageState();
-}
-
-class _MergeEditorPageState extends State<MergeEditorPage> {
-  /// 编辑框的初值 = **当前的「如何解决」**（不是灵感原文）
-  late final TextEditingController _implementation =
-      TextEditingController(text: widget.project.implementation);
-
-  final FocusNode _implementationFocus = FocusNode();
-
-  /// 两块参考面板是否展开。
-  ///
-  /// **两块都默认展开**（2026-09-27 实机反馈："追加新灵感时默认展开灵感内容，
-  /// 同时显示已有的清单"）。从前单条合并时灵感原文是收起的 ——
-  /// 而"这次并的是哪一句"正是合并时最要看的东西，收起它等于让人凭记忆核对。
-  /// 参考区有 `maxHeight: 200` 兜着，展开也不会把编辑框挤没。
-  bool _referenceExpanded = true;
-  bool _checklistExpanded = true;
-
-  /// 这次要并的灵感原文，**顺序即列表顺序**（参考面板与落点三共用一份）。
-  List<String> get _originalTexts =>
-      <String>[for (final inspiration in widget.inspirations) inspiration.text];
-
-  /// 这个项目**已有的清单条目**，供参考（只读）。
-  ///
-  /// 为什么要露出来：三选一里的「作为清单条目」是**往后追加**，用户在按之前
-  /// 得先看得见已经有哪些条目，否则同一个意思很容易并成两条。
-  /// 这里只读 —— 打勾与改字都在项目详情页，编辑器不做第二处清单编辑。
-  List<ProjectItem> get _existingItems => widget.project.items;
-
-  @override
-  void dispose() {
-    _implementation.dispose();
-    _implementationFocus.dispose();
-    super.dispose();
-  }
-
-  /// 选择一：把改好的正文写回「如何解决」。
-  ///
-  /// 「一进来就是这个值、用户一个字没改」时**不保存**（Q8）：那样"合并"实际
-  /// 什么都没发生，灵感却会被标成已合并并离开灵感箱。业务层（`mergeInspirations`）
-  /// 同样会拒 —— 这里挡一道只是为了把话说在离用户最近的这一层。
-  void _save() {
-    final text = _implementation.text.trim();
-    if (text.isEmpty) {
-      // 空正文会把「如何解决」清没，业务层同样会拒；提示留在这一页更近
-      showToast(context, '正文不能为空；若只需新增清单条目，请使用「作为清单条目」。', error: true);
-      return;
-    }
-    if (text == widget.project.implementation.trim()) {
-      showToast(context, implementationUnchanged, error: true);
-      return;
-    }
-    Navigator.of(context).pop(MergeResult.intoImplementation(text));
-  }
-
-  /// 选择二：灵感原文原封不动作为新的一行接到末尾（多条**按顺序各占一行**，
-  /// **仍要点保存**）。
-  void _appendOriginal() {
-    var next = _implementation.text;
-    for (final inspiration in widget.inspirations) {
-      next = Workspace.appendToImplementation(next, inspiration.text);
-    }
-    _implementation.text = next;
-    _implementation.selection = TextSelection.collapsed(offset: next.length);
-  }
-
-  /// 选择三：不碰正文，直接把原文**各成一条**追加进清单（点一下即结束合并）。
-  void _asChecklistItem() {
-    Navigator.of(context).pop(
-      MergeResult.intoChecklist(itemTexts: _originalTexts),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 分类不是灵感的落点（Q2）：不给任何合并动作，只说清为什么、该怎么办
-    if (widget.isCategory) {
-      return Scaffold(
-        appBar: AppBar(
-          title: Text('合并进「${widget.project.title}」', overflow: TextOverflow.ellipsis),
-        ),
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-              child: Text(categoryNotForInspiration, style: theme.textTheme.titleMedium),
-            ),
-            _ReferencePanel(
-              texts: _originalTexts,
-              expanded: _referenceExpanded,
-              onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
-            ),
-            _ExistingChecklistPanel(
-              items: _existingItems,
-              expanded: _checklistExpanded,
-              onToggle: () => setState(() => _checklistExpanded = !_checklistExpanded),
-            ),
-          ],
-        ),
-      );
-    }
+    final primary = theme.colorScheme.primary;
+    // 这次要并进去的原文，**顺序即列表顺序**（也就是落进清单的顺序）
+    final newTexts = <String>[for (final inspiration in inspirations) inspiration.text];
+
     return Scaffold(
       appBar: AppBar(
-        title: Text('合并进「${widget.project.title}」', overflow: TextOverflow.ellipsis),
+        title: Text('合并进「${project.title}」', overflow: TextOverflow.ellipsis),
         actions: <Widget>[
-          TextButton(
-            onPressed: _save,
-            child: const Text('保存'),
-          ),
+          // 分类不是灵感的落点（Q2）：连动作都不给，这一页只负责说明
+          if (!isCategory)
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(
+                MergeResult(itemTexts: newTexts),
+              ),
+              child: const Text('合并'),
+            ),
         ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: ListView(
+        // 整页可滚：窄屏 + 1.6 倍字体下，清单再长也只是往下滚，不会挤爆布局
+        //（旧版是 Column + 固定高度折叠面板，条目一多或字体一大就会被顶出去）
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 6),
-            child: Row(
-              children: <Widget>[
-                // 标题**必须能缩**（`Flexible` + 省略号）：「追加原文」是固定宽度的按钮，
-                // 标题一旦比剩余宽度长就会把整行顶出去 —— 深色 + 1.6 倍字体 + 窄屏下
-                // 实测溢出 19px（改文案时字数变多就会踩到，与文案好坏无关）。
-                Flexible(
-                  child: Text(
-                    '如何解决 · 可编辑',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelLarge,
-                  ),
-                ),
-                const Spacer(),
-                // 「追加原文」：不做润色、也不直接写盘 —— 用户还能在保存前再调一下
-                TextButton.icon(
-                  onPressed: _appendOriginal,
-                  icon: const Icon(Icons.playlist_add, size: 18),
-                  label: const Text('追加原文'),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              // 键盘收起 = **只放掉焦点**（ADR-087）：这一页有明确的「保存」键，
-              // 自动落盘比"键盘回来"更危险；正文一个字都不动，收完键盘接着改也行。
-              child: KeyboardDismissGuard(
-                isFocused: () => _implementationFocus.hasFocus,
-                onKeyboardDismissed: _implementationFocus.unfocus,
-                child: TextField(
-                  controller: _implementation,
-                  focusNode: _implementationFocus,
-                  expands: true,
-                  maxLines: null,
-                  minLines: null,
-                  textAlignVertical: TextAlignVertical.top,
-                  keyboardType: TextInputType.multiline,
-                  decoration: InputDecoration(
-                    border: const OutlineInputBorder(),
-                    hintText: '输入修改后的正文。',
-                  ),
+          if (isCategory) ...<Widget>[
+            Text(categoryNotForInspiration, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 16),
+          ],
+          _ExistingChecklist(items: project.items),
+          if (!isCategory) ...<Widget>[
+            const SizedBox(height: 20),
+            _NewItemsHeading(count: newTexts.length),
+            for (final text in newTexts)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    // 小 + 号：让"这一条是这次要新加进去的"一眼可读
+                    Text(
+                      '+',
+                      style: theme.textTheme.titleMedium?.copyWith(color: primary),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        text,
+                        style: theme.textTheme.bodyMedium?.copyWith(color: primary),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ),
-          // 三个选择里最"一键"的那一个：直接把它（们）变成清单的一条（每条一条）
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: FilledButton.tonalIcon(
-                onPressed: _asChecklistItem,
-                icon: const Icon(Icons.checklist, size: 18),
-                label: const Text('作为清单条目'),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          // 已有的清单摆在灵感原文**下面**：先看清"这次要并的是什么"，
-          // 再对照"项目里已经有什么"决定落点（实机反馈：同时显示已有的清单）
-          _ExistingChecklistPanel(
-            items: _existingItems,
-            expanded: _checklistExpanded,
-            onToggle: () => setState(() => _checklistExpanded = !_checklistExpanded),
-          ),
-          _ReferencePanel(
-            texts: _originalTexts,
-            expanded: _referenceExpanded,
-            onToggle: () => setState(() => _referenceExpanded = !_referenceExpanded),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: Text(
+            const SizedBox(height: 20),
+            Text(
               // 唯一必须留的一句：恢复灵感**不会**把已经写进项目的内容退回去
               '「恢复为待处理」只把灵感放回灵感箱，项目里的内容不会退回。',
               style: theme.textTheme.bodySmall,
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _ReferencePanel extends StatelessWidget {
-  const _ReferencePanel({
-    required this.texts,
-    required this.expanded,
-    required this.onToggle,
-  });
-
-  /// 这次并的灵感原文，**按列表顺序**列出（顺序就是落进项目的顺序）。
-  final List<String> texts;
-  final bool expanded;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final many = texts.length > 1;
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.lightbulb_outline, size: 18),
-            // 多条时把条数写进标题：用户得先知道"这次并的是几条"
-            title: Text(
-              many ? '灵感原文 · 参考 ${texts.length} 条' : '灵感原文 · 参考',
-              style: theme.textTheme.labelLarge,
-            ),
-            trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),
-            onTap: onToggle,
-          ),
-          if (expanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (var index = 0; index < texts.length; index += 1) ...<Widget>[
-                      if (index > 0) const SizedBox(height: 8),
-                      // 多条时前面给个序号：顺序是这一页的承诺（各占一行 / 各成一条）
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          if (many)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: Text('${index + 1}', style: theme.textTheme.labelSmall),
-                            ),
-                          Expanded(
-                            child: SelectableText(
-                              texts[index],
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 项目**已有的实现清单**（只读参考）。
+/// 项目**已有的实现清单**（只读）。
 ///
-/// 为什么要有这一块：三选一里的「作为清单条目」是往后追加，按之前得先看得见
-/// 已经有哪些条目 —— 不然同一个意思并两次，而且没有任何地方提示"已经有了"。
+/// 为什么必须先摆出来：合并只往后追加，按之前得先看得见已经有哪些条目 ——
+/// 不然同一个意思并两次，而且没有任何地方提示"已经有了"（用户要的正是
+/// "已有清单 + 这次新增接在后面"这一整列）。
 ///
-/// **只读**：打勾、改字、上移下移都在项目详情页。一个参考面板里再塞一套编辑
-/// 动作，用户在合并这一页就分不清自己在动哪一层（与分类页展开区的取舍同一条口径）。
-class _ExistingChecklistPanel extends StatelessWidget {
-  const _ExistingChecklistPanel({
-    required this.items,
-    required this.expanded,
-    required this.onToggle,
-  });
+/// **只读**：打勾、改字、上移下移都在项目详情页。合并这一页再塞一套清单编辑，
+/// 用户就分不清自己在动哪一层。
+class _ExistingChecklist extends StatelessWidget {
+  const _ExistingChecklist({required this.items});
 
   final List<ProjectItem> items;
-  final bool expanded;
-  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 一条都没有就整块不画：空面板只会白占一屏
-    if (items.isEmpty) return const SizedBox.shrink();
+    // 一条都没有也要给一句：只留空白会被读成"没加载出来"
+    if (items.isEmpty) {
+      return Text(
+        '这个项目还没有清单条目。',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      );
+    }
     final done = items.where((item) => item.done).length;
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.checklist, size: 18),
-            // 进度写进标题：并之前先知道"这个项目已经做了多少"
-            title: Text(
-              '项目已有的清单 $done/${items.length}',
-              style: theme.textTheme.labelLarge,
-            ),
-            trailing: Icon(expanded ? Icons.expand_more : Icons.expand_less),
-            onTap: onToggle,
-          ),
-          if (expanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (final item in items)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Icon(
-                              item.done
-                                  ? Icons.check_box_outlined
-                                  : Icons.check_box_outline_blank,
-                              size: 16,
-                              color: item.done
-                                  ? theme.colorScheme.outline
-                                  : theme.colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 6),
-                            Expanded(
-                              child: Text(
-                                item.text,
-                                style: item.done
-                                    ? theme.textTheme.bodyMedium?.copyWith(
-                                        decoration: TextDecoration.lineThrough,
-                                        color: theme.colorScheme.outline,
-                                      )
-                                    : theme.textTheme.bodyMedium,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        // 进度写进标题：并之前先知道"这个项目已经做了多少"
+        Text(
+          '项目已有的清单 $done/${items.length}',
+          style: theme.textTheme.labelLarge,
+        ),
+        const SizedBox(height: 6),
+        for (final item in items)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Icon(
+                  item.done ? Icons.check_box_outlined : Icons.check_box_outline_blank,
+                  size: 16,
+                  color: item.done
+                      ? theme.colorScheme.outline
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
-              ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    item.text,
+                    style: item.done
+                        ? theme.textTheme.bodyMedium?.copyWith(
+                            decoration: TextDecoration.lineThrough,
+                            color: theme.colorScheme.outline,
+                          )
+                        : theme.textTheme.bodyMedium,
+                  ),
+                ),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 分隔标题：「从这里往下是这次合并会新增的部分」。
+///
+/// 整行都用主题色 —— 用户要的"用不同颜色衔接在清单后面"落在这条分隔和
+/// 它下面的每一条新增上；已有清单保持正文色，两者一眼分得开。
+class _NewItemsHeading extends StatelessWidget {
+  const _NewItemsHeading({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    return Row(
+      children: <Widget>[
+        Icon(Icons.add, size: 18, color: primary),
+        const SizedBox(width: 6),
+        // 必须能缩：1.6 倍字体 + 窄屏下这条标题比剩余宽度长时不该把整行顶出去
+        Flexible(
+          child: Text(
+            '本次合并新增 $count 条',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelLarge?.copyWith(color: primary),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -478,13 +263,13 @@ Future<bool> applyMergeResult(
 
 /// 把合并编辑器交回来的结果落到数据上（**支持多条**，Q37）。
 ///
-/// 这里只负责"选哪个项目 + 给一句提示"；真正的跨文档改动走 `Workspace` 的
-/// 批量动作（项目正文 / 清单 + 那些灵感的状态**一次落盘**）。
+/// 这里只负责"挡掉分类 + 给一句提示"；真正的跨文档改动走 `Workspace` 的
+/// [Workspace.mergeInspirations]（项目清单追加 + 那些灵感的状态**一次落盘**）。
 ///
 /// **落点只能是目标**（Q2）：这里再挡一道 —— 万一入口那侧没把手上的项目判准
 /// （它是快照，看不到"有没有下级"），到了写数据这一步也不会悄悄落进分类。
-/// 「正文没变」同样在**落盘这一步**再挡（Q8）：传进来的 `project` 是快照，
-/// 拿它比对会漏掉"用户在别处刚改过正文"的情况 —— 以库里的当前值为准。
+/// 从前这里还要再挡一次"正文没变"（Q8）；合并只剩清单落点之后，那个判断
+/// 连同「保存」那条路一起没了。
 ///
 /// 返回 `true` 表示真的写进去了（灵感页据此决定要不要退出多选）。
 Future<bool> applyMergeResultFor(
@@ -498,17 +283,10 @@ Future<bool> applyMergeResultFor(
     showToast(context, categoryNotForInspiration, error: true);
     return false;
   }
-  if (!result.asChecklistItem &&
-      result.text.trim() == (app.ws.findProject(project.id)?.implementation ?? '').trim()) {
-    showToast(context, implementationUnchanged, error: true);
-    return false;
-  }
   final error = app.run(() {
     app.ws.mergeInspirations(
       inspirationIds: <String>[for (final inspiration in inspirations) inspiration.id],
       projectId: project.id,
-      landing: result.asChecklistItem ? MergeLanding.checklist : MergeLanding.implementation,
-      newImplementation: result.text,
       itemTexts: result.itemTexts,
     );
   });
@@ -518,16 +296,9 @@ Future<bool> applyMergeResultFor(
     return false;
   }
   final count = inspirations.length;
-  final String message;
-  if (result.asChecklistItem) {
-    message = count > 1
-        ? '已把 $count 条灵感追加到「${project.title}」的清单，原文可在归档区「已合并」找回'
-        : '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回';
-  } else {
-    message = count > 1
-        ? '已把 $count 条灵感并进「${project.title}」，原文可在归档区「已合并」找回'
-        : '已合并进「${project.title}」，原文可在归档区「已合并」找回';
-  }
+  final message = count > 1
+      ? '已把 $count 条灵感追加到「${project.title}」的清单，原文可在归档区「已合并」找回'
+      : '已追加到「${project.title}」的清单，原文可在归档区「已合并」找回';
   showToast(context, message);
   return true;
 }

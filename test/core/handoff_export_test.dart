@@ -92,7 +92,9 @@ void main() {
     expect(text, startsWith('# 项目：重构知识库\n'));
     expect(text, contains('- 有什么问题 / 思路：让灵感不再散落'));
     expect(text, contains('- 日期：2026-12-31'));
-    expect(text, contains('- 标识色：#2f6feb'));
+    // 标识色只用于界面内识别，对接收这份说明的 AI 没有信息量（用户要求不附）：
+    // 这里**故意带着 color**，证明即使设了色也不写出那一行
+    expect(text, isNot(contains('- 标识色：')));
     expect(text, contains('- 导出时间：2026-09-25 14:30'));
     // 项目没有完成 / 搁置（Q1）：老数据里的 done 也不再写进交接说明
     expect(text, isNot(contains('- 状态：')));
@@ -100,8 +102,11 @@ void main() {
     expect(text, isNot(contains('进行中')));
   });
 
-  test('空的「有什么问题 / 思路」/ 日期 / 标识色不写出对应行', () {
-    final text = build(p: project(title: '极简', purpose: '   '));
+  test('「有什么问题 / 思路」与日期为空时不写对应行；标识色设了也不写', () {
+    // 标识色那一行不是"空才省略"，而是**从来不写**：颜色只在界面里认项目用。
+    final text = build(
+      p: project(title: '极简', purpose: '   ', color: '#2f6feb'),
+    );
     expect(text, isNot(contains('- 有什么问题 / 思路：')));
     expect(text, isNot(contains('- 日期：')));
     expect(text, isNot(contains('- 标识色：')));

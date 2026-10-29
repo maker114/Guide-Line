@@ -149,7 +149,8 @@ class AppController extends ChangeNotifier {
   ///
   /// 失败**不打断启动**：清理是"维护动作"，写盘失败时下次启动会再试一次，
   /// 比在启动路径上抛异常（用户看到白屏）合理得多。清理条数记在
-  /// [lastTrashPurgedCount] / [lastProcessedPurgedCount] 里，设置页 / 用例可以看。
+  /// [lastTrashPurgedCount] / [lastProcessedPurgedCount] 里供用例与排查
+  /// （回收站那一段从 2026-10-29 起不再报给用户，见 [retentionNotice]）。
   void _purgeExpiredTrash() {
     try {
       lastTrashPurgedCount = workspace.purgeExpiredTrash();
@@ -172,20 +173,17 @@ class AppController extends ChangeNotifier {
   /// 合成一个数会让"到底少的是什么"说不清。
   int lastProcessedPurgedCount = 0;
 
-  /// 启动清理的**如实告知**：清了多少条、清的是哪一类；一条没清时返回 `null`。
+  /// 启动清理的**如实告知**：清了多少条「已处理的灵感」；一条没清时返回 `null`。
   ///
   /// 为什么放在控制器里而不是两个外壳各拼一遍：手机与电脑两套外壳，
   /// 一模一样的句子写两处必然会漂（这个仓库已经在别处踩过）。
+  ///
+  /// **回收站那一段不在这里报**（用户 2026-10-29："回收站已经清除的条目不要弹提示"，
+  /// 见 ADR-102）：墓碑到期在启动时被清掉，是"回收站本来就会自己变短"的既有行为，
+  /// 不必每次启动再念一句。条数仍然记在 [lastTrashPurgedCount] 里供用例与排查。
   String? get retentionNotice {
-    final parts = <String>[
-      if (lastTrashPurgedCount > 0)
-        '回收站有 $lastTrashPurgedCount 条已超过 $trashRetentionDays 天',
-      if (lastProcessedPurgedCount > 0)
-        // 「已处理的灵感」的保留期是 ADR-098（与回收站分开记：两者清的不是同一种东西）
-        '已处理的灵感有 $lastProcessedPurgedCount 条已超过 $processedRetentionDays 天',
-    ];
-    if (parts.isEmpty) return null;
-    return '${parts.join('；')}，已自动清除';
+    if (lastProcessedPurgedCount <= 0) return null;
+    return '已处理的灵感有 $lastProcessedPurgedCount 条已超过 $processedRetentionDays 天，已自动清除';
   }
 
   /// 本次启动被隔离保留的损坏文件（**完整路径**，界面只显示文件名）。
@@ -621,13 +619,22 @@ class AppController extends ChangeNotifier {
       //   · 不数带时刻的任务（那些已经由两档各催过一次，见 `planDailyDigest`）；
       //   · **已搁置事件下的不算**（与上面同一条"放下的线不该继续催"）。
       //
+      // 事件名在这里查一次随任务一起交过去（用户 2026-10-29："附上事件名称"）：
+      // `planDailyDigest` 是纯函数、拿不到库，查库这一步只能落在这一层。
+      //
       // 记账按**日期**：同一天里重排多少次、重开多少次 App，都只弹那一次。
       // 每次重排顺手把不是今天的键清掉 —— 这个集合按天增长，不清就会一直涨。
       final today = Ids.todayDate(now);
       final nextDigestShown = <String>{};
       if (prefs.dailyDigestEnabled) {
         final digest = planDailyDigest(
-          dueDates: <String?>[for (final task in candidates) task.dueAt],
+          tasks: <DailyDigestTask>[
+            for (final task in candidates)
+              DailyDigestTask(
+                dueAt: task.dueAt,
+                eventName: workspace.findEvent(task.eventId)?.name ?? '',
+              ),
+          ],
           now: now,
         );
         if (digest != null) {

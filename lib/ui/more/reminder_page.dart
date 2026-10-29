@@ -90,7 +90,8 @@ class _ReminderPageState extends State<ReminderPage> {
                 SwitchListTile(
                   title: const Text('零点摘要今天到期的事'),
                   subtitle: Text(
-                    '只写到期日、没写钟点的那种任务，当天零点汇总一句「今天有 N 件事到期」。'
+                    '只写到期日、没写钟点的那种任务，当天零点汇总一条，'
+                    '例如「今天有 3 件事到期：备考、健身」——正文带上这些事所属的事件名。'
                     '带钟点的仍走上一条。',
                     style: theme.textTheme.labelSmall,
                   ),

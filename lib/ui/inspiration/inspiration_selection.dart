@@ -250,7 +250,7 @@ class InspirationBatchActions {
   /// 边界（刻意定的，不是漏做）：
   ///   · **分类不是落点**（Q2：分类只回答"归哪一类"）—— 灵感挂在分类上时，
   ///     那一组不算"有效目标"，会走"问一次"那条路，用户自己挑一个真目标；
-  ///   · 一组内部走**一次批量合并**（`MergeLanding` 同一个方向），不逐条弹编辑器。
+  ///   · 一组内部走**一次批量合并**（一次落盘并进同一个项目的清单），不逐条弹编辑器。
   Future<void> merge(BuildContext context, List<Inspiration> ordered) async {
     final picks = ordered
         .where((inspiration) => selectedIds.contains(inspiration.id))
@@ -316,7 +316,7 @@ class InspirationBatchActions {
       showToast(context, '选中的灵感都没有合并到项目。', error: true);
       return;
     }
-    final skipNote = skipped.isEmpty ? '' : '；未处理 ${skipped.join('、')}';
+    final skipNote = skipped.isEmpty ? '' : '；未并进 ${skipped.join('、')}';
     showToast(context, '已并进 $groups 个项目，共 $merged 条$skipNote');
     onDone();
   }
@@ -333,10 +333,10 @@ class InspirationBatchActions {
   /// 把 [group] 并进 [project]（一个项目的合并编辑器 + 落盘）。
   ///
   /// 每一步都会**推一次合并编辑器**：流水作业就是这样走的 —— 用户在第一组里
-  /// 选好落点（改写 / 追加 / 作为清单条目），返回之后自动进下一组。
+  /// 确认一次（合并只有一个落点：目标清单），返回之后自动进下一组。
   /// 收尾只给**一句汇总**（每组各弹一次提示会连成一串，最后那条反而看不清）。
   ///
-  /// 返回是否真的并进去了（用户中途返回 = `false`，那一组会记进"未处理"）。
+  /// 返回是否真的并进去了（用户中途返回 = `false`，那一组会记进"未并进"）。
   Future<bool> _mergeInto(
     BuildContext context,
     Project project,
@@ -354,7 +354,7 @@ class InspirationBatchActions {
     );
     if (result == null || !context.mounted) return false;
 
-    // `applyMergeResultFor` 自己会给一句"已并进…"的提示；流水时它每步都会弹，
+    // `applyMergeResultFor` 自己会给一句"已追加到…的清单"的提示；流水时它每步都会弹，
     // 但那正是"一组一组做完"的即时反馈 —— 最后由汇总那句收口。
     return applyMergeResultFor(
       context,

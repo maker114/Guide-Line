@@ -194,63 +194,51 @@ void main() {
     await tester.tap(find.text('这条灵感要合并'));
     await tester.pumpAndSettle();
 
-    // 进了合并编辑器：标题带项目名，编辑框里**就是当前的「如何解决」**
+    // 进了合并页：标题带项目名；没有可编辑正文，上半是已有清单、下半是新增预览
     expect(find.textContaining('合并进「项目甲」'), findsOneWidget);
-    expect(find.text('如何解决 · 可编辑'), findsOneWidget);
-    final field = tester.widget<TextField>(
-      find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first,
-    );
-    expect(field.controller!.text, isEmpty, reason: '项目还没写正文 → 编辑框是空的');
+    expect(find.text('这个项目还没有清单条目。'), findsOneWidget, reason: '项目还没写过清单');
+    expect(find.text('本次合并新增 1 条'), findsOneWidget);
+    expect(find.text('这条灵感要合并'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing, reason: '合并页不再有正文编辑器');
   });
 
-  testWidgets('合并选择一：手改正文 → 保存写回「实现计划」，灵感进归档区', (tester) async {
+  testWidgets('灵感页单条合并：合并页只落清单，点「合并」后清单多一条', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '项目乙');
     app.run(() => app.ws.updateProject(project.id, implementation: '手写的计划'));
-    app.run(() => app.ws.captureInspiration('灵感原文', projectId: project.id));
+    app.run(() => app.ws.addProjectItem(project.id, '原来就有的条目'));
+    app.run(() => app.ws.captureInspiration('灵感原文')); // 没归属 → 先问一次落点
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('项目'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('项目乙').first);
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('灵感原文'),
-      120,
-      scrollable: verticalScrollable,
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('灵感原文'));
-    await tester.pumpAndSettle();
+
     await tester.tap(find.text('灵感原文'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('合并进项目…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('项目乙').last);
+    await tester.pumpAndSettle();
 
-    // 编辑框预填当前正文，照着灵感改一版再保存
-    final field = find.descendant(of: find.byType(Scaffold), matching: find.byType(TextField)).first;
-    await tester.enterText(field, '改好的计划：灵感原文');
-    await tester.tap(find.text('保存'));
+    // 合并页：已有清单在上、这次新增在下，没有可编辑正文
+    expect(find.textContaining('合并进「项目乙」'), findsOneWidget);
+    expect(find.text('项目已有的清单 0/1'), findsOneWidget);
+    expect(find.text('本次合并新增 1 条'), findsOneWidget);
+    expect(find.text('保存'), findsNothing, reason: '正文与「保存」已随三选一一起删掉');
+
+    await tester.tap(find.text('合并'));
     await tester.pumpAndSettle();
 
     final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.implementation, '改好的计划：灵感原文');
-    expect(reloaded.items, isEmpty, reason: '走正文这一条就不动清单');
+    expect(reloaded.items.map((i) => i.text), <String>['原来就有的条目', '灵感原文']);
+    expect(reloaded.implementation, '手写的计划', reason: '合并只落清单，不再改正文');
     expect(app.ws.inspirationInbox, isEmpty);
     expect(app.ws.archiveZone.mergedInspirations.length, 1);
-    // 回到详情页：正文在「实现 · 文本」那一侧，默认给的是「清单」，先切过去
-    await tester.tap(find.text('文本'));
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('改好的计划：灵感原文'),
-      findsOneWidget,
-      reason: '回到详情页，文本模式里就是刚保存的那段',
-    );
+    expect(find.textContaining('已追加到「项目乙」的清单'), findsOneWidget);
   });
 
-  testWidgets('多选合并：一次进编辑器，追加原文把两条按顺序各占一行接进正文（Q37）', (tester) async {
+  testWidgets('多选合并：一次进合并页，两条按列表顺序各成一条进清单（Q37）', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '目标项目');
-    app.run(() => app.ws.updateProject(project.id, implementation: '已有的正文'));
     app.run(() => app.ws.captureInspiration('灵感甲', projectId: project.id));
     app.run(() => app.ws.captureInspiration('灵感乙', projectId: project.id));
 
@@ -276,64 +264,25 @@ void main() {
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
     // **不再问落点**（2026-09-28 实机反馈：已经分配了项目的灵感直接并进对应项目）
-    // —— 两条都归「目标项目」，所以直接进它的编辑器
+    // —— 两条都归「目标项目」，所以直接进它的合并页
     expect(find.text('合并到哪个项目'), findsNothing, reason: '有唯一归属时不问落点');
-
-    // 编辑器里要能看出"这次并的是哪几条"：多条按顺序列出来、默认展开
     expect(find.textContaining('合并进「目标项目」'), findsOneWidget);
-    expect(find.text('灵感原文 · 参考 2 条'), findsOneWidget);
-    expect(find.text(order[0]), findsOneWidget);
-    expect(find.text(order[1]), findsOneWidget);
+    expect(find.text('本次合并新增 2 条'), findsOneWidget);
 
-    await tester.tap(find.text('追加原文'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('合并'));
     await tester.pumpAndSettle();
 
-    expect(
-      app.ws.findProject(project.id)!.implementation,
-      '已有的正文\n${order[0]}\n${order[1]}',
-      reason: '多条原文按顺序各占一行接到正文末尾',
-    );
+    final reloaded = app.ws.findProject(project.id)!;
+    expect(reloaded.items.map((i) => i.text), order, reason: '一条灵感一条，顺序与列表一致');
+    expect(reloaded.implementation, isEmpty, reason: '合并只落清单');
     expect(app.ws.inspirationInbox, isEmpty);
     expect(
       app.ws.archiveZone.mergedInspirations.length,
       2,
       reason: '两条都要能在归档区「已合并」找回',
     );
-    expect(find.textContaining('已把 2 条灵感并进「目标项目」'), findsOneWidget);
-    expect(find.text('已选 1 条'), findsNothing, reason: '合并完要退出多选');
-  });
-
-  testWidgets('多选合并「作为清单条目」：清单多出两条，顺序与列表一致（Q37）', (tester) async {
-    final app = await boot();
-    final project = app.ws.createProject(title: '目标项目');
-    app.run(() => app.ws.captureInspiration('灵感甲', projectId: project.id));
-    app.run(() => app.ws.captureInspiration('灵感乙', projectId: project.id));
-
-    await tester.pumpWidget(MaterialApp(home: AppShell(app: app)));
-    await tester.pumpAndSettle();
-
-    final order = app.ws.inspirationInbox.map((i) => i.text).toList(growable: false);
-    await tester.longPress(find.text(order[0]));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text(order[1]));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byIcon(Icons.merge_type));
-    await tester.pumpAndSettle();
-    // 两条都归「目标项目」→ 不问落点，直接进编辑器
-    expect(find.text('合并到哪个项目'), findsNothing);
-
-    await tester.tap(find.text('作为清单条目'));
-    await tester.pumpAndSettle();
-
-    final reloaded = app.ws.findProject(project.id)!;
-    expect(reloaded.items.map((i) => i.text), order, reason: '一条灵感一条，顺序与列表一致');
-    expect(reloaded.implementation, isEmpty, reason: '这个落点不碰正文');
-    expect(app.ws.inspirationInbox, isEmpty);
-    expect(app.ws.archiveZone.mergedInspirations.length, 2);
     expect(find.textContaining('已把 2 条灵感追加到「目标项目」的清单'), findsOneWidget);
+    expect(find.text('已选 1 条'), findsNothing, reason: '合并完要退出多选');
   });
 
   testWidgets('合并落在分类上时回退到"问一次"：分类点不动，只给一句「分类不装灵感」（Q37 / Q2）',
@@ -395,14 +344,15 @@ void main() {
     await tester.tap(find.byIcon(Icons.merge_type));
     await tester.pumpAndSettle();
 
-    // 分成两组 → 不问落点，直接进第一组的编辑器；一组做完返回后自动进下一组
+    // 分成两组 → 不问落点，直接进第一组的合并页；一组做完返回后自动进下一组
     expect(find.text('合并到哪个项目'), findsNothing, reason: '两组都有归属，不需要再问');
-    expect(find.text('作为清单条目'), findsOneWidget, reason: '第一组的编辑器');
+    // 先做哪一组由列表顺序决定，这里只确认"进了某一组的合并页"
+    expect(find.textContaining('合并进「'), findsOneWidget, reason: '第一组的合并页');
 
-    // 流水做完两组：每一组都用「作为清单条目」这个落点
-    await tester.tap(find.text('作为清单条目'));
+    // 流水做完两组：每一组都点「合并」（唯一落点是清单）
+    await tester.tap(find.text('合并'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('作为清单条目'));
+    await tester.tap(find.text('合并'));
     await tester.pumpAndSettle();
 
     expect(app.ws.findProject(alpha.id)!.items.map((i) => i.text), <String>['甲的那条']);
@@ -534,7 +484,7 @@ void main() {
     expect(find.text('标签…'), findsNothing, reason: '动作面板里的那一项也删了');
   });
 
-  testWidgets('筛空了要说清"还有多少条"，不能假装灵感箱是空的', (tester) async {
+  testWidgets('筛空了仍给出口：空态指路「清除筛选就能看到」，计数行只报筛出几条', (tester) async {
     final app = await boot();
     final project = app.ws.createProject(title: '甲');
     app.run(() => app.ws.captureInspiration('归到甲的想法', projectId: project.id));
@@ -554,8 +504,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('没有符合筛选的灵感'), findsOneWidget);
-    expect(find.textContaining('未处理共 1 条'), findsWidgets,
-        reason: '筛选条与空态各说一次"一共还有多少条"');
+    // 默认态那行「未处理 N 条」已经删掉（用户要求）；筛选态只报筛出几条
+    expect(find.text('筛出 0 条'), findsOneWidget);
+    expect(
+      find.text('清除筛选就能看到'),
+      findsOneWidget,
+      reason: '空态只指路怎么找回来，不再报"还有多少条"',
+    );
     expect(find.text('清除筛选'), findsWidgets, reason: '筛选条与空态各给一次出口');
   });
 
@@ -576,7 +531,12 @@ void main() {
 
     expect(find.text('看得见的灵感'), findsOneWidget);
     expect(find.text('被藏起来的灵感'), findsNothing, reason: '归档项目承诺过它不再占列表');
-    expect(find.text('未处理 1 条'), findsOneWidget, reason: '计数与列表同一套取数');
+    // 默认态不再显示「未处理 N 条」：那行说的就是下面列表本身，用户要求去掉
+    expect(
+      find.textContaining('未处理'),
+      findsNothing,
+      reason: '计数行只在多选 / 筛选时出现',
+    );
     expect(
       find.textContaining('另有 1 条在已归档项目下'),
       findsOneWidget,
@@ -588,7 +548,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('被藏起来的灵感'), findsOneWidget);
     expect(find.textContaining('另有 1 条在已归档项目下'), findsNothing);
-    expect(find.text('未处理 2 条'), findsOneWidget);
+    expect(find.textContaining('未处理'), findsNothing, reason: '默认态始终没有计数行');
   });
 
   testWidgets('全部灵感都被归档项目遮住时，空态也要说清"去哪看"（Q10）', (tester) async {

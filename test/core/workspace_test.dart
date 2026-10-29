@@ -246,14 +246,14 @@ void main() {
   });
 
   group('灵感：分配 / 合并 / 撤销 / 丢弃', () {
-    test('合并 · 落点一（正文）：替换「实现计划」，灵感状态一起变（跨集合，天然原子）', () {
+    test('合并：灵感原文追加成清单的新一条，灵感状态一起变（跨集合，天然原子）', () {
       final project = ws.createProject(title: '项目 A');
       final inspiration = ws.captureInspiration('这条灵感要并进去');
 
-      ws.mergeInspiration(
-        inspirationId: inspiration.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[inspiration.id],
         projectId: project.id,
-        newImplementation: '手写后的实现段落',
+        itemTexts: <String>['这条灵感要并进去'],
       );
 
       final merged = ws.findInspiration(inspiration.id)!;
@@ -261,14 +261,16 @@ void main() {
       expect(merged.mergedInto, project.id);
       expect(merged.deleted, isFalse, reason: '合并不用 deleted 表达');
       expect(merged.isConsistent, isTrue, reason: 'merged 必须同时有 merged_into / merged_at');
-      expect(ws.findProject(project.id)!.implementation, '手写后的实现段落');
-      expect(ws.findProject(project.id)!.items, isEmpty, reason: '走正文这一条就不动清单');
+      final reloaded = ws.findProject(project.id)!;
+      expect(reloaded.items.map((i) => i.text), <String>['这条灵感要并进去']);
+      expect(reloaded.items.single.done, isFalse, reason: '新条目不该是打勾的');
+      expect(reloaded.implementation, isEmpty, reason: '合并只落清单，正文一个字都不动');
 
       // 跨集合改动要么一起落盘、要么一起没有（这是单文件存储要换来的性质）
       final onDisk = storeFileOnDisk();
       expect(
-        onDisk.documentOf(DocName.projects).projectItems.single.implementation,
-        '手写后的实现段落',
+        onDisk.documentOf(DocName.projects).projectItems.single.items.single.text,
+        '这条灵感要并进去',
       );
       expect(
         onDisk.documentOf(DocName.inspirations).inspirationItems.single.status,
@@ -276,133 +278,97 @@ void main() {
       );
     });
 
-    test('合并 · 落点二（清单条目）：追加成新的一条，正文一个字不动', () {
+    test('合并只 trim 条目首尾，其余一个字都不改（不润色、不改写）', () {
       final project = ws.createProject(title: '项目 B');
       ws.updateProject(project.id, implementation: '原来写好的计划');
-      final inspiration = ws.captureInspiration('这条灵感要并进去');
+      final inspiration = ws.captureInspiration('带 - 破折号，还有「引号」\n第二行');
 
-      ws.mergeInspirationAsItem(
-        inspirationId: inspiration.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[inspiration.id],
         projectId: project.id,
-        itemText: '手写后的条目',
+        itemTexts: <String>['  带 - 破折号，还有「引号」\n第二行  '],
       );
 
       final reloaded = ws.findProject(project.id)!;
-      expect(reloaded.items.map((i) => i.text), <String>['手写后的条目']);
-      expect(reloaded.items.single.done, isFalse, reason: '新条目不该是打勾的');
-      expect(reloaded.implementation, '原来写好的计划', reason: '这一条不碰正文');
+      expect(reloaded.items.single.text, '带 - 破折号，还有「引号」\n第二行');
+      expect(reloaded.implementation, '原来写好的计划', reason: '合并只落清单，不碰正文');
       expect(ws.findInspiration(inspiration.id)!.status, InspirationStatus.merged);
       expect(
         storeFileOnDisk().documentOf(DocName.projects).projectItems.single.items.single.text,
-        '手写后的条目',
+        '带 - 破折号，还有「引号」\n第二行',
       );
     });
 
-    test('两种落点都把空文本整条拒掉，且灵感不会变成已合并', () {
+    test('空条目整条拒绝，且灵感不会变成已合并', () {
       final project = ws.createProject(title: '项目 C');
-      final intoBody = ws.captureInspiration('并进正文');
-      final intoItem = ws.captureInspiration('并进清单');
+      final inspiration = ws.captureInspiration('并进清单');
 
       expect(
-        () => ws.mergeInspiration(
-          inspirationId: intoBody.id,
+        () => ws.mergeInspirations(
+          inspirationIds: <String>[inspiration.id],
           projectId: project.id,
-          newImplementation: '   ',
+          itemTexts: <String>['   '],
         ),
         throwsA(isA<RuleViolation>()),
-        reason: '空的合并结果不能把正文清没',
-      );
-      expect(
-        () => ws.mergeInspirationAsItem(
-          inspirationId: intoItem.id,
-          projectId: project.id,
-          itemText: '   ',
-        ),
-        throwsA(isA<RuleViolation>()),
-      );
-
-      expect(ws.findInspiration(intoBody.id)!.isPending, isTrue);
-      expect(ws.findInspiration(intoItem.id)!.isPending, isTrue);
-      expect(ws.findProject(project.id)!.implementation, isEmpty);
-      expect(ws.findProject(project.id)!.items, isEmpty);
-    });
-
-    test('正文与当前一模一样就拒绝合并：灵感不会被偷偷标成已合并（Q8）', () {
-      final project = ws.createProject(title: '项目 D');
-      ws.updateProject(project.id, implementation: '原封不动的正文');
-      final inspiration = ws.captureInspiration('这条还没写进去');
-
-      expect(
-        () => ws.mergeInspiration(
-          inspirationId: inspiration.id,
-          projectId: project.id,
-          newImplementation: '原封不动的正文',
-        ),
-        throwsA(
-          predicate<RuleViolation>((e) => e.message.contains('正文没有变化')),
-        ),
-        reason: '没变就不算合并 —— 否则项目里一个字没多，灵感却从灵感箱消失了',
+        reason: '空的条目写进清单就是一条点不动的占位',
       );
 
       expect(ws.findInspiration(inspiration.id)!.isPending, isTrue);
-      expect(ws.inspirationInbox.length, 1);
+      expect(ws.findProject(project.id)!.items, isEmpty);
+      expect(ws.findProject(project.id)!.implementation, isEmpty);
     });
 
-    test('「作为清单条目」不受"正文没变"影响（它本来就不碰正文，Q8）', () {
-      final project = ws.createProject(title: '项目 E');
-      ws.updateProject(project.id, implementation: '原封不动的正文');
-      final inspiration = ws.captureInspiration('变成一条待办');
+    test('项目不存在 / 已删除就拒绝：一个字都不写', () {
+      final gone = ws.createProject(title: '删掉的项目');
+      final inspiration = ws.captureInspiration('无处可去');
+      ws.deleteProject(gone.id);
 
-      ws.mergeInspirationAsItem(
-        inspirationId: inspiration.id,
-        projectId: project.id,
-        itemText: '变成一条待办',
+      expect(
+        () => ws.mergeInspirations(
+          inspirationIds: <String>[inspiration.id],
+          projectId: gone.id,
+          itemTexts: <String>['无处可去'],
+        ),
+        throwsA(predicate<RuleViolation>((e) => e.message.contains('目标项目不存在'))),
+        reason: '已删除的项目不再是落点',
       );
-
-      expect(ws.findProject(project.id)!.items.map((i) => i.text), <String>['变成一条待办']);
-      expect(ws.findInspiration(inspiration.id)!.isMerged, isTrue);
+      expect(ws.findInspiration(inspiration.id)!.isPending, isTrue);
+      expect(ws.findProject(gone.id)!.items, isEmpty);
     });
 
-    test('撤销合并只恢复灵感，正文与清单条目不回滚（ADR-057）', () {
+    test('撤销合并只恢复灵感，清单条目不回滚（ADR-057）', () {
       final project = ws.createProject(title: '项目 A');
-      final intoBody = ws.captureInspiration('原文一');
-      final intoItem = ws.captureInspiration('原文二');
-      ws.mergeInspiration(
-        inspirationId: intoBody.id,
+      final first = ws.captureInspiration('原文一');
+      final second = ws.captureInspiration('原文二');
+      ws.mergeInspirations(
+        inspirationIds: <String>[first.id, second.id],
         projectId: project.id,
-        newImplementation: '用户编辑后的正文',
-      );
-      ws.mergeInspirationAsItem(
-        inspirationId: intoItem.id,
-        projectId: project.id,
-        itemText: '用户编辑后的条目',
+        itemTexts: <String>['用户编辑后的条目一', '用户编辑后的条目二'],
       );
 
-      ws.undoMerge(intoBody.id);
-      ws.undoMerge(intoItem.id);
+      ws.undoMerge(first.id);
+      ws.undoMerge(second.id);
 
-      for (final id in <String>[intoBody.id, intoItem.id]) {
+      for (final id in <String>[first.id, second.id]) {
         final restored = ws.findInspiration(id)!;
         expect(restored.status, InspirationStatus.pending);
         expect(restored.mergedInto, isNull);
         expect(restored.projectId, project.id, reason: '项目还在 → 保留归属');
       }
-      expect(ws.findProject(project.id)!.implementation, '用户编辑后的正文',
-          reason: '正文不回滚');
       expect(
         ws.findProject(project.id)!.items.map((i) => i.text),
-        <String>['用户编辑后的条目'],
-        reason: '已经写进项目的内容不回滚 —— 与正文同一个口径',
+        <String>['用户编辑后的条目一', '用户编辑后的条目二'],
+        reason: '已经写进项目的内容不回滚',
       );
     });
 
     test('目标项目被彻底删除后，撤销合并会解除归属（悬挂引用）', () {
       final project = ws.createProject(title: '项目 A');
       final inspiration = ws.captureInspiration('原文');
-      ws.mergeInspiration(
-        inspirationId: inspiration.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[inspiration.id],
         projectId: project.id,
-        newImplementation: '正文',
+        itemTexts: <String>['要并进清单的一条'],
       );
 
       // 单机形态下没有"另一台设备整体替换文档"这回事，而 deleteProject 一定会把
@@ -442,64 +408,7 @@ void main() {
   });
 
   group('批量合并灵感（Q37：多选合并）', () {
-    test('落点一（正文）：选中的多条一次并完，正文更新 + 全部置 merged（同一份文件里全有）', () {
-      final project = ws.createProject(title: '目标');
-      final first = ws.captureInspiration('原文甲');
-      final second = ws.captureInspiration('原文乙');
-
-      ws.mergeInspirations(
-        inspirationIds: <String>[first.id, second.id],
-        projectId: project.id,
-        landing: MergeLanding.implementation,
-        newImplementation: '把两条都并进去的正文',
-      );
-
-      expect(ws.findProject(project.id)!.implementation, '把两条都并进去的正文');
-      for (final id in <String>[first.id, second.id]) {
-        final merged = ws.findInspiration(id)!;
-        expect(merged.status, InspirationStatus.merged);
-        expect(merged.mergedInto, project.id);
-        expect(merged.isConsistent, isTrue, reason: 'merged 必须同时有 merged_into / merged_at');
-      }
-      expect(ws.inspirationInbox, isEmpty);
-
-      // 项目侧与灵感侧两处改动**同时**出现在落盘的那一份文件里（一次写入）
-      final onDisk = storeFileOnDisk();
-      expect(
-        onDisk.documentOf(DocName.projects).projectItems.single.implementation,
-        '把两条都并进去的正文',
-      );
-      expect(
-        onDisk.documentOf(DocName.inspirations).inspirationItems.every((i) => i.isMerged),
-        isTrue,
-      );
-    });
-
-    test('落点二（追加原文）：多条按顺序各占一行接到正文末尾', () {
-      final project = ws.createProject(title: '目标');
-      ws.updateProject(project.id, implementation: '已有的一行');
-      final first = ws.captureInspiration('原文甲');
-      final second = ws.captureInspiration('原文乙');
-
-      // 与界面同一条路：编辑器把原文按顺序接好，再当"新正文"一次落盘
-      var body = ws.findProject(project.id)!.implementation;
-      for (final text in <String>[first.text, second.text]) {
-        body = Workspace.appendToImplementation(body, text);
-      }
-      ws.mergeInspirations(
-        inspirationIds: <String>[first.id, second.id],
-        projectId: project.id,
-        landing: MergeLanding.implementation,
-        newImplementation: body,
-      );
-
-      expect(ws.findProject(project.id)!.implementation, '已有的一行\n原文甲\n原文乙');
-      expect(ws.findProject(project.id)!.items, isEmpty, reason: '这条落点不动清单');
-      expect(ws.inspirationInbox, isEmpty);
-      expect(ws.archiveZone.mergedInspirations.length, 2);
-    });
-
-    test('落点三（清单条目）：一条灵感一条，顺序即传入顺序', () {
+    test('多条一次并完：清单按传入顺序接在已有条目后面，项目与灵感一次落盘', () {
       final project = ws.createProject(title: '目标');
       ws.addProjectItem(project.id, '原来就有的条目');
       final first = ws.captureInspiration('原文甲');
@@ -508,63 +417,33 @@ void main() {
       ws.mergeInspirations(
         inspirationIds: <String>[first.id, second.id],
         projectId: project.id,
-        landing: MergeLanding.checklist,
         itemTexts: <String>['原文甲', '原文乙'],
       );
 
       final reloaded = ws.findProject(project.id)!;
       expect(reloaded.items.map((i) => i.text), <String>['原来就有的条目', '原文甲', '原文乙']);
       expect(reloaded.items.skip(1).every((i) => !i.done), isTrue, reason: '新条目不该是打勾的');
-      expect(reloaded.implementation, isEmpty, reason: '这一条不碰正文');
+      expect(reloaded.implementation, isEmpty, reason: '合并只落清单，正文一个字都不动');
+      for (final id in <String>[first.id, second.id]) {
+        final merged = ws.findInspiration(id)!;
+        expect(merged.status, InspirationStatus.merged);
+        expect(merged.mergedInto, project.id);
+        expect(merged.isConsistent, isTrue, reason: 'merged 必须同时有 merged_into / merged_at');
+      }
       expect(ws.inspirationInbox, isEmpty);
       expect(ws.archiveZone.mergedInspirations.length, 2);
+
+      // 项目侧与灵感侧两处改动**同时**出现在落盘的那一份文件里（一次写入）
+      final onDisk = storeFileOnDisk();
       expect(
-        storeFileOnDisk().documentOf(DocName.projects).projectItems.single.items.length,
-        3,
-        reason: '多条条目要真的落盘',
+        onDisk.documentOf(DocName.projects).projectItems.single.items.map((i) => i.text),
+        <String>['原来就有的条目', '原文甲', '原文乙'],
+        reason: '多条条目要真的落盘，顺序也保持一致',
       );
-    });
-
-    test('空正文一律拒绝：两条都留在灵感箱，项目一个字没动', () {
-      final project = ws.createProject(title: '目标');
-      final first = ws.captureInspiration('原文甲');
-      final second = ws.captureInspiration('原文乙');
-
       expect(
-        () => ws.mergeInspirations(
-          inspirationIds: <String>[first.id, second.id],
-          projectId: project.id,
-          landing: MergeLanding.implementation,
-          newImplementation: '   ',
-        ),
-        throwsA(isA<RuleViolation>()),
-        reason: '空的合并结果不能把正文清没',
+        onDisk.documentOf(DocName.inspirations).inspirationItems.every((i) => i.isMerged),
+        isTrue,
       );
-
-      for (final id in <String>[first.id, second.id]) {
-        expect(ws.findInspiration(id)!.isPending, isTrue);
-      }
-      expect(ws.findProject(project.id)!.implementation, isEmpty);
-      expect(ws.archiveZone.mergedInspirations, isEmpty);
-    });
-
-    test('正文与当前一模一样也拒绝：批量也被 Q8 挡住', () {
-      final project = ws.createProject(title: '目标');
-      ws.updateProject(project.id, implementation: '原封不动的正文');
-      final first = ws.captureInspiration('原文甲');
-      final second = ws.captureInspiration('原文乙');
-
-      expect(
-        () => ws.mergeInspirations(
-          inspirationIds: <String>[first.id, second.id],
-          projectId: project.id,
-          landing: MergeLanding.implementation,
-          newImplementation: '原封不动的正文',
-        ),
-        throwsA(predicate<RuleViolation>((e) => e.message.contains('正文没有变化'))),
-        reason: '项目里一个字没多，两条灵感却从灵感箱消失 —— 这不是合并',
-      );
-      expect(ws.inspirationInbox.length, 2);
     });
 
     test('清单条目文本非空：有一条空的就整批拒绝，一条都不落', () {
@@ -577,7 +456,6 @@ void main() {
         () => ws.mergeInspirations(
           inspirationIds: <String>[first.id, second.id],
           projectId: project.id,
-          landing: MergeLanding.checklist,
           itemTexts: <String>['能落的一条', '   '],
         ),
         throwsA(predicate<RuleViolation>((e) => e.message.contains('条目内容不能为空'))),
@@ -598,39 +476,51 @@ void main() {
         () => ws.mergeInspirations(
           inspirationIds: <String>[first.id, second.id],
           projectId: project.id,
-          landing: MergeLanding.checklist,
           itemTexts: <String>['只有一条'],
         ),
-        throwsA(isA<RuleViolation>()),
+        throwsA(predicate<RuleViolation>((e) => e.message.contains('一一对应'))),
       );
       expect(ws.findProject(project.id)!.items, isEmpty);
       expect(ws.inspirationInbox.length, 2);
+    });
+
+    test('灵感不存在就整批拒绝：不会留下没有来源的条目', () {
+      final project = ws.createProject(title: '目标');
+
+      expect(
+        () => ws.mergeInspirations(
+          inspirationIds: <String>['不存在的灵感'],
+          projectId: project.id,
+          itemTexts: <String>['不该落下的一条'],
+        ),
+        throwsA(predicate<RuleViolation>((e) => e.message.contains('灵感不存在'))),
+      );
+      expect(ws.findProject(project.id)!.items, isEmpty);
     });
 
     test('批量里夹着一条已合并的灵感：整批拒绝，要么全成要么全不动', () {
       final project = ws.createProject(title: '目标');
       final ok = ws.captureInspiration('还没合并的一条');
       final merged = ws.captureInspiration('已经合并过的一条');
-      ws.mergeInspiration(
-        inspirationId: merged.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[merged.id],
         projectId: project.id,
-        newImplementation: '已经合并过的一条',
+        itemTexts: <String>['已经合并过的一条'],
       );
 
       expect(
         () => ws.mergeInspirations(
           inspirationIds: <String>[ok.id, merged.id],
           projectId: project.id,
-          landing: MergeLanding.implementation,
-          newImplementation: '新正文',
+          itemTexts: <String>['新条目一', '新条目二'],
         ),
         throwsA(isA<RuleViolation>()),
       );
       expect(ws.findInspiration(ok.id)!.isPending, isTrue);
       expect(
-        ws.findProject(project.id)!.implementation,
-        '已经合并过的一条',
-        reason: '被拒时正文也要留在原样',
+        ws.findProject(project.id)!.items.map((i) => i.text),
+        <String>['已经合并过的一条'],
+        reason: '被拒时清单也要留在原样',
       );
     });
 
@@ -641,8 +531,7 @@ void main() {
       ws.mergeInspirations(
         inspirationIds: const <String>[],
         projectId: project.id,
-        landing: MergeLanding.implementation,
-        newImplementation: '不该写进去的正文',
+        itemTexts: const <String>[],
       );
 
       expect(storeTextOnDisk(), before);
@@ -739,11 +628,25 @@ void main() {
       expect(next.color, firstColor, reason: '颜色分布应当自动均衡，删项目就把色让出来');
     });
 
-    test('子项目也自动分配标志色', () {
-      final root = ws.createProject(title: '根');
-      final child = ws.createProject(title: '子', parentId: root.id);
-      expect(child.color, isNotNull);
-      expect(ProjectPalette.hexes, contains(child.color));
+    test('分类下新建目标默认继承分类的标识色（2026-10-29 用户要求）', () {
+      final category = ws.createProject(title: '工作');
+      final hex = ProjectPalette.hexes.last.toLowerCase();
+      ws.setProjectColor(category.id, hex);
+
+      final target = ws.createProject(title: '发布 v1', parentId: category.id);
+
+      expect(target.color, hex, reason: '分类下新建的目标跟随分类的标识色，不再另挑一支');
+    });
+
+    test('分类没有标识色时回退到自动分配（不让新目标变灰）', () {
+      final category = ws.createProject(title: '工作');
+      // 老数据没设过色 / 用户显式清掉了：这时"继承"没有值可继承
+      ws.setProjectColor(category.id, null);
+
+      final target = ws.createProject(title: '发布 v1', parentId: category.id);
+
+      expect(target.color, isNotNull);
+      expect(ProjectPalette.hexes, contains(target.color));
     });
   });
 
@@ -788,7 +691,7 @@ void main() {
     });
   });
 
-  group('灵感：改正文 / 一键追加 / 批量', () {
+  group('灵感：改正文 / 合并 / 批量', () {
     test('改正文：改得掉、能落盘读回', () {
       final inspiration = ws.captureInspiration('原来的内容');
       ws.updateInspirationText(inspiration.id, '改过的内容');
@@ -813,78 +716,49 @@ void main() {
       expect(ws.findInspiration(inspiration.id)!.text, '带空格', reason: '被拒绝后必须保持原值');
     });
 
-    test('一键追加：原文原封不动作为新的一行接到正文末尾', () {
-      expect(
-        Workspace.appendToImplementation('一\n二', '三'),
-        '一\n二\n三',
-        reason: '非空正文先补一个换行',
-      );
-      expect(Workspace.appendToImplementation('', '三'), '三', reason: '空正文直接放');
-      expect(
-        Workspace.appendToImplementation('一\n\n', '三'),
-        '一\n三',
-        reason: '末尾多余空行要被收掉，不然会越接越散',
-      );
-      expect(Workspace.appendToImplementation('一', '  三  '), '一\n三');
-      expect(Workspace.appendToImplementation('一', '   '), '一', reason: '空灵感什么也不加');
-      // 关键：**不做任何润色或改写**，标点与换行都按原样
-      const original = '带 - 破折号，还有「引号」\n第二行';
-      expect(Workspace.appendToImplementation('', original), original);
-    });
-
-    test('一键追加走完整链路：合并后正文含原文，清单条目的文本也原样保留', () {
+    test('合并走完整链路：原文按顺序各成一条落进清单，文本只 trim 首尾', () {
       final project = ws.createProject(title: '目标项目');
       final first = ws.captureInspiration('第一条灵感');
-      ws.mergeInspiration(
-        inspirationId: first.id,
-        projectId: project.id,
-        newImplementation: Workspace.appendToImplementation(
-          ws.findProject(project.id)!.implementation,
-          ws.findInspiration(first.id)!.text,
-        ),
-      );
       final second = ws.captureInspiration('第二条灵感');
-      ws.mergeInspiration(
-        inspirationId: second.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[first.id, second.id],
         projectId: project.id,
-        newImplementation: Workspace.appendToImplementation(
-          ws.findProject(project.id)!.implementation,
-          ws.findInspiration(second.id)!.text,
-        ),
+        itemTexts: <String>[first.text, second.text],
       );
 
       expect(
-        ws.findProject(project.id)!.implementation,
-        '第一条灵感\n第二条灵感',
-        reason: '两条各占一行、顺序是合并顺序',
+        ws.findProject(project.id)!.items.map((i) => i.text),
+        <String>['第一条灵感', '第二条灵感'],
+        reason: '顺序就是合并顺序，一条灵感一条',
       );
+      expect(ws.findProject(project.id)!.implementation, isEmpty, reason: '合并不碰正文');
       expect(ws.inspirationInbox, isEmpty);
       expect(ws.archiveZone.mergedInspirations.length, 2);
 
       // 另一条落点：文本只 trim 首尾，其余一个字都不改
       const original = '带 - 破折号，还有「引号」\n第二行';
       final third = ws.captureInspiration('第三条灵感');
-      ws.mergeInspirationAsItem(
-        inspirationId: third.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[third.id],
         projectId: project.id,
-        itemText: original,
+        itemTexts: <String>['  $original  '],
       );
-      expect(ws.findProject(project.id)!.items.single.text, original);
+      expect(ws.findProject(project.id)!.items.last.text, original);
     });
 
-    test('连续把两条灵感追加成清单条目：顺序就是合并顺序', () {
+    test('连续两次合并：清单顺序就是合并顺序，撤销也不回滚条目', () {
       final project = ws.createProject(title: '目标项目');
       final first = ws.captureInspiration('第一条灵感');
-      ws.mergeInspirationAsItem(
-        inspirationId: first.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[first.id],
         projectId: project.id,
-        itemText: ws.findInspiration(first.id)!.text,
+        itemTexts: <String>[first.text],
       );
       final second = ws.captureInspiration('第二条灵感');
-      ws.mergeInspirationAsItem(
-        inspirationId: second.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[second.id],
         projectId: project.id,
-        itemText: ws.findInspiration(second.id)!.text,
+        itemTexts: <String>[second.text],
       );
 
       final items = ws.findProject(project.id)!.items;
@@ -926,10 +800,10 @@ void main() {
       final project = ws.createProject(title: '项目 A');
       final ok = ws.captureInspiration('能分配的');
       final merged = ws.captureInspiration('已合并的');
-      ws.mergeInspiration(
-        inspirationId: merged.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[merged.id],
         projectId: project.id,
-        newImplementation: '已合并的',
+        itemTexts: <String>['已合并的'],
       );
 
       expect(
@@ -1258,10 +1132,10 @@ void main() {
       final child = ws.createProject(title: '子项目', parentId: project.id);
       final assigned = ws.captureInspiration('分配给子项目', projectId: child.id);
       final mergedInspiration = ws.captureInspiration('将被合并');
-      ws.mergeInspiration(
-        inspirationId: mergedInspiration.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[mergedInspiration.id],
         projectId: child.id,
-        newImplementation: '正文',
+        itemTexts: <String>['要并进子项目清单的一条'],
       );
       final unrelated = ws.captureInspiration('无关灵感');
 
@@ -2297,15 +2171,15 @@ void main() {
       final mergedFresh = ws.captureInspiration('前几天刚合的');
       final pending = ws.captureInspiration('还没处理的那条');
       ws.discardInspiration(discarded.id);
-      ws.mergeInspiration(
-        inspirationId: mergedStale.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[mergedStale.id],
         projectId: target.id,
-        newImplementation: '很久以前合进来的正文',
+        itemTexts: <String>['很久以前合进来的条目'],
       );
-      ws.mergeInspiration(
-        inspirationId: mergedFresh.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[mergedFresh.id],
         projectId: target.id,
-        newImplementation: '前几天合进来的正文',
+        itemTexts: <String>['前几天合进来的条目'],
       );
 
       final reloaded = backdated(<String>{discarded.id, mergedStale.id}, 40);
@@ -2428,10 +2302,10 @@ void main() {
     test('persist 后重新加载，数据与视图偏好都在', () {
       final project = ws.createProject(title: '项目 A');
       final inspiration = ws.captureInspiration('灵感');
-      ws.mergeInspirationAsItem(
-        inspirationId: inspiration.id,
+      ws.mergeInspirations(
+        inspirationIds: <String>[inspiration.id],
         projectId: project.id,
-        itemText: '条目',
+        itemTexts: <String>['条目'],
       );
       ws.setExpanded(project.id, expanded: false);
       ws.persist();

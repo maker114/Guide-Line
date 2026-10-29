@@ -59,10 +59,10 @@ void main() {
     app.run(() => app.ws.discardInspiration(discarded.id));
     // 一条已合并的：它退回「未分配」，不进"永久删除"那一句
     final merged = app.ws.captureInspiration('合并过的一条', projectId: project.id);
-    app.run(() => app.ws.mergeInspiration(
-          inspirationId: merged.id,
+    app.run(() => app.ws.mergeInspirations(
+          inspirationIds: <String>[merged.id],
           projectId: project.id,
-          newImplementation: '写进项目的正文',
+          itemTexts: <String>['写进项目的正文'],
         ));
     expect(app.ws.findInspiration(pending.id)!.isPending, isTrue);
 

@@ -149,7 +149,10 @@ void main() {
     final app = await boot(tester);
     final cell = tester.getRect(find.byType(AppBottomNav)).width / 4;
 
-    expect(find.text('未处理 0 条'), findsOneWidget, reason: '起点是灵感页');
+    // 锚点用速记框的 hint，而不是计数行：默认态那行「未处理 N 条」已按用户要求
+    // 去掉（2026-10-29），而 hint 在灵感页上常在、内容也不随数据变。
+    expect(find.text('「灵感」在此钉下一个锚点……'), findsOneWidget,
+        reason: '起点是灵感页');
     expect(pillLeft(tester), closeTo(0, 1));
 
     await swipe(tester, 1);
@@ -184,10 +187,9 @@ void main() {
     // `关于` 挂在 `AppBar` 的 **actions** 槽上，与 `title` 槽（`ShellTitle`）是并列关系，
     // 不是后代，所以那个写法恒为 0 命中。改成限定在 `AppBar` 整条里找。
     //
-    // 为什么要限定子树：更多页正文里也有一个小节标题叫「关于」
-    // （`lib/ui/more/more_tab.dart` 的 `SectionHeader('关于')`），全树找会把它一起算进来。
-    // 它此刻落在 `ListView` 视口之外、没被构建，所以全树找"看起来"也能过 ——
-    // 但这依赖"列表恰好没建到那儿"，不是这条用例想钉的东西。
+    // 仍然限定子树，而不是全树找：更多页列表尾部那段「关于」（名称 / 版本 / 数据目录）
+    // 已按用户要求删掉（2026-10-29），全树找此刻恰好只剩这一处 —— 但那样就变成
+    // 靠"正文里没有同名文字"过，不是这条用例想钉的"入口在标题栏上"。
     expect(inAppBar(find.text('关于')), findsOneWidget,
         reason: '标题栏右侧只在更多页出现这个入口');
     // 连它的容器一起量：`TextButton` 只有一个，说明那一个 `关于` 就是它
@@ -569,7 +571,8 @@ void main() {
     // 点击行为不变：切到灵感页并把光标放进速记框
     await tester.tap(find.byType(CapturePillButton));
     await tester.pumpAndSettle();
-    expect(find.text('未处理 0 条'), findsOneWidget, reason: '点它应当回到灵感页');
+    expect(find.text('「灵感」在此钉下一个锚点……'), findsOneWidget,
+        reason: '点它应当回到灵感页');
     // `focusCapture` 里还挂着一个 450ms 的"再要一次键盘"（HyperOS 实测需要），
     // 让它跑完再收尾 —— 否则测试框架会判"还有 Timer 没结束"
     await tester.pump(const Duration(milliseconds: 500));

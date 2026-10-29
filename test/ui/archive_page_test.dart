@@ -10,11 +10,13 @@ import 'package:guideline/core/store/app_storage.dart';
 import 'package:guideline/ui/app_shell.dart';
 import 'package:guideline/ui/more/archive_page.dart';
 
-/// 归档区「回收站」的几件事（实机反馈 + Q12）：
+/// 归档区「回收站」的几件事（实机反馈 + Q12；其中「清理要吭声」的回收站半句
+/// 已由 ADR-102 撤销）：
 ///   · 每条后面给一个**倒计时**（还剩几天自动清掉）；
 ///   · 只在回收站里待 `trashRetentionDays` 天，**启动时**清掉过期的墓碑；
-///   · 清理了就必须吭声（启动提示条）、说明里写清"到期在下次启动时清"、
-///     恢复提示要带**实际范围与条数**。
+///   · 2026-10-29 起：**回收站到期清理不再弹提示**（用户："回收站已经清除的
+///     条目不要弹提示"），但条数仍然记账；「已处理的灵感」那一档照旧吭声。
+///     说明里写清"到期在下次启动时清"、恢复提示要带**实际范围与条数**。
 void main() {
   late Directory tempDir;
 
@@ -87,7 +89,7 @@ void main() {
     expect(find.text('删了很久的项目'), findsNothing);
   });
 
-  testWidgets('启动清理了非零条数会在外壳上吭声，而且关得掉', (tester) async {
+  testWidgets('回收站到期清理**不再弹提示**，但条数仍有记账（2026-10-29）', (tester) async {
     final first = await boot();
     final stale = first.ws.createProject(title: '很久以前删的项目');
     first.run(() => first.ws.deleteProject(stale.id));
@@ -96,13 +98,35 @@ void main() {
     await backdate(storeFile, <String>{stale.id}, 40);
 
     final restarted = await AppController.bootstrap(dataDirectoryOverride: tempDir);
-    expect(restarted.lastTrashPurgedCount, greaterThan(0), reason: '先得真的清掉了');
+    expect(restarted.lastTrashPurgedCount, greaterThan(0), reason: '清理照旧发生，只是不再报给用户');
 
     await tester.pumpWidget(MaterialApp(home: AppShell(app: restarted)));
     await tester.pumpAndSettle();
 
-    final notice = find.textContaining('已超过 30 天，已自动清除');
+    // 用户口径："回收站已经清除的条目不要弹提示" —— 横幅一个字都不出现
+    expect(find.textContaining('已自动清除'), findsNothing);
+    expect(find.textContaining('回收站有'), findsNothing);
+  });
+
+  testWidgets('「已处理的灵感」过期清理仍然如实提示（不报的只有回收站那半句）', (tester) async {
+    final first = await boot();
+    final project = first.ws.createProject(title: '承载灵感的项目');
+    final dropped = first.ws.captureInspiration('丢掉的灵感', projectId: project.id);
+    first.run(() => first.ws.discardInspiration(dropped.id));
+
+    final storeFile = AppStorage(AppPaths(tempDir)).paths.storeFile;
+    await backdate(storeFile, <String>{dropped.id}, 40);
+
+    final restarted = await AppController.bootstrap(dataDirectoryOverride: tempDir);
+    expect(restarted.lastProcessedPurgedCount, greaterThan(0), reason: '先得真的清掉了');
+    expect(restarted.lastTrashPurgedCount, 0, reason: '这一条不涉及回收站');
+
+    await tester.pumpWidget(MaterialApp(home: AppShell(app: restarted)));
+    await tester.pumpAndSettle();
+
+    final notice = find.textContaining('已处理的灵感有');
     expect(notice, findsOneWidget, reason: '数据被自动删掉不能一声不吭');
+    expect(find.textContaining('已超过 30 天，已自动清除'), findsOneWidget);
 
     // 关掉之后本次运行不再出现（维护动作，不需要反复念）
     await tester.tap(find.byTooltip('知道了'));
@@ -135,10 +159,10 @@ void main() {
     final category = app.ws.createProject(title: '工作');
     final target = app.ws.createProject(title: '发布 v1', parentId: category.id);
     final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
-    app.run(() => app.ws.mergeInspiration(
-          inspirationId: merged.id,
+    app.run(() => app.ws.mergeInspirations(
+          inspirationIds: <String>[merged.id],
           projectId: target.id,
-          newImplementation: '写进项目的正文',
+          itemTexts: <String>['写进项目的正文'],
         ));
     final dropped = app.ws.captureInspiration('丢掉的灵感', projectId: target.id);
     app.run(() => app.ws.discardInspiration(dropped.id));
@@ -225,10 +249,10 @@ void main() {
     app.run(() => app.ws.discardInspiration(dropped.id));
     final target = app.ws.createProject(title: '目标项目');
     final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
-    app.run(() => app.ws.mergeInspiration(
-          inspirationId: merged.id,
+    app.run(() => app.ws.mergeInspirations(
+          inspirationIds: <String>[merged.id],
           projectId: target.id,
-          newImplementation: '写进项目的正文',
+          itemTexts: <String>['写进项目的正文'],
         ));
     // 被隐藏：所在项目归档，灵感原文一个字没动
     final hiddenProject = app.ws.createProject(title: '会被归档的项目');
@@ -326,10 +350,10 @@ void main() {
     final app = await boot();
     final project = app.ws.createProject(title: '目标项目');
     final inspiration = app.ws.captureInspiration('合并掉的灵感', projectId: project.id);
-    app.run(() => app.ws.mergeInspiration(
-          inspirationId: inspiration.id,
+    app.run(() => app.ws.mergeInspirations(
+          inspirationIds: <String>[inspiration.id],
           projectId: project.id,
-          newImplementation: '写进项目的正文',
+          itemTexts: <String>['写进项目的正文'],
         ));
 
     await tester.pumpWidget(MaterialApp(home: ArchivePage(app: app)));
@@ -359,8 +383,8 @@ void main() {
     expect(find.textContaining('已恢复为待处理，项目里的内容不会退回'), findsOneWidget);
     expect(app.ws.findInspiration(inspiration.id)!.isPending, isTrue);
     expect(
-      app.ws.findProject(project.id)!.implementation,
-      '写进项目的正文',
+      app.ws.findProject(project.id)!.items.map((i) => i.text),
+      <String>['写进项目的正文'],
       reason: '项目里的内容不退回 —— 这正是名字里要写清的那半句',
     );
   });
@@ -373,10 +397,10 @@ void main() {
     // 已合并
     final target = app.ws.createProject(title: '目标项目');
     final merged = app.ws.captureInspiration('合并掉的灵感', projectId: target.id);
-    app.run(() => app.ws.mergeInspiration(
-          inspirationId: merged.id,
+    app.run(() => app.ws.mergeInspirations(
+          inspirationIds: <String>[merged.id],
           projectId: target.id,
-          newImplementation: '写进项目的正文',
+          itemTexts: <String>['写进项目的正文'],
         ));
     // 被隐藏：所在项目归档
     final archived = app.ws.createProject(title: '归档掉的项目');

@@ -81,7 +81,10 @@ class DesktopShell extends StatefulWidget {
 class _DesktopShellState extends State<DesktopShell> {
   _NavItem _selected = _NavItem.projects;
 
-  /// 到期清理（回收站 / 已处理的灵感）的提示关掉没有（与手机外壳同一口径：关掉就是本次运行不再出现）。
+  /// 到期清理提示关掉没有（与手机外壳同一口径：关掉就是本次运行不再出现）。
+  ///
+  /// 2026-10-29 起这句提示只报「已处理的灵感」那一档；回收站到期清理不再提示
+  /// （用户口径："回收站已经清除的条目不要弹提示"）。
   bool _retentionNoticeClosed = false;
 
   // 这里**不再自己跑开机比对**（ADR-095 第 ⑥ 条）。

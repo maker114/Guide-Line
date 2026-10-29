@@ -133,8 +133,9 @@ class InspirationTabState extends State<InspirationTab> {
         ? all.where((i) => i.projectId == _selectedProjectId)
         : all;
     final list = byProject.toList(growable: false);
-    /// 有没有在筛：筛着的时候标题行的数字必须说清"筛出几条 / 一共几条"，
-    /// 否则会出现"标题写 12 条、列表只有 3 条"这种对不上号的情况（实机反馈）。
+    /// 有没有在筛：筛着的时候计数行要写「筛出几条」——否则列表短了一截，
+    /// 用户分不清是筛掉了还是真没了（实机反馈）。总数不再单独摆出来：
+    /// 默认态的「未处理 N 条」已按用户要求去掉（它和列表说的是同一件事）。
     final filtering = _onlySelectedProject && _selectedProjectId != null;
 
     // 选中项可能已被别人改动（例如在别处合并掉了），每次构建都清一遍幽灵选中
@@ -190,21 +191,25 @@ class InspirationTabState extends State<InspirationTab> {
               ],
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-          child: Row(
-            children: <Widget>[
-              Text(
-                _selecting
-                    ? '已选 ${_selectedIds.length} 条'
-                    : (filtering ? '筛出 ${list.length} 条 / 未处理共 ${all.length} 条' : '未处理 ${all.length} 条'),
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              // 这里**不再有**那枚「多选」按钮（2026-09-27 实机反馈）：
-              // 长按任一条就能进多选，页头不需要再占一个常驻入口。
-            ],
+        // 计数行**只在有多选或按项目筛选时出现**：默认态那行「未处理 N 条」
+        // 说的就是下面列表本身（长度一眼看得出），留着只是每屏多占一行 ——
+        // 用户要求去掉它。多选 / 筛选时数字才有独立信息量（选了几条 / 筛出几条）。
+        if (_selecting || filtering)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+            child: Row(
+              children: <Widget>[
+                Text(
+                  _selecting
+                      ? '已选 ${_selectedIds.length} 条'
+                      : '筛出 ${list.length} 条',
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+                // 这里**不再有**那枚「多选」按钮（2026-09-27 实机反馈）：
+                // 长按任一条就能进多选，页头不需要再占一个常驻入口。
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 4),
         // 被归档项目遮住的那些灵感**必须有个交代**（Q10）：它们从列表里消失，
         // 不吭声就等于"灵感被静默吞了"；而归档区那个数字由同一个函数给。
@@ -250,12 +255,13 @@ class InspirationTabState extends State<InspirationTab> {
                           ? '另有 $hiddenCount 条在已归档项目下，去归档区看'
                           : null,
                     )
-                  // 箱子不空、只是被筛掉了：必须说清"一共还有多少条"，
-                  // 否则用户会以为灵感丢了
+                  // 箱子不空、只是被筛掉了：标题行已经写明「没有符合筛选的灵感」，
+                  // 这里只指路"怎么把它们找回来"。条数留给上面那行「筛出 N 条」，
+                  // 不在两处各报一遍（默认态也不再报「未处理 N 条」）。
                   : EmptyState(
                       icon: Icons.filter_alt_off_outlined,
                       title: '没有符合筛选的灵感',
-                      hint: '未处理共 ${all.length} 条，清除筛选就能看到',
+                      hint: '清除筛选就能看到',
                       action: TextButton(
                         onPressed: () => setState(() {
                           _selectedProjectId = null;

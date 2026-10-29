@@ -287,12 +287,29 @@ void main() {
   // 2026-10-15 加的那一条（ADR-099）：**到期日就是今天、而没设具体时刻**的任务，
   // 当天零点汇总一句。它与上面那两档并列、互不改写 —— 所以这一组的期望值
   // 全部按"只有日期"来写，凡是带时刻的都应当被排除在外。
+  //
+  // 2026-10-29 起正文附上事件名（用户："提醒当天的事件时，需要在通知里附上事件名称"）：
+  // 入参换成 [DailyDigestTask]，事件名去重、按任务顺序全列；查不到事件名时退回原句。
   group('今日事（当天零点的汇总）', () {
     final morning = DateTime(2026, 10, 15, 0, 0);
     final noon = DateTime(2026, 10, 15, 12, 30);
 
-    ReminderFire? digest(List<String?> dues, {DateTime? at}) =>
-        planDailyDigest(dueDates: dues, now: at ?? morning);
+    /// 默认不给事件名（等价于"事件查不到"）；要验带名字的正文就传 `events`。
+    ReminderFire? digest(
+      List<String?> dues, {
+      DateTime? at,
+      List<String> events = const <String>[],
+    }) =>
+        planDailyDigest(
+          tasks: <DailyDigestTask>[
+            for (var index = 0; index < dues.length; index += 1)
+              DailyDigestTask(
+                dueAt: dues[index],
+                eventName: index < events.length ? events[index] : '',
+              ),
+          ],
+          now: at ?? morning,
+        );
 
     test('今天有只写到天的任务 —— 落在**今天零点**', () {
       final fire = digest(<String?>['2026-10-15']);
@@ -302,11 +319,45 @@ void main() {
       expect(fire.taskId, dailyDigestTaskId);
     });
 
-    test('正文只说条数，不列标题', () {
+    test('正文只说条数（没有事件名可列时，不硬凑一个冒号）', () {
       expect(digest(<String?>['2026-10-15'])!.body, '今天有 1 件事到期');
       expect(
         digest(<String?>['2026-10-15', '2026-10-15', '2026-10-15'])!.body,
         '今天有 3 件事到期',
+      );
+    });
+
+    test('正文带上这些事所属的事件名：去重、按任务顺序、全列不截断', () {
+      // 同一个事件下三件今天到期的事 → 名字只出现一次；跨两个事件 → 两个都列。
+      expect(
+        digest(
+          <String?>['2026-10-15', '2026-10-15', '2026-10-15'],
+          events: <String>['备考', '健身', '备考'],
+        )!.body,
+        '今天有 3 件事到期：备考、健身',
+      );
+      // 不在今天到期的那条，它的事件名也不该被列进来（名字跟着任务走）。
+      expect(
+        digest(
+          <String?>['2026-10-15', '2026-10-16'],
+          events: <String>['备考', '明天的事'],
+        )!.body,
+        '今天有 1 件事到期：备考',
+      );
+    });
+
+    test('事件删了 / 悬挂引用的那条只是不列名字，条数照数', () {
+      expect(
+        digest(
+          <String?>['2026-10-15', '2026-10-15'],
+          events: <String>['', '健身'],
+        )!.body,
+        '今天有 2 件事到期：健身',
+      );
+      expect(
+        digest(<String?>['2026-10-15'], events: <String>['   '])!.body,
+        '今天有 1 件事到期',
+        reason: '全是空白的事件名等于没有',
       );
     });
 
@@ -327,7 +378,15 @@ void main() {
     test('昨天到期的那条**不算今天的事**（不把逾期扩张进来）', () {
       // 这一条刻意与「已逾期」那一档划清界限：逾期有自己的去处（那三个列表），
       // 零点这句回答的是"今天要做什么"。
-      expect(planDailyDigest(dueDates: <String?>['2026-10-14'], now: noon), isNull);
+      expect(
+        planDailyDigest(
+          tasks: const <DailyDigestTask>[
+            DailyDigestTask(dueAt: '2026-10-14'),
+          ],
+          now: noon,
+        ),
+        isNull,
+      );
     });
 
     test('一条都没有 ⇒ 不排（零点固定响一声"今天没事"比不响更烦人）', () {
@@ -349,7 +408,9 @@ void main() {
     test('前一天的 now 不会把今天的算进来（按 now 的日期取今天）', () {
       expect(
         planDailyDigest(
-          dueDates: <String?>['2026-10-15'],
+          tasks: const <DailyDigestTask>[
+            DailyDigestTask(dueAt: '2026-10-15'),
+          ],
           now: DateTime(2026, 10, 14, 23, 59),
         ),
         isNull,

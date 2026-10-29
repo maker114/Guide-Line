@@ -20,6 +20,10 @@ import '../models/project_item.dart';
 /// **不导出项目状态**（Q1）：项目没有完成 / 搁置，只有"要 / 不要"；
 /// `status` / `completed_at` 只是老数据里只读保留的字段，写进交接说明只会误导
 /// 对面的 AI（"已完成"其实不代表这个项目不做了）。不做了就该归档。
+///
+/// **不导出标识色**（用户要求）：`color` 只用于在界面里一眼认出项目，
+/// 对接收这份说明的 AI 没有信息量 —— 它看不到屏幕上的颜色，写进正文只是多一行
+/// 噪声；分类说明本来也没写过它。
 class HandoffExport {
   const HandoffExport._();
 
@@ -39,7 +43,6 @@ class HandoffExport {
       meta.add('- 有什么问题 / 思路：${project.purpose.trim()}');
     }
     if (project.date != null) meta.add('- 日期：${project.date}');
-    if (project.color != null) meta.add('- 标识色：${project.color}');
     meta.add('- 导出时间：${_stamp(now)}');
     out.addAll(meta);
 

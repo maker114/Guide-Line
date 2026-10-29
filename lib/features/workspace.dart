@@ -44,28 +44,6 @@ const String _parallelGone =
     '「并列任务」已废除。两件并行的事请开两个「事件」，'
     '或者把两条并成同一个节点下的两条子任务。';
 
-/// 「正文与进来时一模一样」时拒绝合并的文案（Q8）。
-///
-/// 界面上最该看到的那一句就是这个 —— 它同时是两个可点动作的名字，
-/// 所以抽成常量、界面与业务层共用一份，免得两处说法慢慢走偏。
-const String implementationUnchanged =
-    '正文没有变化，这条灵感还没写进项目。请用「追加原文」或「作为清单条目」。';
-
-/// 批量合并灵感的**落点**（Q37）—— 与单条的两个方法一一对应：
-/// [MergeLanding.implementation] ↔ [Workspace.mergeInspiration]，
-/// [MergeLanding.checklist] ↔ [Workspace.mergeInspirationAsItem]。
-///
-/// 界面上给的是三个选择（手改正文 / 追加原文 / 作为清单条目），但前两个最后
-/// 都是"给出一段新的正文"：**追加是文本拼接**（[Workspace.appendToImplementation]），
-/// 不是另一种数据动作，所以落点只有两个。
-enum MergeLanding {
-  /// 落点一 / 二：用给定的新正文（手改后的、或追加原文后的）替换「如何解决」。
-  implementation,
-
-  /// 落点三：选中的灵感**各成一条**「实现清单」条目。
-  checklist,
-}
-
 /// 分类的汇总（Q2）—— **只统计，不判定**。
 ///
 /// 口径（与《定义与边界》§2.1 / §2.2 一致，只用契约里已有的字段）：
@@ -557,8 +535,8 @@ class Workspace {
     final trimmed = title.trim();
     if (trimmed.isEmpty) throw const RuleViolation('项目名不能为空');
     _requireValidDate(date, '日期');
+    final parent = parentId == null ? null : findProject(parentId);
     if (parentId != null) {
-      final parent = findProject(parentId);
       if (parent == null || parent.deleted) throw const RuleViolation('父项目不存在');
       if (projectTree.depthOf(parentId) >= maxProjectDepth) {
         throw const RuleViolation('项目最多嵌套 $maxProjectDepth 层');
@@ -581,7 +559,12 @@ class Workspace {
       // 新项目**自动分配一个标志色**：空着的话项目树里全是同一个灰图标，
       // 一眼分不出谁是谁。取"还没被用的"颜色里第一个，用完一轮再从头来 ——
       // 这样同一层的兄弟项目优先拿到不同的颜色。
-      color: nextProjectColor(),
+      //
+      // 但在**分类下面新建目标**时不自动挑色（2026-10-29 用户要求，ADR-103：
+      // "分类下新建的目标默认跟随分类的标识色"）：目标属于哪一类，在项目树里
+      // 一眼就该读得出来；自动分配反而会让同一类下的目标五颜六色。
+      // 分类自己没设色（老数据 / 用户清掉了）时仍回退到自动分配，免得新目标变灰。
+      color: parent?.color ?? nextProjectColor(),
       updatedAt: now,
       deleted: false,
     );
@@ -1012,102 +995,31 @@ class Workspace {
     persist();
   }
 
-  /// 把一条灵感**原封不动**追加到项目「如何解决」的末尾。
+  /// 合并灵感 · **唯一落点：目标的「实现清单」**（2026-10-29 重做合并界面，ADR-101）。
   ///
-  /// 纯文本拼接，不改契约：已有实现非空时先补一个换行，再把原文按原样放上去。
-  /// 刻意**不做任何润色或改写** —— 用户要的是"原文作为新的一行"。
-  static String appendToImplementation(String implementation, String inspirationText) {
-    final base = implementation.trimRight();
-    final addition = inspirationText.trim();
-    if (addition.isEmpty) return base;
-    if (base.isEmpty) return addition;
-    return '$base\n$addition';
-  }
-
-  /// 合并灵感 · **落点一：写进「如何解决」正文**（跨文档）。
+  /// 用户口径（原话）：「在合并界面中，永远只作为清单被合并，界面中显示已有的
+  /// 清单，随后将这次合并的内容以不同颜色衔接在这份清单后面」。
+  /// 从前那条"照着灵感手改正文 / 追加原文"的路（替换 `implementation`）连同
+  /// 它的两个单条方法一起删掉了：合并只回答"这件事要做什么"，落点是清单；
+  /// 正文归 AI 整理与正文编辑，不再由合并顺带改写。
   ///
-  /// 两条裁定管着这里：**合并为用户手动择优、不自动追加**（ADR-033）；
-  /// **合并后原灵感置 `merged` 并进归档区**（ADR-037）。
-  ///
-  /// 合并编辑器里"照着灵感手改正文"与"追加原文后保存"走的都是这一条。
-  /// 空正文拒绝 —— 合并不该把正文清没（要只留清单条目就走
-  /// [mergeInspirationAsItem]）。
-  ///
-  /// **正文没变也拒绝**（Q8）：这条灵感在项目里一个字都没多，
-  /// 却会被标成 `merged`、从灵感箱里消失 —— 用户拿到的是"合并没有发生"，
-  /// 界面却报成功。要"追加一段"就走 [appendToImplementation]，
-  /// 要"变成一条待办"就走 [mergeInspirationAsItem]。
-  void mergeInspiration({
-    required String inspirationId,
-    required String projectId,
-    required String newImplementation,
-  }) {
-    final inspiration = _requireMergeable(inspirationId, projectId);
-    final trimmed = newImplementation.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('正文不能是空的');
-    final project = findProject(projectId)!;
-    if (trimmed == project.implementation) {
-      throw const RuleViolation(implementationUnchanged);
-    }
-
-    final now = Ids.nowMillis();
-    _upsert(
-      DocName.projects,
-      project.copyWith(implementation: trimmed, updatedAt: now),
-    );
-    _markInspirationMerged(inspiration, projectId, now);
-    persist();
-  }
-
-  /// 合并灵感 · **落点二：追加成「实现清单」的新一条**（合并编辑器里那个
-  /// 「作为清单条目」按钮）。
-  ///
-  /// 不碰 `implementation`：这条灵感的去向是"一件要做的事"，不是往说明里添一句。
-  ProjectItem mergeInspirationAsItem({
-    required String inspirationId,
-    required String projectId,
-    required String itemText,
-  }) {
-    final inspiration = _requireMergeable(inspirationId, projectId);
-    final trimmed = itemText.trim();
-    if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
-    final project = findProject(projectId)!;
-
-    final now = Ids.nowMillis();
-    final item = ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false);
-    _upsert(
-      DocName.projects,
-      project.copyWith(
-        items: <ProjectItem>[...project.items, item],
-        updatedAt: now,
-      ),
-    );
-    _markInspirationMerged(inspiration, projectId, now);
-    persist();
-    return item;
-  }
-
-  /// 合并灵感 · **批量**（Q37）：选中的多条**一次落盘**并完。
-  ///
-  /// 规则与单条 [mergeInspiration] / [mergeInspirationAsItem] 完全一致，
-  /// 只是把"一条"换成"一批"：
-  ///   · 每条灵感都要在、都没合并过；目标项目要在、没被删除；
-  ///   · [MergeLanding.implementation]：[newImplementation] 就是新的「如何解决」——
-  ///     **空正文一律拒绝**，与当前正文一模一样也拒绝（Q8，[implementationUnchanged]）；
-  ///   · [MergeLanding.checklist]：[itemTexts] 与 [inspirationIds] **一一对应**
-  ///     （顺序就是落进清单的顺序），任何一条文本为空都整批拒绝；
-  ///   · **先整体校验再落盘**：任何一处不合法就一条都不动 —— 批量动作绝不留
-  ///     "改了一半"的半截状态（与 [assignInspirations]、[setTasksDue] 同一套做法）。
+  /// 语义：
+  ///   · [itemTexts] 与 [inspirationIds] **一一对应**，顺序就是落进清单的顺序
+  ///     （一条灵感一条，界面按列表顺序把原文带进来）；
+  ///   · 空列表是安全的空操作，不写盘；
+  ///   · 每条灵感都要在、都没合并过；目标项目要在、没被删除；条数对不上、
+  ///     任何一条文本 trim 后为空 → **整批拒绝**（RuleViolation），一个字都不写；
+  ///   · 全部合法才**一次** upsert：条目追加在项目清单末尾，灵感置 `merged`
+  ///     并进归档区（ADR-037），然后 `persist()`。
   ///
   /// 为什么不是"循环调单条"：那样每次都 `persist()` 重写整份文件并轮转备份，
   /// 既慢，又会在中途失败时留下只并了一半的库。这里项目侧与灵感侧的改动跟着
-  /// **同一次** [persist] 写下去，单文件让这两处天然全有或全无。
+  /// **同一次** [persist] 写下去，单文件让这两处天然全有或全无
+  /// （与 [assignInspirations]、[setTasksDue] 同一套做法）。
   void mergeInspirations({
     required Iterable<String> inspirationIds,
     required String projectId,
-    required MergeLanding landing,
-    String? newImplementation,
-    List<String>? itemTexts,
+    required List<String> itemTexts,
   }) {
     final ids = inspirationIds.toList(growable: false);
     if (ids.isEmpty) return; // 空列表是安全的空操作，不写盘
@@ -1120,41 +1032,26 @@ class Workspace {
     ];
 
     // ---- 校验：全部通过之前一个字都不写 ----
-    String body = '';
+    if (itemTexts.length != ids.length) {
+      // 一条灵感对应一条清单条目：数目对不上就是调用方写错了，
+      // 与其猜"多的算谁的"，不如整批拒绝
+      throw const RuleViolation('清单条目要和灵感一一对应');
+    }
     final newItems = <ProjectItem>[];
-    switch (landing) {
-      case MergeLanding.implementation:
-        body = (newImplementation ?? '').trim();
-        if (body.isEmpty) throw const RuleViolation('正文不能是空的');
-        if (body == project.implementation) {
-          throw const RuleViolation(implementationUnchanged);
-        }
-      case MergeLanding.checklist:
-        final texts = itemTexts ?? const <String>[];
-        if (texts.length != ids.length) {
-          // 一条灵感对应一条清单条目：数目对不上就是调用方写错了，
-          // 与其猜"多的算谁的"，不如整批拒绝
-          throw const RuleViolation('清单条目要和灵感一一对应');
-        }
-        for (final text in texts) {
-          final trimmed = text.trim();
-          if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
-          newItems.add(ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false));
-        }
+    for (final text in itemTexts) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) throw const RuleViolation('条目内容不能为空');
+      newItems.add(ProjectItem(id: Ids.uuidV4(), text: trimmed, done: false));
     }
 
     // ---- 落盘：项目侧 + 灵感侧一次写完 ----
     final now = Ids.nowMillis();
     _upsert(
       DocName.projects,
-      switch (landing) {
-        MergeLanding.implementation =>
-          project.copyWith(implementation: body, updatedAt: now),
-        MergeLanding.checklist => project.copyWith(
-            items: <ProjectItem>[...project.items, ...newItems],
-            updatedAt: now,
-          ),
-      },
+      project.copyWith(
+        items: <ProjectItem>[...project.items, ...newItems],
+        updatedAt: now,
+      ),
     );
     for (final inspiration in inspirations) {
       _markInspirationMerged(inspiration, projectId, now);
@@ -1162,7 +1059,7 @@ class Workspace {
     persist();
   }
 
-  /// 两种合并共用的前置检查：灵感在、目标项目在、这条灵感还没合并过。
+  /// 合并的前置检查：灵感在、目标项目在、这条灵感还没合并过。
   Inspiration _requireMergeable(String inspirationId, String projectId) {
     final inspiration = findInspiration(inspirationId);
     if (inspiration == null) throw const RuleViolation('灵感不存在');
@@ -1172,10 +1069,10 @@ class Workspace {
     return inspiration;
   }
 
-  /// 两种合并共用的收尾：灵感置 `merged` 并记下合并到哪。
+  /// 合并的收尾：灵感置 `merged` 并记下合并到哪。
   ///
   /// 只 `_upsert` 不 `persist()` —— 由调用方跟项目那次改动**一起落盘**，
-  /// 这样"灵感状态 + 正文/条目"要么都在、要么都不在。
+  /// 这样"灵感状态 + 清单条目"要么都在、要么都不在。
   void _markInspirationMerged(Inspiration inspiration, String projectId, int now) {
     _upsert(
       DocName.inspirations,
@@ -1192,8 +1089,8 @@ class Workspace {
   /// 把已合并的灵感**恢复为待处理**（ADR-057，Q9 定的叫法）：
   /// **只恢复灵感，项目里的内容不退回**。
   ///
-  /// 合并是"吸收"：写进「如何解决」的那一行、追加进「实现清单」的那一条
-  /// 都已经属于项目了，这个动作不去把它们拿走（拿走了才是真的数据丢失）。
+  /// 合并是"吸收"：合并时追加进「实现清单」的那一条已经属于项目了，
+  /// 这个动作不去把它拿走（拿走了才是真的数据丢失）。
   /// 所以界面上的名字必须带上这半句 —— 叫"撤销合并"会让人以为项目也退回去了，
   /// 用户再合并一次就得到重复内容。
   void undoMerge(String inspirationId) {
