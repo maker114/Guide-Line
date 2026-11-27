@@ -23,6 +23,12 @@ class WindowChrome {
 
   static Future<void> maximizeRestore() => _invoke('maximizeRestore');
 
+  /// 开始拖动窗口：由标题栏那块空白区域的手势触发。
+  ///
+  /// 为什么不在原生命中测试里把顶部整条当标题栏：那样顶部的按钮与文字都会
+  /// 被系统吞掉、点不动（用户 2026-11-27 反馈）。改成"只有这块空白可拖"。
+  static Future<void> startDragging() => _invoke('startDragging');
+
   static Future<void> close() => _invoke('close');
 
   static Future<bool> isMaximized() async {

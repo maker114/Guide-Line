@@ -191,8 +191,21 @@ class _DesktopShellState extends State<DesktopShell> {
       padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
       child: Row(
         children: <Widget>[
-          Text(_selected.label, style: theme.textTheme.headlineSmall),
-          const Spacer(),
+          // 标题左侧这块空白兼作拖动区：原生不再把整条顶部当标题栏，
+          // 否则顶部的按钮与文字会点不动。
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onPanStart:
+                  WindowChrome.supported ? (_) => WindowChrome.startDragging() : null,
+              onDoubleTap:
+                  WindowChrome.supported ? () => WindowChrome.maximizeRestore() : null,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(_selected.label, style: theme.textTheme.headlineSmall),
+              ),
+            ),
+          ),
           SyncStatusIndicator(
             state: app.autoSync,
             onShowReason: _showAutoSyncReason,

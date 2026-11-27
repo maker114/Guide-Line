@@ -261,11 +261,6 @@ Win32Window::MessageHandler(HWND hwnd,
         if (bottom) return HTBOTTOM;
       }
 
-      const int caption_height = MulDiv(44, dpi, 96);
-      const int buttons_width = MulDiv(200, dpi, 96);
-      if (cursor.y < caption_height && cursor.x < client.right - buttons_width) {
-        return HTCAPTION;
-      }
       return HTCLIENT;
     }
 

@@ -31,14 +31,12 @@ LRESULT CALLBACK FlutterChildWindowProc(HWND window,
       GetClientRect(parent, &client);
       const UINT dpi = GetDpiForWindow(parent);
       const int border = MulDiv(6, dpi, 96);
-      const int caption = MulDiv(44, dpi, 96);
-      const int buttons = MulDiv(200, dpi, 96);
       const bool on_edge =
           point.x < border || point.y < border ||
           point.x >= client.right - border || point.y >= client.bottom - border;
-      const bool on_caption =
-          point.y < caption && point.x < client.right - buttons;
-      if (on_caption || (!IsZoomed(parent) && on_edge)) {
+      // 只把四边让给顶层窗口做缩放；顶部标题栏改成由 Flutter 手势触发
+      // `startDragging`（见 `WindowChrome`），这样顶部的按钮与文字都点得动。
+      if (!IsZoomed(parent) && on_edge) {
         return HTTRANSPARENT;
       }
     }
@@ -90,6 +88,10 @@ bool FlutterWindow::OnCreate() {
           result->Success();
         } else if (method == "close") {
           PostMessage(hwnd, WM_CLOSE, 0, 0);
+          result->Success();
+        } else if (method == "startDragging") {
+          ReleaseCapture();
+          SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0);
           result->Success();
         } else if (method == "isMaximized") {
           result->Success(flutter::EncodableValue(IsZoomed(hwnd) != 0));
