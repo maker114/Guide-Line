@@ -68,6 +68,13 @@
 - `docs/spec/项目与事件-定义与边界.md` 新增 §10.3（服务器同步的联网边界），
   `docs/spec/数据契约.md` §2.1.1 / §2.1.2 补 `server_sync.json` 与服务器那份备份的形态。
 
+### Fixed
+
+- **Windows 包改用应用自己的图标**（`windows/runner/resources/app_icon.ico`）：
+  这个文件一直是 `flutter create` 留下的默认 Flutter 图标，exe、任务栏与桌面快捷方式都显示
+  蓝底 F。现在换成与 Android 启动图标同源的一张（从 `mipmap-xxxhdpi/ic_launcher.png`
+  生成多尺寸 ICO），快捷方式直接按 exe 取图标，从此任务栏、快捷方式与手机图标一致。
+
 ## [2.10.1] - 2026-11-27
 
 > 实验分支（`beta/server-test`）的第一版：把这条线的显示名与测试包统一成
