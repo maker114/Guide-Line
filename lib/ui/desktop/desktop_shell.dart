@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../app/auto_sync_state.dart';
+import '../../platform/window_chrome.dart';
 import '../common/sync_status_indicator.dart';
 import '../events/event_tab.dart';
 import '../inspiration/inspiration_tab.dart';
@@ -200,6 +201,25 @@ class _DesktopShellState extends State<DesktopShell> {
             onPressed: () => showAboutApp(context, app),
             child: const Text('关于'),
           ),
+          // 原生标题栏收掉之后，这三个按钮就是窗口的唯一出口（另有 Alt+Space
+          // 与任务栏）。只在 Windows 上出现 —— 那条通道也只有 Windows 有。
+          if (WindowChrome.supported) ...<Widget>[
+            _WindowButton(
+              icon: Icons.remove,
+              tooltip: '最小化',
+              onPressed: () => WindowChrome.minimize(),
+            ),
+            _WindowButton(
+              icon: Icons.crop_square,
+              tooltip: '最大化 / 还原',
+              onPressed: () => WindowChrome.maximizeRestore(),
+            ),
+            _WindowButton(
+              icon: Icons.close,
+              tooltip: '关闭',
+              onPressed: () => WindowChrome.close(),
+            ),
+          ],
         ],
       ),
     );
@@ -229,4 +249,30 @@ class _DesktopShellState extends State<DesktopShell> {
       ),
     );
   }
+}
+
+/// 标题栏右侧的窗口按钮：比普通 `IconButton` 窄一档，三个并排也不抢标题的位置。
+class _WindowButton extends StatelessWidget {
+  const _WindowButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        icon: Icon(icon, size: 18),
+        tooltip: tooltip,
+        visualDensity: VisualDensity.compact,
+        style: IconButton.styleFrom(
+          minimumSize: const Size(36, 32),
+          padding: EdgeInsets.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: onPressed,
+      );
 }

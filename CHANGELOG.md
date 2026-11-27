@@ -35,6 +35,31 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.11.1] - 2026-11-27
+
+> 电脑端改成**无边框窗口**：收掉原生标题栏，顶部那条自绘标题栏右侧补上
+> 最小化 / 最大化 / 关闭三个按钮（桌面专属，手机端不受影响）。
+>
+> 版本位（`AGENTS.md` §6）：只动外壳外观与窗口按钮 ⇒ **修订位 +1**
+> （2.11.0 → 2.11.1），构建号 +1（103 → 104）。
+>
+> 验收：`flutter analyze --no-pub` 0 问题；`flutter test --no-pub` 全绿；
+> `flutter build windows --release` 出 exe。
+
+### Changed
+
+- **电脑端换成无边框窗口**（`windows/runner/win32_window.cpp`）：拦掉 `WM_NCCALCSIZE`
+  让客户区铺满整个窗口，原生标题栏与边框不再绘制；`WM_NCHITTEST` 自己判四边
+  6dp 缩放、顶部 44dp 拖动（双击最大化），并给右侧按钮留出 200dp；
+  `WM_GETMINMAXINFO` 把最小尺寸定在 900×620。窗口样式仍是 `WS_OVERLAPPEDWINDOW`，
+  所以贴边分屏、最小化动画与 Alt+Space 系统菜单都还在。
+  **与旧行为的差别**：窗口顶上看不到系统标题栏与最小化 / 关闭按钮，鼠标拖动换成
+  顶部那条自绘标题栏。
+- **标题栏补三个窗口按钮**（`lib/platform/window_chrome.dart` +
+  `lib/ui/desktop/desktop_shell.dart`）：最小化 / 最大化切换 / 关闭走
+  `guideline/window` 通道，真正执行仍在 C++（`windows/runner/flutter_window.cpp`）；
+  非 Windows 平台不显示。
+
 ## [2.11.0] - 2026-11-27
 
 > 用户（2026-11-27）要求"在目前通过 github 进行同步的基础上添加一条管线也就是通过服务器

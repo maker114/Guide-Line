@@ -2,6 +2,7 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <windowsx.h>
 
 #include "resource.h"
 
@@ -135,7 +136,8 @@ bool Win32Window::Create(const std::wstring& title,
   double scale_factor = dpi / 96.0;
 
   HWND window = CreateWindow(
-      window_class, title.c_str(), WS_OVERLAPPEDWINDOW,
+      window_class, title.c_str(),
+      WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU,
       Scale(origin.x, scale_factor), Scale(origin.y, scale_factor),
       Scale(size.width, scale_factor), Scale(size.height, scale_factor),
       nullptr, nullptr, GetModuleHandle(nullptr), this);
@@ -212,6 +214,68 @@ Win32Window::MessageHandler(HWND hwnd,
         SetFocus(child_content_);
       }
       return 0;
+
+    case WM_NCCALCSIZE: {
+      // 无边框：客户区直接铺满整个窗口，原生标题栏与边框都不画。
+      // 窗口样式仍保留 WS_OVERLAPPEDWINDOW —— 这样贴边分屏、最小化动画、
+      // Alt+Space 系统菜单都还在，只是"看不见了"。
+      if (wparam == TRUE) {
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lparam);
+        if (IsZoomed(hwnd)) {
+          // 最大化时窗口会比工作区大出一圈，这里按工作区校正一次，
+          // 否则内容贴边会被裁掉几个像素。
+          MONITORINFO monitor_info{};
+          monitor_info.cbSize = sizeof(monitor_info);
+          if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                             &monitor_info)) {
+            params->rgrc[0] = monitor_info.rcWork;
+          }
+        }
+        return 0;
+      }
+      break;
+    }
+
+    case WM_NCHITTEST: {
+      // 没有原生边框之后，拖动与缩放都要自己判：四边 6dp 交给系统缩放，
+      // 顶部 44dp 当标题栏（可拖、可双击最大化），右侧给窗口按钮留出来。
+      POINT cursor{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(hwnd, &cursor);
+      RECT client;
+      GetClientRect(hwnd, &client);
+      const UINT dpi = GetDpiForWindow(hwnd);
+      const int border = MulDiv(6, dpi, 96);
+      const bool left = cursor.x < border;
+      const bool right = cursor.x >= client.right - border;
+      const bool top = cursor.y < border;
+      const bool bottom = cursor.y >= client.bottom - border;
+
+      if (!IsZoomed(hwnd)) {
+        if (top && left) return HTTOPLEFT;
+        if (top && right) return HTTOPRIGHT;
+        if (bottom && left) return HTBOTTOMLEFT;
+        if (bottom && right) return HTBOTTOMRIGHT;
+        if (left) return HTLEFT;
+        if (right) return HTRIGHT;
+        if (top) return HTTOP;
+        if (bottom) return HTBOTTOM;
+      }
+
+      const int caption_height = MulDiv(44, dpi, 96);
+      const int buttons_width = MulDiv(200, dpi, 96);
+      if (cursor.y < caption_height && cursor.x < client.right - buttons_width) {
+        return HTCAPTION;
+      }
+      return HTCLIENT;
+    }
+
+    case WM_GETMINMAXINFO: {
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const UINT dpi = GetDpiForWindow(hwnd);
+      info->ptMinTrackSize.x = MulDiv(900, dpi, 96);
+      info->ptMinTrackSize.y = MulDiv(620, dpi, 96);
+      return 0;
+    }
 
     case WM_DWMCOLORIZATIONCOLORCHANGED:
       UpdateTheme(hwnd);

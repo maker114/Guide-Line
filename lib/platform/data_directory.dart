@@ -93,9 +93,9 @@ class AppInfo {
   /// 合回 `main` 前必须还原成 `Guide Line`（ADR-032）。
   static const String displayName = 'Guideline-Beta-ServerTest-1';
 
-  static const String version = '2.11.0';
+  static const String version = '2.11.1';
 
-  static const String buildNumber = '103';
+  static const String buildNumber = '104';
 
   /// 界面与导出里展示的完整版本（`1.8.5+37`）。
   ///
