@@ -35,6 +35,27 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.11.2] - 2026-11-27
+
+> 修无边框窗口的两处：拖动 / 缩放不生效、窗口没有圆角。
+>
+> 版本位（`AGENTS.md` §6）：只改窗口外壳行为 ⇒ **修订位 +1**
+> （2.11.1 → 2.11.2），构建号 +1（104 → 105）。
+>
+> 验收：`flutter analyze --no-pub` 0 问题；`flutter test --no-pub` 全绿；
+> 真机拖动实测窗口从 (10,10) 移到 (110,110)，圆角属性读到 `DWMWCP_ROUND`。
+
+### Fixed
+
+- **无边框窗口又能拖动了**（`windows/runner/flutter_window.cpp`）：上一版把命中判定
+  写在顶层窗口的 `WM_NCHITTEST`，而 Flutter 视图铺满客户区、鼠标永远落在子窗口上，
+  顶层根本收不到。现在给子窗口装了转发过程：顶部 44dp 与四边 6dp 返回
+  `HTTRANSPARENT`，由顶层回 `HTCAPTION` / `HTLEFT`…，拖动、双击最大化与边缘缩放
+  恢复原生行为。**与旧行为的差别**：窗口可以拖到任意位置，也能从四边拉大拉小。
+- **窗口改成圆角矩形**（`windows/runner/win32_window.cpp`）：
+  `DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND)`，
+  Windows 11 上由 DWM 按圆角裁切；Windows 10 不识别该属性时保持原样。
+
 ## [2.11.1] - 2026-11-27
 
 > 电脑端改成**无边框窗口**：收掉原生标题栏，顶部那条自绘标题栏右侧补上

@@ -1,10 +1,52 @@
 #include "flutter_window.h"
 
 #include <flutter/standard_method_codec.h>
+#include <windowsx.h>
 
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+// Flutter 视图那个子窗口的原始窗口过程。
+WNDPROC g_flutter_child_proc = nullptr;
+
+// 子窗口把"标题栏 / 四边"这几处**让给顶层窗口**：返回 `HTTRANSPARENT`
+// 之后系统会去问父窗口，父窗口的 `WM_NCHITTEST` 就会回 HTCAPTION / HTLEFT…
+// 于是拖动、双击最大化、贴边缩放都由系统原生完成。
+//
+// 为什么必须从子窗口让：Flutter 视图铺满整个客户区，鼠标永远落在它上面，
+// 顶层窗口的 `WM_NCHITTEST` 根本收不到 —— 这也是上一版"拖动没反应"的原因。
+LRESULT CALLBACK FlutterChildWindowProc(HWND window,
+                                        UINT const message,
+                                        WPARAM const wparam,
+                                        LPARAM const lparam) {
+  if (message == WM_NCHITTEST) {
+    HWND parent = GetParent(window);
+    if (parent) {
+      POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+      ScreenToClient(parent, &point);
+      RECT client;
+      GetClientRect(parent, &client);
+      const UINT dpi = GetDpiForWindow(parent);
+      const int border = MulDiv(6, dpi, 96);
+      const int caption = MulDiv(44, dpi, 96);
+      const int buttons = MulDiv(200, dpi, 96);
+      const bool on_edge =
+          point.x < border || point.y < border ||
+          point.x >= client.right - border || point.y >= client.bottom - border;
+      const bool on_caption =
+          point.y < caption && point.x < client.right - buttons;
+      if (on_caption || (!IsZoomed(parent) && on_edge)) {
+        return HTTRANSPARENT;
+      }
+    }
+  }
+  return CallWindowProc(g_flutter_child_proc, window, message, wparam, lparam);
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -57,6 +99,12 @@ bool FlutterWindow::OnCreate() {
       });
 
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // 给 Flutter 子窗口装上转发：顶部标题栏与四边交给顶层窗口判命中。
+  HWND child = flutter_controller_->view()->GetNativeWindow();
+  g_flutter_child_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
+      child, GWLP_WNDPROC,
+      reinterpret_cast<LONG_PTR>(FlutterChildWindowProc)));
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

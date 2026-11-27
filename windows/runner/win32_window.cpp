@@ -349,4 +349,16 @@ void Win32Window::UpdateTheme(HWND const window) {
     DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
                           &enable_dark_mode, sizeof(enable_dark_mode));
   }
+
+  // 圆角：Windows 11 的 DWM 会把整个窗口按圆角裁切（自绘标题栏的外框一起圆）。
+  // Windows 10 上这个属性不被识别，调用失败即可，不影响其它行为。
+#ifndef DWMWA_WINDOW_CORNER_PREFERENCE
+#define DWMWA_WINDOW_CORNER_PREFERENCE 33
+#endif
+#ifndef DWMWCP_ROUND
+#define DWMWCP_ROUND 2
+#endif
+  const int corner_preference = DWMWCP_ROUND;
+  DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE,
+                        &corner_preference, sizeof(corner_preference));
 }
