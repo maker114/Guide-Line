@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
 import '../../core/models/ai_config.dart';
+import '../../core/models/server_backup_config.dart';
 import '../../core/rules/reminder_schedule.dart';
 import '../../core/store/github_sync.dart';
 import '../../core/store/ui_prefs.dart';
@@ -17,6 +18,7 @@ import 'export_page.dart';
 import 'github_backup_page.dart';
 import 'reminder_page.dart';
 import 'search_page.dart';
+import 'server_backup_page.dart';
 import 'upcoming_page.dart';
 
 /// 更多 Tab：**浏览入口 + 数据安全**。
@@ -140,6 +142,12 @@ class _MoreTabState extends State<MoreTab> {
           subtitle: _gitHubSubtitle(context),
           page: GitHubBackupPage(app: app),
         ),
+        _MoreItem(
+          icon: Icons.dns_outlined,
+          title: '服务器同步',
+          subtitle: _serverSyncSubtitle(context),
+          page: ServerBackupPage(app: app),
+        ),
       ],
     );
   }
@@ -232,6 +240,30 @@ class _MoreTabState extends State<MoreTab> {
       text = '$owner/$repo · 还没同步过';
     } else {
       text = '$owner/$repo · 上次同步 ${formatStamp(record.syncedAt)}';
+    }
+    return Text(text, style: Theme.of(context).textTheme.bodySmall);
+  }
+
+  /// 「服务器同步」入口的副标题：与 GitHub 那一条同一套写法，
+  /// 配置读不出来也只当装饰，不阻塞整页。
+  Widget _serverSyncSubtitle(BuildContext context) {
+    if (!app.prefs.serverSyncEnabled) {
+      return Text('已关闭', style: Theme.of(context).textTheme.bodySmall);
+    }
+    final config = ServerBackupConfig(
+      enabled: true,
+      baseUrl: app.prefs.serverSyncBaseUrl,
+      fingerprint: app.prefs.serverSyncFingerprint,
+    );
+    final record = app.readServerSyncRecord();
+
+    final String text;
+    if (config.baseUrl.isEmpty || config.fingerprint.isEmpty) {
+      text = '未配置：还没填服务器地址或证书指纹';
+    } else if (record == null) {
+      text = '${config.displayHost} · 还没同步过';
+    } else {
+      text = '${config.displayHost} · 上次同步 ${formatStamp(record.syncedAt)}';
     }
     return Text(text, style: Theme.of(context).textTheme.bodySmall);
   }

@@ -121,3 +121,8 @@ dist/
 .tools/
 # Widget Preview related
 .widget_preview/
+
+# ---------- Python（server/ 的本地测试产物）----------
+**/__pycache__/
+*.pyc
+.pytest_cache/

@@ -11,6 +11,7 @@ import '../core/models/entity.dart';
 import '../core/models/github_backup_config.dart';
 import '../core/models/project.dart';
 import '../core/models/reminder.dart';
+import '../core/models/server_backup_config.dart';
 import '../core/models/task.dart';
 import '../core/rules/archive_zone.dart';
 import '../core/rules/reminder_schedule.dart';
@@ -25,6 +26,7 @@ import '../platform/data_directory.dart';
 import '../platform/data_transfer_platform.dart';
 import '../platform/github_backup_client.dart';
 import '../platform/notification_service.dart';
+import '../platform/server_backup_client.dart';
 import 'auto_sync_state.dart';
 
 /// 分享动作的可注入钩子（真机走 [DataTransferPlatform.shareFile]）。
@@ -59,6 +61,8 @@ class AppController extends ChangeNotifier {
     ShareFileHook? shareFile,
     GitHubBackupGateway? gitHubGateway,
     GitHubCredentialStore? gitHubCredentials,
+    ServerBackupGateway? serverGateway,
+    ServerCredentialStore? serverCredentials,
     bool? remindersSupportedOverride,
   })  : startupWarnings = List<String>.unmodifiable(startupWarnings),
         ai = aiGenerator ?? const HttpAiTextGenerator(),
@@ -66,6 +70,8 @@ class AppController extends ChangeNotifier {
         shareFile = shareFile ?? _defaultShareFile,
         gitHub = gitHubGateway ?? HttpGitHubBackupGateway(),
         gitHubStore = gitHubCredentials ?? const SecureGitHubCredentialStore(),
+        server = serverGateway ?? HttpServerBackupGateway(),
+        serverStore = serverCredentials ?? const SecureServerCredentialStore(),
         // 默认看平台（电脑端不做提醒）；测试里可以覆盖 —— 与上面那几个注入点
         // 同一套做法。不覆盖的话，UI 用例跑在宿主机上永远只能看到
         // "电脑端不做提醒"那一句，开关与两档根本没机会被点到。
@@ -80,6 +86,8 @@ class AppController extends ChangeNotifier {
     ShareFileHook? shareFile,
     GitHubBackupGateway? gitHubGateway,
     GitHubCredentialStore? gitHubCredentials,
+    ServerBackupGateway? serverGateway,
+    ServerCredentialStore? serverCredentials,
     bool? remindersSupportedOverride,
   }) async {
     final dir = await DataDirectory.resolve(override: dataDirectoryOverride);
@@ -98,6 +106,8 @@ class AppController extends ChangeNotifier {
       shareFile: shareFile,
       gitHubGateway: gitHubGateway,
       gitHubCredentials: gitHubCredentials,
+      serverGateway: serverGateway,
+      serverCredentials: serverCredentials,
       remindersSupportedOverride: remindersSupportedOverride,
     ).._loadBackgroundBytes();
     // 灵感箱空态那句轮换文案**每次启动重抽**（ADR-084）。落进偏好是为了
@@ -252,6 +262,12 @@ class AppController extends ChangeNotifier {
 
   /// GitHub Token 的保管处（与 AI 的 `apiKey` **分开存**，两者的权限量级不同）。
   final GitHubCredentialStore gitHubStore;
+
+  /// 「服务器同步」的联网实现（默认 HTTPS + 证书固定；测试注入假实现）。
+  final ServerBackupGateway server;
+
+  /// 服务器 Token 的保管处（与 GitHub 的 Token 分开存）。
+  final ServerCredentialStore serverStore;
 
   Workspace get ws => workspace;
 
@@ -2198,6 +2214,280 @@ class AppController extends ChangeNotifier {
       ok: true,
       message: '已拉取远程备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
           '那一次上传的提交码：${shortSha(commit?.sha ?? '')}\n'
+          '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
+    );
+  }
+
+  // ------------------------------------------------- 服务器同步（自建服务）
+
+  static const String _serverDisabledMessage =
+      '服务器同步的开关还没打开，请先在这一页打开「启用服务器同步」';
+
+  /// 读服务器同步的配置：非敏感部分在偏好里，Token 从安全存储取。
+  Future<({ServerBackupConfig config, String token})> readServerBackupConfig() async {
+    final token = await serverStore.readToken();
+    return (
+      config: ServerBackupConfig(
+        enabled: prefs.serverSyncEnabled,
+        baseUrl: prefs.serverSyncBaseUrl,
+        fingerprint: prefs.serverSyncFingerprint,
+      ),
+      token: token ?? '',
+    );
+  }
+
+  /// 保存服务器同步的配置。
+  ///
+  /// 换了地址或证书指纹时**连记账一起清掉**（与 GitHub 那一边换仓库同理）：
+  /// 旧记账说的是"另一个服务器上同步到哪"，留着会让冲突判定拿错基线。
+  Future<String?> saveServerBackupConfig(
+    ServerBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final old = prefs;
+    final moved = cleaned.baseUrl != old.serverSyncBaseUrl ||
+        cleaned.fingerprint != old.serverSyncFingerprint;
+
+    try {
+      workspace.updatePrefs(
+        prefs.copyWith(
+          serverSyncEnabled: cleaned.enabled,
+          serverSyncBaseUrl: cleaned.baseUrl,
+          serverSyncFingerprint: cleaned.fingerprint,
+        ),
+      );
+      final trimmed = token.trim();
+      if (trimmed.isEmpty) {
+        await serverStore.clearToken();
+      } else {
+        await serverStore.writeToken(trimmed);
+      }
+      if (moved) storage.clearServerSyncRecord();
+      notifyListeners();
+      return null;
+    } catch (error) {
+      return '保存失败：$error';
+    }
+  }
+
+  /// 上次与自建服务器同步的记账（没同步过返回 null）。
+  SyncRecord? readServerSyncRecord() => storage.readServerSyncRecord();
+
+  /// 真连一次自建服务器：先问 `/healthz`，再用 Token 读一次元信息。
+  ///
+  /// **只读不写** —— "测试连接"不该顺手往服务器里留东西。
+  Future<({bool ok, String message})> testServerConnection(
+    ServerBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (ok: false, message: reason);
+    if (token.trim().isEmpty) return (ok: false, message: '还没填服务器 Token');
+
+    try {
+      await server.ping(config: cleaned);
+      final meta = await server.readMeta(config: cleaned, token: token.trim());
+      if (meta == null) {
+        return (
+          ok: true,
+          message: '连上了 ${cleaned.displayHost}，服务器上还没有备份；'
+              '第一次「推送」会在那儿建一份。\n\n还没保存：按右上角「保存」才会写入',
+        );
+      }
+      return (
+        ok: true,
+        message: '连上了 ${cleaned.displayHost}。\n'
+            '服务器上：上传编号 ${meta.revision} · ${meta.recordCount} 条 · '
+            '${formatStamp(meta.savedAt)}\n\n还没保存：按右上角「保存」才会写入',
+      );
+    } on ServerBackupException catch (error) {
+      return (ok: false, message: error.message);
+    } catch (error) {
+      return (ok: false, message: '测试连接失败：$error');
+    }
+  }
+
+  /// 判定"相对服务器现在该做什么"（**只读**：不写数据、不写记账）。
+  Future<({SyncPlan? plan, RemoteBackup? remote, String? error})> checkServerBackup(
+    ServerBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (plan: null, remote: null, error: reason);
+    if (!cleaned.enabled) {
+      return (plan: null, remote: null, error: _serverDisabledMessage);
+    }
+    if (token.trim().isEmpty) return (plan: null, remote: null, error: '还没填服务器 Token');
+
+    try {
+      final remote = await server.readBackup(config: cleaned, token: token.trim());
+      final local = workspace.buildStoreFile();
+      final record = storage.readServerSyncRecord();
+      final plan = analyzeSync(
+        local: local,
+        localSavedAt: storage.readStoreSavedAt() ?? record?.syncedAt,
+        remote: remote,
+        lastSync: record,
+        remoteCommitSha: remote?.commitSha ?? '',
+      );
+      return (plan: plan, remote: remote, error: null);
+    } on ServerBackupException catch (error) {
+      return (plan: null, remote: null, error: error.message);
+    } catch (error) {
+      return (plan: null, remote: null, error: '读取服务器失败：$error');
+    }
+  }
+
+  /// 先把服务器上那份解出来（**不落盘**），给界面做"拉取前预览"。
+  Future<({RemoteBackup? remote, String? error})> previewServerPull(
+    ServerBackupConfig config,
+    String token,
+  ) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return (remote: null, error: reason);
+    if (!cleaned.enabled) return (remote: null, error: _serverDisabledMessage);
+    if (token.trim().isEmpty) return (remote: null, error: '还没填服务器 Token');
+
+    try {
+      final remote = await server.readBackup(config: cleaned, token: token.trim());
+      if (remote == null) {
+        return (remote: null, error: '服务器上还没有这份备份，先推送一次');
+      }
+      if (!remote.readable) {
+        return (remote: null, error: '服务器上的备份读不出 Guide Line 数据');
+      }
+      if (liveRecordCount(remote.payload!.store) == 0) {
+        return (
+          remote: null,
+          error: '服务器上的备份是 0 条记录，不算可用备份，不能用它覆盖本地。',
+        );
+      }
+      return (remote: remote, error: null);
+    } on ServerBackupException catch (error) {
+      return (remote: null, error: error.message);
+    } catch (error) {
+      return (remote: null, error: '读取服务器失败：$error');
+    }
+  }
+
+  /// 把当前数据推到自建服务器（覆盖那一份）。
+  ///
+  /// 判定与 GitHub 那条管线共用同一套 `analyzeSync`：
+  /// 内容相同就不推、本机 0 条不推、两边都改过必须由用户明确覆盖。
+  Future<PushOutcome> pushServerBackup(
+    ServerBackupConfig config,
+    String token, {
+    bool overrideRemoteChanges = false,
+  }) async {
+    final cleaned = config.normalized();
+    final reason = cleaned.validate();
+    if (reason != null) return PushOutcome.failure(reason);
+    if (!cleaned.enabled) return PushOutcome.failure(_serverDisabledMessage);
+    if (token.trim().isEmpty) return PushOutcome.failure('还没填服务器 Token');
+
+    try {
+      final remote = await server.readBackup(config: cleaned, token: token.trim());
+      final local = workspace.buildStoreFile();
+      final record = storage.readServerSyncRecord();
+      final plan = analyzeSync(
+        local: local,
+        localSavedAt: storage.readStoreSavedAt() ?? record?.syncedAt,
+        remote: remote,
+        lastSync: record,
+        remoteCommitSha: remote?.commitSha ?? '',
+      );
+
+      if (plan.action == SyncAction.noChange) {
+        return PushOutcome.unchanged('两边是同一份，没有要推的东西。');
+      }
+      if (plan.action == SyncAction.localEmpty) {
+        return PushOutcome.failure(
+          '${plan.message}\n\n'
+          '为避免误覆盖服务器上的备份，这里不再继续：请先在这台手机上恢复数据。',
+        );
+      }
+      if ((plan.action == SyncAction.pull || plan.action == SyncAction.bothChanged) &&
+          !overrideRemoteChanges) {
+        return PushOutcome.failure(
+          '${plan.message}\n\n要覆盖服务器上的备份，请再点一次「推送」。',
+        );
+      }
+
+      final now = Ids.nowMillis();
+      final bytes = ExportCodec.encode(local, exportedAt: now);
+      final written = await server.writeBackup(
+        config: cleaned,
+        token: token.trim(),
+        bytes: bytes,
+        baseRevision: int.tryParse(remote?.commitSha ?? '') ?? 0,
+        savedAt: now,
+        recordCount: liveRecordCount(local),
+        appVersion: AppInfo.versionLabel,
+      );
+
+      storage.writeServerSyncRecord(
+        SyncRecord(
+          syncedAt: now,
+          remoteSha: written.sha,
+          recordCount: liveRecordCount(local),
+          commitSha: written.commitSha,
+          localSha: workspace.localContentSha(),
+          // 服务器这条线只有一个"这一次上传"的号，两排本来就该一样。
+          localCommitSha: written.commitSha,
+        ),
+      );
+      notifyListeners();
+      return PushOutcome.written(
+        commitSha: written.commitSha,
+        message: '已推送：${liveRecordCount(local)} 条记录 · ${formatStamp(now)}\n'
+            '服务器上的上传编号：${written.commitSha}（每推一次 +1）\n'
+            '地址：${cleaned.displayHost}',
+      );
+    } on ServerBackupException catch (error) {
+      return PushOutcome.failure('推送失败：${error.message}');
+    } catch (error) {
+      return PushOutcome.failure('推送失败：$error');
+    }
+  }
+
+  /// 用服务器上那份**整体替换**本地数据（用户已经在预览里确认过）。
+  ///
+  /// 与 GitHub 的拉取走同一条 `applyImport`：强制轮转备份 → 原子写 → 重载工作区。
+  Future<({bool ok, String message})> pullServerBackup(
+    ServerBackupConfig config,
+    String token,
+  ) async {
+    final preview = await previewServerPull(config, token);
+    if (preview.remote == null) {
+      return (ok: false, message: preview.error ?? '读取服务器失败');
+    }
+
+    final remote = preview.remote!;
+    final store = remote.payload!.store;
+    final count = liveRecordCount(store);
+    final error = applyImport(store);
+    if (error != null) return (ok: false, message: '拉取失败：$error');
+
+    final now = Ids.nowMillis();
+    storage.writeServerSyncRecord(
+      SyncRecord(
+        syncedAt: now,
+        remoteSha: remote.sha,
+        recordCount: count,
+        commitSha: remote.commitSha,
+        localSha: workspace.localContentSha(),
+        localCommitSha: remote.commitSha,
+      ),
+    );
+    notifyListeners();
+    return (
+      ok: true,
+      message: '已拉取服务器备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
+          '服务器上的上传编号：${remote.commitSha}\n'
           '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
     );
   }

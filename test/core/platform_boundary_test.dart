@@ -138,9 +138,9 @@ const Set<String> _sdkPackages = <String>{
 /// 必须由一个提交显式说明，而不是悄悄发生。处数写死是有意的 ——
 /// 同一插件多 import 一处也要来改这里，改动于是会出现在 diff 里。
 const Map<String, int> _expectedPluginImports = <String, int>{
-  // 密钥：AI 的 apiKey、GitHub 的 token —— 只在系统安全存储里
-  'flutter_secure_storage': 2, // ai_client.dart、github_backup_client.dart
-  'http': 2, // ai_client.dart、github_backup_client.dart
+  // 密钥：AI 的 apiKey、GitHub 的 token、服务器的 Token —— 只在系统安全存储里
+  'flutter_secure_storage': 3, // ai_client.dart、github_backup_client.dart、server_backup_client.dart
+  'http': 3, // ai_client.dart、github_backup_client.dart、server_backup_client.dart
   'path_provider': 1, // data_directory.dart
   'file_picker': 1, // data_transfer_platform.dart
   'share_plus': 1, // data_transfer_platform.dart

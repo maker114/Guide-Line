@@ -1045,6 +1045,51 @@ class AppStorage {
     }
   }
 
+  // -------------------------------------------------- 服务器同步的记账
+
+  /// 「上次与自建服务器同步到哪」的记账文件名。
+  ///
+  /// 与 [githubSyncRecordFileName] **各记各的**：两条管线可以同时开着，
+  /// 一条的记账不能让另一条误以为"上次同步过"（否则冲突基线会拿错）。
+  /// 同样不是数据：不进主数据文件、不进导出、不进滚动备份。
+  static const String serverSyncRecordFileName = 'server_sync.json';
+
+  File get _serverSyncFile => File(
+        '${paths.directory.path}${Platform.pathSeparator}$serverSyncRecordFileName',
+      );
+
+  /// 读回服务器同步记账；没有 / 读不出 / 坏了一律返回 `null`。
+  SyncRecord? readServerSyncRecord() {
+    final file = _serverSyncFile;
+    if (!file.existsSync()) return null;
+    try {
+      return SyncRecord.parse(file.readAsStringSync(encoding: utf8));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 记一次成功的服务器同步（与 [writeSyncRecord] 同一口径：写不进去只当没记上）。
+  void writeServerSyncRecord(SyncRecord record) {
+    try {
+      paths.ensureDirectories();
+      AtomicFile(_serverSyncFile).writeText(record.toCanonicalText());
+    } catch (_) {
+      // 文件已经推上去了（或已经拉下来了），记账失败不改变这次结果。
+    }
+  }
+
+  /// 清掉服务器同步的记账（例如用户换了服务器地址 / 证书）。
+  void clearServerSyncRecord() {
+    final file = _serverSyncFile;
+    if (!file.existsSync()) return;
+    try {
+      file.deleteSync();
+    } catch (_) {
+      // 删不掉也不影响：下次同步会整份覆盖。
+    }
+  }
+
   /// 主数据文件里那句 `savedAt`：**本地数据最后一次落盘的时刻**。
   ///
   /// 冲突判定要拿它跟远程那份的 `exportedAt` 比。这里刻意**不用

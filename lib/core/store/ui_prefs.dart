@@ -27,6 +27,9 @@ class UiPrefs {
     this.githubBackupRepo = '',
     this.githubBackupBranch = defaultGithubBranch,
     this.githubBackupPath = defaultGithubBackupPath,
+    this.serverSyncEnabled = false,
+    this.serverSyncBaseUrl = '',
+    this.serverSyncFingerprint = '',
     this.reminderEnabled = false,
     this.reminderLeads = ReminderLead.defaults,
     this.reminderCatchUpShown = const <String>{},
@@ -196,6 +199,21 @@ class UiPrefs {
   /// 远程文件路径（**非敏感**）。
   final String githubBackupPath;
 
+  /// 「服务器同步」的**总开关**（默认**关**）。
+  ///
+  /// 与 [githubBackupEnabled] 同一条口径：关掉不清地址 / 指纹 / Token，
+  /// 也不删服务器上那份。两条管线各自一个开关，**互不隶属** ——
+  /// 有人只想留 GitHub、有人只想用自建服务器，共用一个开关就只能二选一。
+  final bool serverSyncEnabled;
+
+  /// 自建同步服务的地址（**非敏感**），形如 `https://host:8443`。
+  final String serverSyncBaseUrl;
+
+  /// 服务端证书的 SHA-256 指纹（**非敏感**，64 位十六进制）。
+  ///
+  /// 它不是密码：指纹公开也不影响安全，泄露的只是"这台服务器用什么证书"。
+  final String serverSyncFingerprint;
+
   /// 提醒功能的**总开关**（默认**关**，用户 2026-10-03 定）。
   ///
   /// 默认关的两个理由：
@@ -304,6 +322,9 @@ class UiPrefs {
     String? githubBackupRepo,
     String? githubBackupBranch,
     String? githubBackupPath,
+    bool? serverSyncEnabled,
+    String? serverSyncBaseUrl,
+    String? serverSyncFingerprint,
     bool? reminderEnabled,
     List<ReminderLead>? reminderLeads,
     Set<String>? reminderCatchUpShown,
@@ -338,6 +359,10 @@ class UiPrefs {
         githubBackupRepo: githubBackupRepo ?? this.githubBackupRepo,
         githubBackupBranch: githubBackupBranch ?? this.githubBackupBranch,
         githubBackupPath: githubBackupPath ?? this.githubBackupPath,
+        serverSyncEnabled: serverSyncEnabled ?? this.serverSyncEnabled,
+        serverSyncBaseUrl: serverSyncBaseUrl ?? this.serverSyncBaseUrl,
+        serverSyncFingerprint:
+            serverSyncFingerprint ?? this.serverSyncFingerprint,
         reminderEnabled: reminderEnabled ?? this.reminderEnabled,
         reminderLeads: reminderLeads ?? this.reminderLeads,
         reminderCatchUpShown: reminderCatchUpShown ?? this.reminderCatchUpShown,
@@ -367,6 +392,9 @@ class UiPrefs {
         'githubBackupRepo': githubBackupRepo,
         'githubBackupBranch': githubBackupBranch,
         'githubBackupPath': githubBackupPath,
+        'serverSyncEnabled': serverSyncEnabled,
+        'serverSyncBaseUrl': serverSyncBaseUrl,
+        'serverSyncFingerprint': serverSyncFingerprint,
         'reminderEnabled': reminderEnabled,
         'reminderLeads': reminderLeads
             .map((lead) => lead.toJson())
@@ -416,6 +444,11 @@ class UiPrefs {
       githubBackupRepo: _readTrimmed(json['githubBackupRepo']),
       githubBackupBranch: _readNonEmpty(json['githubBackupBranch'], defaultGithubBranch),
       githubBackupPath: _readNonEmpty(json['githubBackupPath'], defaultGithubBackupPath),
+      // 服务器同步：与上面几项同一套口径。开关**缺键即关**；
+      // 地址与指纹允许为空（那就是"还没配"），坏值静默收回空串。
+      serverSyncEnabled: json['serverSyncEnabled'] == true,
+      serverSyncBaseUrl: _readTrimmed(json['serverSyncBaseUrl']),
+      serverSyncFingerprint: _readTrimmed(json['serverSyncFingerprint']),
       // 提醒：开关**缺键即关**（与 githubBackupEnabled 同一条口径 ——
       // 老偏好文件里没有它，不该因此凭空开始弹通知）；
       // 两档缺键则取默认的 60 / 10 分钟，这样用户一打开开关就有可用的默认，

@@ -2,10 +2,11 @@
 
 **本地优先的个人生活管理工具** —— 把「灵感」和「任务线」两条线管清楚。
 
-Android 单机版 + Windows 桌面版。**没有账号、没有服务器、没有推送**：数据是设备上的一份
-文件，只留在你自己手里；想留一份在家门外，可以自己填一个 GitHub 私有仓库当备份点。
+Android 单机版 + Windows 桌面版。**没有账号、没有第三方服务器、没有推送**：数据是设备上的
+一份文件，只留在你自己手里；想留一份在家门外，可以自己填一个 GitHub 私有仓库，
+或搭一台自己的同步服务器（服务端在 `server/`）当备份点。
 
-当前版本 **2.10.1+102** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
+当前版本 **2.11.0+103** ｜ 变更记录 [`CHANGELOG.md`](CHANGELOG.md) ｜ 安装包 [Releases](https://github.com/maker114/Guide-Line/releases) ｜ 许可 [MIT](LICENSE)
 
 > 📷 **下面截图里的内容全部是演示数据**，由 `tool/demo_seed.dart` 生成
 > （10 个项目 / 10 条灵感 / 6 条事件 / 30 条任务），**不含任何真实使用者的内容**。
