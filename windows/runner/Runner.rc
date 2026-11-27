@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.maker" "\0"
-            VALUE "FileDescription", "Guide Line" "\0"
+            VALUE "FileDescription", "Guideline-Beta-ServerTest-1" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "guideline" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.maker. All rights reserved." "\0"
             VALUE "OriginalFilename", "guideline.exe" "\0"
-            VALUE "ProductName", "Guide Line" "\0"
+            VALUE "ProductName", "Guideline-Beta-ServerTest-1" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -35,6 +35,29 @@
 > 占位节：本仓库的现状口径是**一个小版本对应一个提交**，行为改了就直接新增一节
 > `## [x.y.z]`，不往这里攒条目（口径见 `AGENTS.md` §8）。
 
+## [2.10.1] - 2026-11-27
+
+> 实验分支（`beta/server-test`）的第一版：把这条线的显示名与测试包统一成
+> `Guideline-Beta-ServerTest-<n>`，并定下它只走分支、不并 `main`（ADR-104）。
+> 正式线 `main` 的显示名仍是 `Guide Line`，这一节只描述分支上的行为。
+>
+> 版本位（`AGENTS.md` §6）：只改显示文案与出包名字 ⇒ **修订位 +1**
+> （2.10.0 → 2.10.1），构建号 +1（101 → 102）。按 §8.1 的判据，修订位不建 tag、不发 Release。
+>
+> 验收：`flutter analyze --no-pub` 0 问题；`flutter test --no-pub` **1072 例全绿**；
+> 四处版本号已对齐。
+
+### Changed
+
+- **实验分支的显示名统一为 `Guideline-Beta-ServerTest-1`**（ADR-104；ADR-032 的
+  `Guide Line` 只在 `main` 生效，本分支临时覆盖它）。关于弹窗、Android 桌面图标名、
+  Windows 窗口标题与文件属性（`FileDescription` / `ProductName`）取同一个名字。
+  **与旧行为的差别**：装上测试包后，图标、窗口标题与「关于」一眼就能和正式版区分开。
+- **测试包按同一名字出包**（`docs/构建与发布.md` §7.2）：手机端叫
+  `dist/Guideline-Beta-ServerTest-<n>.apk`，电脑端叫
+  `dist/Guideline-Beta-ServerTest-<n>-windows.zip`。测试号 `<n>` 从 1 起、每出一个
+  可测包 +1，与 `pubspec.yaml` 的 `主.次.修订+构建号` 分开记。
+
 ## [2.10.0] - 2026-10-29
 
 > 用户（2026-10-29）从交接清单一次提了七条（三个项目）：合并界面重做、交接说明去标识色、

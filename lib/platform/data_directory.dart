@@ -85,11 +85,17 @@ class DataDirectory {
 class AppInfo {
   const AppInfo._();
 
-  static const String displayName = 'Guide Line';
+  /// 实验分支（`beta/server-test`）的显示名：`Guideline-Beta-ServerTest-<n>`。
+  ///
+  /// 口径见 `AGENTS.md` §10 与 `docs/构建与发布.md` §7.2 —— `<n>` 是测试号（从 1 起，
+  /// 每出一个可测包 +1），与下面的 `version` / `buildNumber` **不是一回事**：
+  /// 版本号照 `主.次.修订+构建号` 走，测试号只进显示名与产物文件名。
+  /// 合回 `main` 前必须还原成 `Guide Line`（ADR-032）。
+  static const String displayName = 'Guideline-Beta-ServerTest-1';
 
-  static const String version = '2.10.0';
+  static const String version = '2.10.1';
 
-  static const String buildNumber = '101';
+  static const String buildNumber = '102';
 
   /// 界面与导出里展示的完整版本（`1.8.5+37`）。
   ///

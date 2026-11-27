@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:guideline/app/app_controller.dart';
 import 'package:guideline/main.dart';
+import 'package:guideline/platform/data_directory.dart';
 
 /// **Flutter 内置组件的文案要是中文**（2026-10-02 加）。
 ///
@@ -46,8 +47,9 @@ void main() {
     await tester.tap(find.text('关于'));
     await tester.pumpAndSettle();
 
-    // 弹窗本体在（版本号那一行）
-    expect(find.text('Guide Line'), findsWidgets);
+    // 弹窗本体在：应用名取自 `AppInfo.displayName`（实验分支上带 `Beta-ServerTest`
+    // 后缀），这里不写死名字 —— 改测试线或合回 `main` 时都不必再动这条用例。
+    expect(find.text(AppInfo.displayName), findsWidgets);
 
     expect(
       find.text('查看许可'),
