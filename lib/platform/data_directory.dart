@@ -89,9 +89,9 @@ class AppInfo {
   /// `Guideline-Beta-ServerTest-<n>` 已于 2026-11-27 合并回 `main` 时还原成这一份。
   static const String displayName = 'Guide Line';
 
-  static const String version = '2.12.0';
+  static const String version = '2.13.0';
 
-  static const String buildNumber = '106';
+  static const String buildNumber = '107';
 
   /// 界面与导出里展示的完整版本（`1.8.5+37`）。
   ///

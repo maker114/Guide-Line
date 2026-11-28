@@ -82,6 +82,8 @@ function Send([string]$method, [string]$url, $body, [string]$contentType) {
 # 把 `2.8.0` 与 `2.9.0` 的改动一并带上；`v2.8.0` 自己也补一篇（只挂它自己的包）。
 # `v2.7.0` 那一篇**不重建** —— 它当年是按用户要求删掉的，重开等于替用户反悔。
 $releases = @(
+  @{ Tag = 'v2.13.0'; Name = 'v2.13.0 — 服务器同步自动刷新、窗口记住位置'; Asset = @('dist/guideline-2.13.0.apk', 'dist/guideline-windows-2.13.0.zip') },
+  @{ Tag = 'v2.12.0'; Name = 'v2.12.0 — 服务器同步与电脑端窗口'; Asset = @('dist/guideline-2.12.0.apk', 'dist/guideline-windows-2.12.0.zip') },
   # 2026-10-29：`v2.10.0` 按"一篇 Release 对应一个次位号"发；`2.9.1` 是修订版，
   # 不单独发，正文已并进这一篇。附件只挂它自己那一版的包（APK + 电脑端 zip）。
   @{ Tag = 'v2.10.0'; Name = 'v2.10.0 — 合并只落清单、今日事带上事件名'; Asset = @('dist/guideline-2.10.0.apk', 'dist/guideline-windows-2.10.0.zip') },
