@@ -26,6 +26,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   FlutterWindow window(project);
   // Title bar text (the binary is still guideline.exe; this is what users read).
+  // 这里的尺寸只是**第一次启动**的兜底：有 `%LOCALAPPDATA%\GuideLine\window.state`
+  // 时按存档恢复（见 `win32_window.cpp` 的 `RestorePlacement`），没有存档则居中。
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"Guide Line", origin, size)) {

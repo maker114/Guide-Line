@@ -4,6 +4,9 @@
 #include <flutter_windows.h>
 #include <windowsx.h>
 
+#include <cstdio>
+#include <string>
+
 #include "resource.h"
 
 namespace {
@@ -26,6 +29,165 @@ constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 constexpr const wchar_t kGetPreferredBrightnessRegKey[] =
   L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
 constexpr const wchar_t kGetPreferredBrightnessRegValue[] = L"AppsUseLightTheme";
+
+// 窗口位置 / 大小 / 最大化状态的存档名。
+//
+// 目录与 `lib/platform/data_directory.dart` 里的 `desktopFolderName` 一致：
+// 电脑端数据都落在 `%LOCALAPPDATA%\GuideLine`。窗口状态**不是数据** ——
+// 不进备份、不进导出，删掉只是回到"居中 + 默认大小"。
+constexpr const wchar_t kWindowStateFileName[] = L"window.state";
+
+struct WindowState {
+  RECT rect{};
+  bool maximized = false;
+  bool valid = false;
+};
+
+// `%LOCALAPPDATA%\GuideLine`；拿不到环境变量时返回空串（只是不记忆窗口，不影响启动）。
+std::wstring WindowStateDirectory() {
+  wchar_t buffer[1024] = {};
+  const DWORD length =
+      GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, 1024);
+  if (length == 0 || length >= 1024) {
+    return std::wstring();
+  }
+  std::wstring directory(buffer, length);
+  directory += L"\\GuideLine";
+  CreateDirectoryW(directory.c_str(), nullptr);
+  return directory;
+}
+
+bool ReadWindowState(WindowState* state) {
+  const std::wstring directory = WindowStateDirectory();
+  if (directory.empty()) {
+    return false;
+  }
+  const std::wstring path = directory + L"\\" + kWindowStateFileName;
+  HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                            nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  char text[256] = {};
+  DWORD read = 0;
+  const BOOL ok = ReadFile(file, text, sizeof(text) - 1, &read, nullptr);
+  CloseHandle(file);
+  if (!ok || read == 0) {
+    return false;
+  }
+  long x = 0, y = 0, width = 0, height = 0;
+  int maximized = 0;
+  if (sscanf_s(text, "x=%ld y=%ld w=%ld h=%ld max=%d", &x, &y, &width,
+               &height, &maximized) != 5) {
+    return false;
+  }
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
+  state->rect = RECT{x, y, x + width, y + height};
+  state->maximized = maximized != 0;
+  state->valid = true;
+  return true;
+}
+
+void WriteWindowState(const RECT& rect, bool maximized) {
+  const std::wstring directory = WindowStateDirectory();
+  if (directory.empty()) {
+    return;
+  }
+  char text[256] = {};
+  const int length =
+      sprintf_s(text, sizeof(text), "x=%ld y=%ld w=%ld h=%ld max=%d\n",
+                rect.left, rect.top, rect.right - rect.left,
+                rect.bottom - rect.top, maximized ? 1 : 0);
+  if (length <= 0) {
+    return;
+  }
+  const std::wstring path = directory + L"\\" + kWindowStateFileName;
+  const std::wstring temporary = path + L".tmp";
+  HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
+                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  DWORD written = 0;
+  WriteFile(file, text, static_cast<DWORD>(length), &written, nullptr);
+  FlushFileBuffers(file);
+  CloseHandle(file);
+  MoveFileExW(temporary.c_str(), path.c_str(),
+              MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+}
+
+// 存档里的矩形至少要有这么一块落在某个显示器的工作区里，才算"看得见"。
+bool IsUsableOnScreen(const RECT& rect) {
+  HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+  if (monitor == nullptr) {
+    return false;
+  }
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (!GetMonitorInfo(monitor, &info)) {
+    return false;
+  }
+  RECT overlap{};
+  if (!IntersectRect(&overlap, &rect, &info.rcWork)) {
+    return false;
+  }
+  return (overlap.right - overlap.left) >= 120 &&
+         (overlap.bottom - overlap.top) >= 60;
+}
+
+// 把矩形夹进最近那个显示器的工作区：换过显示器 / 分辨率变小之后也不会跑到屏幕外。
+void ClampToWorkArea(RECT* rect) {
+  HMONITOR monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+  if (monitor == nullptr) {
+    return;
+  }
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (!GetMonitorInfo(monitor, &info)) {
+    return;
+  }
+  const RECT work = info.rcWork;
+  int width = rect->right - rect->left;
+  int height = rect->bottom - rect->top;
+  const int work_width = work.right - work.left;
+  const int work_height = work.bottom - work.top;
+  if (width > work_width) width = work_width;
+  if (height > work_height) height = work_height;
+  int left = rect->left;
+  int top = rect->top;
+  if (left < work.left) left = work.left;
+  if (top < work.top) top = work.top;
+  if (left + width > work.right) left = work.right - width;
+  if (top + height > work.bottom) top = work.bottom - height;
+  rect->left = left;
+  rect->top = top;
+  rect->right = left + width;
+  rect->bottom = top + height;
+}
+
+void CenterOnNearestMonitor(RECT* rect) {
+  HMONITOR monitor = MonitorFromRect(rect, MONITOR_DEFAULTTONEAREST);
+  if (monitor == nullptr) {
+    monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+  }
+  MONITORINFO info{};
+  info.cbSize = sizeof(info);
+  if (!GetMonitorInfo(monitor, &info)) {
+    return;
+  }
+  const RECT work = info.rcWork;
+  const int width = rect->right - rect->left;
+  const int height = rect->bottom - rect->top;
+  const int left = work.left + (work.right - work.left - width) / 2;
+  const int top = work.top + (work.bottom - work.top - height) / 2;
+  rect->left = left;
+  rect->top = top;
+  rect->right = left + width;
+  rect->bottom = top + height;
+}
 
 // The number of Win32Window objects that currently exist.
 static int g_active_window_count = 0;
@@ -146,13 +308,64 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
+  initial_rect_ = RECT{
+      Scale(origin.x, scale_factor),
+      Scale(origin.y, scale_factor),
+      Scale(origin.x, scale_factor) + Scale(size.width, scale_factor),
+      Scale(origin.y, scale_factor) + Scale(size.height, scale_factor),
+  };
+  // 先按存档摆好，再建 Flutter 视图 —— 视图的初始尺寸取自客户区，
+  // 晚一步就会先按默认大小建一次、再被撑开（闪一下）。
+  RestorePlacement();
+
   UpdateTheme(window);
 
   return OnCreate();
 }
 
+void Win32Window::RestorePlacement() {
+  WindowState state;
+  const bool restored = ReadWindowState(&state);
+  RECT rect = restored ? state.rect : initial_rect_;
+
+  // 存档落在看不见的地方（换显示器 / 分辨率变小 / 显示器被拔掉）⇒ 当作没有存档，
+  // 居中到当前显示器 —— 比"窗口在屏幕外、只能靠任务栏找回来"强。
+  if (!restored || !IsUsableOnScreen(rect)) {
+    rect = initial_rect_;
+    CenterOnNearestMonitor(&rect);
+  } else {
+    ClampToWorkArea(&rect);
+  }
+
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  placement.rcNormalPosition = rect;
+  placement.showCmd = restored && state.maximized ? SW_SHOWMAXIMIZED
+                                                  : SW_SHOWNORMAL;
+  SetWindowPlacement(window_handle_, &placement);
+  start_maximized_ = placement.showCmd == SW_SHOWMAXIMIZED;
+}
+
+void Win32Window::SavePlacement() {
+  if (!window_handle_) {
+    return;
+  }
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  if (!GetWindowPlacement(window_handle_, &placement)) {
+    return;
+  }
+  // 最小化时 `showCmd` 是 SW_SHOWMINIMIZED，但 `rcNormalPosition` 仍是还原后的
+  // 位置 / 大小 —— 正好是下次该恢复的东西。
+  const bool maximized = IsZoomed(window_handle_) != 0 ||
+                         placement.showCmd == SW_SHOWMAXIMIZED;
+  WriteWindowState(placement.rcNormalPosition, maximized);
+}
+
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  // `SW_SHOWNORMAL` 会把最大化状态还原掉，所以恢复时要用 `SW_SHOWMAXIMIZED`。
+  return ShowWindow(window_handle_,
+                    start_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }
 
 // static
@@ -182,12 +395,23 @@ Win32Window::MessageHandler(HWND hwnd,
                             LPARAM const lparam) noexcept {
   switch (message) {
     case WM_DESTROY:
+      // 程序内销毁（不经过 WM_CLOSE）时也把最后的摆放记下来。
+      SavePlacement();
       window_handle_ = nullptr;
       Destroy();
       if (quit_on_close_) {
         PostQuitMessage(0);
       }
       return 0;
+
+    case WM_CLOSE:
+      SavePlacement();
+      break;
+
+    case WM_EXITSIZEMOVE:
+      // 拖完 / 拉完边框：这时用户已经定下了新的位置与大小，记下来。
+      SavePlacement();
+      break;
 
     case WM_DPICHANGED: {
       auto newRectSize = reinterpret_cast<RECT*>(lparam);

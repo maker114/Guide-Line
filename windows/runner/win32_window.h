@@ -90,7 +90,22 @@ class Win32Window {
   // Update the window frame's theme to match the system theme.
   static void UpdateTheme(HWND const window);
 
+  // 关掉窗口时把位置 / 大小 / 最大化状态记下来，下次启动按它恢复。
+  //
+  // 存在 `%LOCALAPPDATA%\GuideLine\window.state`：与 ADR-094 的桌面数据目录
+  // 同一处，但它**不是数据**（不进备份、不进导出），删掉只是回到默认居中。
+  void SavePlacement();
+
+  // 启动时按存档恢复；没有存档 / 存档落在看不见的地方就居中到当前显示器。
+  void RestorePlacement();
+
   bool quit_on_close_ = false;
+
+  // 上次显示时是不是最大化（`Show` 用：`SW_SHOWNORMAL` 会把最大化还原掉）。
+  bool start_maximized_ = false;
+
+  // `Create` 传进来的那块矩形（物理像素）：没有存档时拿它居中。
+  RECT initial_rect_{};
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;
