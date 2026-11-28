@@ -324,20 +324,6 @@ class _ServerBackupPageState extends State<ServerBackupPage> {
                   ),
                 if (_result != null)
                   _ResultBox(text: _result!, error: _isErrorText(_result!)),
-                const _SectionLabel('会发出去什么'),
-                const _Bullet(
-                  '整份数据文件，压缩后即「导出」会生成的那一份：'
-                  '项目、灵感、事件、任务，含墓碑',
-                ),
-                const _Bullet(
-                  '以明文 gzip 存在你自己的服务器上；传输走 HTTPS，'
-                  '证书由客户端按指纹固定，不会因为「自签」就放行任意证书。',
-                ),
-                const _Bullet('每次推送都会留下一个上传编号，每推一次 +1'),
-                const _SectionLabel('不会发出去什么'),
-                const _Bullet('Token 本身：它只存在系统安全存储里，连偏好文件的键都不出现'),
-                const _Bullet('不会自动拉回，也不会把两份数据自动合并'),
-                const _Bullet('不会在启动或回主页时偷偷上传 —— 这一版的服务器同步是纯手动'),
               ],
             ),
     );
@@ -366,26 +352,6 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
         child: Text(text, style: Theme.of(context).textTheme.labelLarge),
-      );
-}
-
-class _Bullet extends StatelessWidget {
-  const _Bullet(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            const Text('· '),
-            Expanded(
-              child: Text(text, style: Theme.of(context).textTheme.bodySmall),
-            ),
-          ],
-        ),
       );
 }
 

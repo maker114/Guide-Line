@@ -142,7 +142,6 @@ void main() {
       expect(push.onTap, isNull);
       expect(pull.onTap, isNull);
       expect(test.onTap, isNotNull, reason: '测试连接是只读的，关着开关也该能验配置');
-      expect(find.textContaining('开关关着'), findsOneWidget);
 
       await tapAction(tester, '推送到 GitHub');
       await tapAction(tester, '从 GitHub 拉取');

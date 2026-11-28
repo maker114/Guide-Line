@@ -80,14 +80,6 @@ class _ExportPageState extends State<ExportPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        app.exportOverdue
-                            ? '建议每 ${AppController.exportReminderDays} 天导出一次。'
-                                '没有云端，手机丢失或卸载后，数据只剩这份导出。'
-                            : '导出的备份还不算旧。',
-                        style: theme.textTheme.bodySmall,
-                      ),
                     ],
                   ),
                 ),
@@ -118,15 +110,6 @@ class _ExportPageState extends State<ExportPage> {
                   padding: EdgeInsets.symmetric(vertical: 8),
                   child: Center(child: CircularProgressIndicator()),
                 ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                child: Text('说明', style: theme.textTheme.labelLarge),
-              ),
-              // 只留与"会不会丢数据"有关的两条
-              const _Bullet('「从文件导入」是整体替换：这台手机会变成文件里的内容。'
-                  '替换前会先留一份备份，导入有误可以在「备份与恢复」里恢复。'),
-              const _Bullet('「合并导入」同一条记录以较新的一方为准，合并前同样先留一份备份。'),
             ],
           ),
         );
@@ -437,26 +420,5 @@ String _docLabel(DocName name) {
       return '事件';
     case DocName.tasks:
       return '任务';
-  }
-}
-
-class _Bullet extends StatelessWidget {
-  const _Bullet(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('· ', style: theme.textTheme.bodySmall),
-          Expanded(child: Text(text, style: theme.textTheme.bodySmall)),
-        ],
-      ),
-    );
   }
 }

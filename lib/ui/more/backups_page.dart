@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../app/app_controller.dart';
 import '../../core/json/store_file.dart';
 import '../../core/models/enums.dart';
-import '../../core/store/app_paths.dart';
 import '../../core/store/app_storage.dart';
 import '../../core/store/github_sync.dart';
 import '../../core/store/store_diff.dart';
@@ -51,19 +50,6 @@ class BackupsPage extends StatelessWidget {
                 title: const Text('立即备份一份'),
                 subtitle: const Text('立刻存一次并留一份备份，不等最小间隔'),
                 onTap: () => _snapshot(context),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                child: Text(
-                  // 只留"会被覆盖、想反悔要尽快"这一句：它是丢失风险。
-                  // 2026-10-02 把**日快照**那一档也写进来 —— 原文只说了滚动备份
-                  // 留几份，而页面上明明还列着"日快照"那一类，用户会问"那些留多久"。
-                  // 两个数字都引常量，不再各写一遍。
-                  '滚动备份只保留 ${AppPaths.rollingBackupCount} 份，'
-                  '会被后续保存依次覆盖；日快照按天各留一份、最多 ${AppPaths.dailyBackupCount} 天。'
-                  '如需恢复到较早的备份请尽快。',
-                  style: theme.textTheme.bodySmall,
-                ),
               ),
               const Divider(),
               if (backups.isEmpty)

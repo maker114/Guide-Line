@@ -126,7 +126,7 @@ class _MoreTabState extends State<MoreTab> {
         _MoreItem(
           icon: Icons.history,
           title: '备份与恢复',
-          subtitle: '${backups.length} 份可用备份，滚动留 10 份、日快照留 7 天',
+          subtitle: '${backups.length} 份可用备份',
           page: BackupsPage(app: app),
         ),
         _MoreItem(

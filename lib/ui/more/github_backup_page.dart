@@ -597,14 +597,6 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                 ),
                 const Divider(height: 1),
                 _SectionLabel('同步'),
-                if (!_enabled)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
-                    child: Text(
-                      '开关关着：推送与拉取均不可用；检查更新与测试连接都是只读的，随时可用。'
-                      '这一页不会在未操作时自行联网。',
-                    ),
-                  ),
                 // 四条按"从只读到会写"排序：看 → 试 → 传上去 → 拉下来。
                 // 两个会改数据的放在后面，且副标题都写明"会不会动数据"。
                 _ActionTile(
@@ -645,20 +637,6 @@ class _GitHubBackupPageState extends State<GitHubBackupPage> {
                   ),
                 if (_result != null)
                   _ResultBox(text: _result!, error: _isErrorText(_result!)),
-                _SectionLabel('会发出去什么'),
-                const _Bullet(
-                  '整份数据文件，压缩后即「导出」会生成的那一份：'
-                  '项目、灵感、事件、任务，含墓碑与偏好文件之外的记录',
-                ),
-                const _Bullet(
-                  '上传之后，这份数据会以明文 gzip 的形式存在于你的 GitHub 仓库，'
-                  '因此这个仓库必须是私有的。',
-                ),
-                const _Bullet('每次推送都是仓库里的一次提交，所以旧版本可以从提交历史里找回'),
-                _SectionLabel('不会发出去什么'),
-                const _Bullet('Token 本身：它只存在系统安全存储里，连偏好文件的键都不出现'),
-                const _Bullet('不会自动拉回：启动时的比对只读，两边对不上时由你选保留哪一边。'),
-                const _Bullet('不会把远程备份与本地数据自动合并：两端都改过时，只由你选择合并方向。'),
               ],
             ),
     );
@@ -678,26 +656,6 @@ class _SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
     child: Text(text, style: Theme.of(context).textTheme.labelLarge),
-  );
-}
-
-class _Bullet extends StatelessWidget {
-  const _Bullet(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 2, 16, 2),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        const Text('· '),
-        Expanded(
-          child: Text(text, style: Theme.of(context).textTheme.bodySmall),
-        ),
-      ],
-    ),
   );
 }
 

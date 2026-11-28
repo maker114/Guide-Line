@@ -188,28 +188,6 @@ class _AiSettingsPageState extends State<AiSettingsPage> {
                       ),
                     ),
                   ),
-                const Divider(height: 32),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text('会发出去什么', style: theme.textTheme.labelLarge),
-                      const SizedBox(height: 6),
-                      // 字段名三处一致（Q4）：项目详情页、这一页的说明、线上提示词
-                      // （`ai_client.dart`）都写「有什么问题 / 思路」与「实现清单」。
-                      _Bullet('项目名称、项目「有什么问题 / 思路」、清单条目文本与勾选状态，'
-                          '以及一段要求它只整理不新增的固定提示词'),
-                      const SizedBox(height: 12),
-                      Text('不会发出去什么', style: theme.textTheme.labelLarge),
-                      const SizedBox(height: 6),
-                      _Bullet('灵感原文、事件与任务、其它项目、设备信息；'
-                          '提示词与模型返回的原文也都不落盘'),
-                      const SizedBox(height: 12),
-                      Text('请求只会发到你上面填的地址。', style: theme.textTheme.bodySmall),
-                    ],
-                  ),
-                ),
               ],
             ),
     );
@@ -349,27 +327,6 @@ class _FieldState extends State<_Field> {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Bullet extends StatelessWidget {
-  const _Bullet(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text('· ', style: theme.textTheme.bodySmall),
-          Expanded(child: Text(text, style: theme.textTheme.bodySmall)),
         ],
       ),
     );
