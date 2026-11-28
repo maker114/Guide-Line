@@ -9,6 +9,7 @@ import json
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -365,6 +366,74 @@ class ApiTest(unittest.TestCase):
         status, _, data = self.request("GET", "/v1/backup/?x=1", headers=auth())
         self.assertEqual(status, 200)
         self.assertEqual(data, gz("slash"))
+
+    # ------------------------------------------------------------ 长轮询
+    def test_watch_returns_immediately_when_revision_is_already_newer(
+        self,
+    ) -> None:
+        self.put(gz("one"))
+        status, _, body = self.request(
+            "GET", "/v1/backup/watch?since=0&timeout=10", headers=auth()
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self.json_body(body)["revision"], 1)
+
+    def test_watch_times_out_with_204(self) -> None:
+        status, headers, body = self.request(
+            "GET", "/v1/backup/watch?since=0&timeout=0", headers=auth()
+        )
+        self.assertEqual(status, 204)
+        self.assertEqual(body, b"")
+        self.assertEqual(headers.get("content-length"), "0")
+
+        self.put(gz("one"))
+        status, _, body = self.request(
+            "GET", "/v1/backup/watch?since=1&timeout=0", headers=auth()
+        )
+        self.assertEqual(status, 204)
+        self.assertEqual(body, b"")
+
+    def test_watch_wakes_up_when_someone_puts(self) -> None:
+        result: dict[str, tuple[int, dict[str, str], bytes]] = {}
+
+        def waiting() -> None:
+            result["response"] = self.request(
+                "GET", "/v1/backup/watch?since=0&timeout=5", headers=auth()
+            )
+
+        thread = threading.Thread(target=waiting)
+        thread.start()
+        time.sleep(0.2)
+        self.put(gz("pushed"))
+        thread.join(timeout=6)
+
+        self.assertFalse(thread.is_alive(), "PUT 之后长轮询应该立刻返回")
+        status, _, body = result["response"]
+        self.assertEqual(status, 200)
+        self.assertEqual(self.json_body(body)["revision"], 1)
+
+    def test_watch_requires_since_and_token(self) -> None:
+        status, _, body = self.request("GET", "/v1/backup/watch", headers=auth())
+        self.assertEqual(status, 400)
+        self.assertEqual(self.json_body(body)["error"], "bad_request")
+
+        status, _, body = self.request(
+            "GET", "/v1/backup/watch?since=0&timeout=0", headers={}
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(self.json_body(body)["error"], "unauthorized")
+
+        status, _, body = self.request(
+            "GET", "/v1/backup/watch?since=abc", headers=auth()
+        )
+        self.assertEqual(status, 400)
+
+    def test_watch_method_not_allowed(self) -> None:
+        status, headers, _ = self.request(
+            "POST", "/v1/backup/watch", body=b"", headers=auth()
+        )
+        self.assertEqual(status, 405)
+        self.assertIn("GET", headers["allow"])
 
 
 if __name__ == "__main__":

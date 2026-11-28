@@ -96,6 +96,23 @@ class _ServerBackupPageState extends State<ServerBackupPage> {
 
   Future<void> _save() async {
     if (_busy) return;
+    if (_enabled && app.prefs.githubBackupEnabled) {
+      final ok = await confirmAction(
+        context,
+        title: '两条同步只能开一条',
+        message: '开启服务器同步会关闭「GitHub 备份同步」；'
+            '它的仓库、Token 与记账都保留，想换回来再打开即可。',
+        confirmLabel: '继续',
+        cancelLabel: '取消',
+      );
+      if (!mounted) return;
+      if (!ok) {
+        final saved = await app.readServerBackupConfig();
+        if (!mounted) return;
+        setState(() => _enabled = saved.config.enabled);
+        return;
+      }
+    }
     setState(() => _busy = true);
     final draft = await _draft();
     final error = await app.saveServerBackupConfig(draft.config, draft.token);

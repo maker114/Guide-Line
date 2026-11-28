@@ -144,8 +144,105 @@ void main() {
     expect(meta.sha256, 'c' * 64);
   });
 
-  test('配置不全时连请求都不发', () async {
-    var called = false;
+  group('长轮询', () {
+    test('带 since 与 timeout 去等，有新版本时解析元信息', () async {
+      late http.Request seen;
+      final gateway = gatewayWith((request) async {
+        seen = request;
+        return http.Response(
+          jsonEncode(<String, Object>{
+            'revision': 12,
+            'sha256': 'd' * 64,
+            'size': 2048,
+            'savedAt': 1700000000000,
+            'recordCount': 9,
+            'appVersion': '2.12.0+106',
+            'updatedAt': 1700000000001,
+          }),
+          200,
+        );
+      });
+
+      final meta = await gateway.watchMeta(
+        config: config,
+        token: token,
+        since: 11,
+        timeout: const Duration(seconds: 25),
+      );
+      expect(seen.url.path, '/v1/backup/watch');
+      expect(seen.url.queryParameters['since'], '11');
+      expect(seen.url.queryParameters['timeout'], '25');
+      expect(seen.headers['Authorization'], 'Bearer $token');
+      expect(meta!.revision, 12);
+      expect(meta.sha256, 'd' * 64);
+    });
+
+    test('204 表示这段时间没有新版本（不是错误）', () async {
+      final gateway = gatewayWith((_) async => http.Response('', 204));
+      expect(
+        await gateway.watchMeta(
+          config: config,
+          token: token,
+          since: 3,
+          timeout: const Duration(seconds: 1),
+        ),
+        isNull,
+      );
+    });
+
+    test('旧服务端 404 not_found：明确告知不支持，好降级成轮询', () async {
+      final gateway = gatewayWith(
+        (_) async => http.Response('{"error":"not_found"}', 404),
+      );
+      await expectLater(
+        gateway.watchMeta(
+          config: config,
+          token: token,
+          since: 0,
+          timeout: const Duration(seconds: 1),
+        ),
+        throwsA(isA<ServerWatchUnsupported>()),
+      );
+    });
+
+    test('服务器还没有备份（404 empty）不算新版本', () async {
+      final gateway = gatewayWith(
+        (_) async => http.Response('{"error":"empty"}', 404),
+      );
+      expect(
+        await gateway.watchMeta(
+          config: config,
+          token: token,
+          since: 0,
+          timeout: const Duration(seconds: 1),
+        ),
+        isNull,
+      );
+    });
+
+    test('401 仍然按 Token 不对报', () async {
+      final gateway = gatewayWith(
+        (_) async => http.Response('{"error":"unauthorized"}', 401),
+      );
+      await expectLater(
+        gateway.watchMeta(
+          config: config,
+          token: token,
+          since: 0,
+          timeout: const Duration(seconds: 1),
+        ),
+        throwsA(
+          isA<ServerBackupException>().having(
+            (e) => e.message,
+            'message',
+            contains('Token'),
+          ),
+        ),
+      );
+    });
+  });
+
+  test('配置不全时连请求都不发', () async {    var called = false;
     final gateway = gatewayWith((_) async {
       called = true;
       return http.Response('{}', 200);

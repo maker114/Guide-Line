@@ -7,6 +7,8 @@ import hashlib
 import json
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -38,6 +40,30 @@ class BackupStoreTest(unittest.TestCase):
 
     def read_meta_json(self) -> dict:
         return json.loads((self.data_dir / "meta.json").read_text(encoding="utf-8"))
+
+    def test_wait_for_revision_returns_immediately_or_times_out(self) -> None:
+        store = self.make_store()
+        self.assertIsNone(store.wait_for_revision(0, 0.05))
+
+        meta = store.put(payload("first"), base_revision=0, saved_at=1)
+        self.assertEqual(store.wait_for_revision(0, 0.01), meta)
+        self.assertIsNone(store.wait_for_revision(meta.revision, 0.05))
+
+    def test_wait_for_revision_wakes_up_on_put(self) -> None:
+        store = self.make_store()
+        result: list[BackupMeta | None] = []
+
+        def waiter() -> None:
+            result.append(store.wait_for_revision(0, 2.0))
+
+        thread = threading.Thread(target=waiter)
+        thread.start()
+        time.sleep(0.1)
+        meta = store.put(payload("wake"), base_revision=0, saved_at=1)
+        thread.join(timeout=2)
+
+        self.assertFalse(thread.is_alive(), "put 之后等待应该立刻返回")
+        self.assertEqual(result, [meta])
 
     def test_first_put_writes_all_files(self) -> None:
         store = self.make_store()

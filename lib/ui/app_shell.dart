@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app/app_controller.dart';
-import '../app/auto_sync_state.dart';
 import '../platform/shortcut_channel.dart';
 import 'common/auto_sync_panels.dart';
 import 'common/sync_status_indicator.dart';
@@ -710,7 +709,7 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final GlobalKey<InspirationTabState> _inspirationKey =
       GlobalKey<InspirationTabState>();
   late int _index = widget.app.prefs.lastTabIndex.clamp(0, 3);
@@ -770,6 +769,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageProgress.value = _index.toDouble();
     _pages.addListener(_syncPageProgress);
     _bindCaptureShortcut();
@@ -787,10 +787,21 @@ class _AppShellState extends State<AppShell> {
     // 比出来的那三扇弹窗（本次改动 / 开机二选一 / 连不上）由 `AutoSyncPanels`
     // 端出来 —— 手机外壳与桌面外壳挂的是**同一份**（ADR-095 第 ⑥ 条）。
     unawaited(widget.app.startupSyncCheck());
+    // 服务器那条：如果开着，先静默比对一次再挂长轮询（关着时只读一次偏好）。
+    unawaited(widget.app.startServerAutoSync());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 退到后台就停掉长轮询 / 轮询，回来再续上（服务器同步只在运行期间跑）。
+    widget.app.setServerAutoSyncForeground(
+      state == AppLifecycleState.resumed || state == AppLifecycleState.inactive,
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.app.removeListener(_openPendingReminderTask);
     _pages
       ..removeListener(_syncPageProgress)
@@ -822,31 +833,6 @@ class _AppShellState extends State<AppShell> {
         ),
       );
     });
-  }
-
-  /// 同步没完成的原因（点右上角那枚黄/红胶囊看）—— 原话照摆，不去掉细节。
-  ///
-  /// 标题按状态走：红的（failed）是"这次真的没传上去"，其余是"这次没传，
-  /// 你看一眼"—— 直接拿它自己的 `label` 当标题（「云端有更新」「两边都改过」
-  /// 「GitHub 未连接」…），比统一写一句"这次没能上传"准确。
-  Future<void> _showAutoSyncReason() async {
-    final state = widget.app.autoSync;
-    final reason = state.reason;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(
-          state.phase == AutoSyncPhase.failed ? '这次没能上传' : state.label,
-        ),
-        content: Text(reason.isEmpty ? '没有拿到原因。' : reason),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
   }
 
   /// 把 `PageController` 的像素偏移换算成"第几页 + 小数"，喂给底栏。
@@ -996,8 +982,20 @@ class _AppShellState extends State<AppShell> {
               // "我这份数据上传了没"和当前翻到哪一页无关。
               SyncStatusIndicator(
                 state: app.autoSync,
-                onShowReason: () => _showAutoSyncReason(),
+                onShowReason: () => showAutoSyncReason(context, app.autoSync),
               ),
+              if (app.serverAutoSync.isVisible) ...<Widget>[
+                Icon(
+                  Icons.dns_outlined,
+                  size: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+                SyncStatusIndicator(
+                  state: app.serverAutoSync,
+                  onShowReason: () =>
+                      showAutoSyncReason(context, app.serverAutoSync),
+                ),
+              ],
               if (_index == 3)
                 TextButton(
                   onPressed: () => showAboutApp(context, app),

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/app_controller.dart';
-import '../../app/auto_sync_state.dart';
 import '../../platform/window_chrome.dart';
+import '../common/auto_sync_panels.dart';
 import '../common/sync_status_indicator.dart';
 import '../events/event_tab.dart';
 import '../inspiration/inspiration_tab.dart';
@@ -208,8 +208,20 @@ class _DesktopShellState extends State<DesktopShell> {
           ),
           SyncStatusIndicator(
             state: app.autoSync,
-            onShowReason: _showAutoSyncReason,
+            onShowReason: () => showAutoSyncReason(context, app.autoSync),
           ),
+          if (app.serverAutoSync.isVisible) ...<Widget>[
+            Icon(
+              Icons.dns_outlined,
+              size: 14,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            SyncStatusIndicator(
+              state: app.serverAutoSync,
+              onShowReason: () =>
+                  showAutoSyncReason(context, app.serverAutoSync),
+            ),
+          ],
           TextButton(
             onPressed: () => showAboutApp(context, app),
             child: const Text('关于'),
@@ -233,31 +245,6 @@ class _DesktopShellState extends State<DesktopShell> {
               onPressed: () => WindowChrome.close(),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  /// 同步没完成的原因（点右上角那枚黄/红胶囊看）—— 原话照摆，不去掉细节。
-  ///
-  /// 与手机外壳同一套文案（标题按状态走：红的 `failed` 是"这次真的没传上去"，
-  /// 其余直接拿状态自己的 `label` 当标题）。两处都写是因为它读的是**当前这个
-  /// 外壳的 `context`**，提到公共文件反而要再传一层 context。
-  Future<void> _showAutoSyncReason() async {
-    final state = widget.app.autoSync;
-    final reason = state.reason;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(
-          state.phase == AutoSyncPhase.failed ? '这次没能上传' : state.label,
-        ),
-        content: Text(reason.isEmpty ? '没有拿到原因。' : reason),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('知道了'),
-          ),
         ],
       ),
     );

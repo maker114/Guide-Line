@@ -54,6 +54,7 @@ python3 server/run.py --check          # 打印绑定地址 / 数据目录 / 是
 | GET | `/v1/backup` | 200 gzip | 原样字节；头 `X-Backup-Revision/Sha256/Saved-At`、`X-Record-Count`、`X-App-Version`；没有备份时 404 `empty` |
 | HEAD | `/v1/backup` | 200 | 与 GET 相同的头，无 body |
 | GET | `/v1/backup/meta` | 200 JSON | 元数据；没有备份时 404 `empty` |
+| GET | `/v1/backup/watch?since=N&timeout=25` | 200 JSON / 204 | 长轮询：等到上传编号大于 `N` 时回元数据；等到 `timeout` 还没有新版本就回 204（无 body）。`timeout` 默认 25、上限 50 秒 |
 | PUT | `/v1/backup` | 201 JSON | 上传新版本；带 `X-Backup-*` 响应头 |
 | GET | `/v1/history` | 200 JSON | `{"items":[meta...]}`，新的在前，最多 `GL_HISTORY` 条 |
 | GET | `/v1/history/{revision}` | 200 gzip | 取历史版本；不存在 404 |
@@ -66,6 +67,8 @@ PUT 请求头：
 - `X-App-Version`（可选，服务端截到 40 字符）。
 
 `X-Base-Revision` 与当前版本不一致时返回 `409 {"error":"version_conflict","currentRevision":n}`，不会改动任何数据；请求体超过 `GL_MAX_BYTES` 返回 `413`，空 body 返回 `400`。服务端不解析 gzip 内容。
+
+`/v1/backup/watch` 是给"另一台设备推上去之后，这边自动刷新"用的：客户端带着自己看到的版本号 `since` 挂起，服务器每次成功 `PUT` 都会唤醒等待者；没有改动时请求最多挂 `timeout` 秒后回 `204`，不空转、不读整份数据。每台在线客户端占一条挂起的线程（`ThreadingHTTPServer` 一线程一请求），自用规模足够；反向代理的超时不要低于 50 秒，否则长轮询会被中途掐断。
 
 ## 存储与一致性
 

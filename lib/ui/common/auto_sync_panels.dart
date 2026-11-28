@@ -91,6 +91,11 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
       await _askStartupSync(startup);
       return;
     }
+    final server = widget.app.pendingServerSync;
+    if (server != null) {
+      await _askServerSync(server);
+      return;
+    }
     final offline = widget.app.pendingStartupOfflineWarning;
     if (offline != null) {
       await _warnOffline(offline);
@@ -206,6 +211,46 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
     }
   }
 
+  /// 「服务器和这台设备对不上」那一屏：与 GitHub 那条同一套面板，
+  /// 只是标签写「服务器 / 本地」。
+  Future<void> _askServerSync(StartupSyncRequest request) async {
+    final choice = await showStoreDiffSheet(
+      widget.shellContext,
+      diff: request.diff,
+      title: '服务器和这台设备对不上',
+      baseLabel: '服务器数据',
+      targetLabel: '这台设备',
+      confirmLabel: '覆盖服务器数据',
+      cancelLabel: '使用服务器数据',
+      barrierDismissible: false,
+      hideConfirm: request.pullOnly,
+      note: request.message,
+      cloudLine: request.cloudStore == null || request.localStore == null
+          ? null
+          : recordCountLine(
+              sideLabel: '服务器',
+              store: request.cloudStore!,
+              shortCommit: request.cloudCommit,
+            ),
+      localLine: request.cloudStore == null || request.localStore == null
+          ? null
+          : recordCountLine(
+              sideLabel: '本地',
+              store: request.localStore!,
+              shortCommit: request.localCommit,
+            ),
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case DiffSheetResult.confirm:
+        await widget.app.acceptServerStartupPush();
+      case DiffSheetResult.cancel:
+        await widget.app.acceptServerStartupPull();
+      case DiffSheetResult.dismissed:
+        widget.app.dismissServerStartupSync();
+    }
+  }
+
   /// 连不上 GitHub 时的警告（需求⑤）：说清"照常编辑也行，但这段时间跟云端对不上"。
   ///
   /// 点掉之后调 `ackStartupOfflineWarning`：当天不再弹，但右上那枚
@@ -234,4 +279,26 @@ class _AutoSyncPanelsState extends State<AutoSyncPanels> {
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+/// 点标题栏那枚黄 / 红胶囊时弹的原因（GitHub 与服务器两条共用）。
+Future<void> showAutoSyncReason(
+  BuildContext context,
+  AutoSyncState state,
+) async {
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: Text(
+        state.phase == AutoSyncPhase.failed ? '这次没能上传' : state.label,
+      ),
+      content: Text(state.reason.isEmpty ? '没有拿到原因。' : state.reason),
+      actions: <Widget>[
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: const Text('知道了'),
+        ),
+      ],
+    ),
+  );
 }

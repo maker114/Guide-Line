@@ -182,6 +182,9 @@ class BackupStore:
         self._meta_path = self.data_dir / META_NAME
         self._history_dir = self.data_dir / HISTORY_DIR_NAME
         self._lock = threading.Lock()
+        # 长轮询（`GET /v1/backup/watch`）靠它等"版本又往上走了"：
+        # 与 `_lock` 同一把锁，写入方在版本落定后 `notify_all()`。
+        self._condition = threading.Condition(self._lock)
 
         self._history_dir.mkdir(parents=True, exist_ok=True)
         self._meta = _read_meta_file(self._meta_path)
@@ -223,6 +226,31 @@ class BackupStore:
                 _LOG.error("读取历史版本 %d 失败: %s", revision, exc)
                 return None
             return meta, data
+
+    def wait_for_revision(
+        self, since: int, timeout: float
+    ) -> BackupMeta | None:
+        """等到版本号大于 ``since`` 或超时。
+
+        返回新的元数据；`since` 已经落后于当前版本时立刻返回；超时返回 ``None``。
+        客户端靠它做长轮询：一次等待只占一条线程，服务器上没有改动时不会空转。
+        """
+        if since < 0:
+            raise ValueError("since 不能为负")
+        with self._condition:
+            current = self._meta.revision if self._meta is not None else 0
+            if current > since:
+                return self._meta
+            self._condition.wait_for(
+                lambda: (
+                    (self._meta.revision if self._meta is not None else 0)
+                    > since
+                ),
+                timeout=timeout,
+            )
+            if self._meta is not None and self._meta.revision > since:
+                return self._meta
+            return None
 
     def history(self) -> list[BackupMeta]:
         """按版本号从新到旧返回，最多 ``history_limit`` 条。"""
@@ -291,9 +319,13 @@ class BackupStore:
                 atomic_write_bytes(self._meta_path, _meta_bytes(meta))
             except OSError:
                 self._meta = meta
+                # 版本已经在内存与 current.gz 里推进了；等待长轮询的客户端
+                # 应该立刻看到它，而不是等到超时。
+                self._condition.notify_all()
                 raise
 
             self._meta = meta
+            self._condition.notify_all()
             try:
                 self._gc_unlocked()
             except OSError as exc:  # 清理失败不影响这次已经成功的写入

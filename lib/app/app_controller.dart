@@ -110,6 +110,8 @@ class AppController extends ChangeNotifier {
       serverCredentials: serverCredentials,
       remindersSupportedOverride: remindersSupportedOverride,
     ).._loadBackgroundBytes();
+    // 两条同步只能开一条：旧版本可能两条都开着，这里按"最近成功同步过的那条"收口。
+    controller._normalizeSyncPipelines();
     // 灵感箱空态那句轮换文案**每次启动重抽**（ADR-084）。落进偏好是为了
     // "同一次运行里不再变" —— 界面只读它，不自己抽。
     controller.rollEmptyBoxLine();
@@ -132,6 +134,12 @@ class AppController extends ChangeNotifier {
   }) =>
       DataTransferPlatform.shareFile(path, text: text, subject: subject);
 
+  /// 有没有推开的编辑页（自动拉取要避开它：那一下会整份重载工作区）。
+  ///
+  /// 由 [editSessionObserver] 维护；与 `storage.editedSinceSessionStart`
+  /// 不是一回事 —— 那个记"写过盘没有"，这个记"用户手上有没有一页还没退"。
+  bool _editingPageOpen = false;
+
   /// 编辑会话的**路由观察者**：推开一个页面 = 一段编辑会话的开始，回到外壳 = 结束。
   ///
   /// 为什么用观察者而不是在每个编辑页里埋点：编辑面散在项目详情 / 事件详情 / 任务线 /
@@ -144,12 +152,21 @@ class AppController extends ChangeNotifier {
   /// 回到外壳这一下同时是**自动同步的触发点**（handoff #87c57e）：先落盘，再看要不要
   /// 自动上传 —— 两件事都在 [autoSyncAfterHome] 里，顺序也在那儿，别在这里拆开。
   late final NavigatorObserver editSessionObserver = _EditSessionObserver(
-    onEnter: storage.beginEditSession,
+    onEnter: () {
+      storage.beginEditSession();
+      _editingPageOpen = true;
+    },
     // 回到外壳这一下同时干三件事，顺序别拆：先落盘（endEditSession 在
     // autoSyncAfterHome 里），再看要不要自动上传，最后把提醒排期对齐一遍。
     // 提醒挂在这里是**兜底**：万一将来有哪条编辑路径没经过 `run`，回到外壳也会补上。
     onLeave: () {
+      _editingPageOpen = false;
       unawaited(autoSyncAfterHome());
+      // 服务器有更新但刚才正在输入 / 在编辑页里，被挡下了：现在补看一次。
+      if (_serverSyncDeferred) {
+        _serverSyncDeferred = false;
+        unawaited(serverAutoSyncNow());
+      }
       unawaited(refreshReminders());
     },
   );
@@ -1354,6 +1371,8 @@ class AppController extends ChangeNotifier {
       workspace.updatePrefs(
         prefs.copyWith(
           githubBackupEnabled: cleaned.enabled,
+          // 两条同步只能开一条：开这条就把服务器那条关掉（配置与 Token 保留）。
+          serverSyncEnabled: cleaned.enabled ? false : prefs.serverSyncEnabled,
           githubBackupOwner: cleaned.owner,
           githubBackupRepo: cleaned.repo,
           githubBackupBranch: cleaned.branch,
@@ -1368,6 +1387,10 @@ class AppController extends ChangeNotifier {
       }
       if (moved) storage.clearSyncRecord();
       gitHubConfigRevision += 1;
+      if (cleaned.enabled) {
+        // 开 GitHub 这条 ⇒ 服务器那条必须停（含正在等着的长轮询）。
+        _stopServerAutoSync();
+      }
       notifyListeners();
       return null;
     } catch (error) {
@@ -1574,6 +1597,40 @@ class AppController extends ChangeNotifier {
   /// [ackStartupOfflineWarning]。null = 这次不弹（连上了，或者今天已经弹过）。
   String? pendingStartupOfflineWarning;
 
+  // ── 服务器同步的自动那一半 ─────────────────────────────────────────────
+  //
+  // 与 GitHub 那条**互斥**：两条同步只能开一条（开一条就把另一条关掉，
+  // 配置与 Token 保留）。服务器这条允许**自动拉取**，条件是"本机自上次同步后
+  // 内容没变、而且没有打开的编辑页 / 输入框"：本机没改过时拉取不会丢掉任何内容，
+  // 拉取前仍会强制轮转本地备份。口径见 ADR-108。
+
+  /// 服务器自动同步的当前状态（标题栏那枚带服务器图标的指示器读它）。
+  AutoSyncState serverAutoSync = const AutoSyncState.idle();
+
+  /// 服务器那边"要你看一眼"的冲突；非 null ⇒ 外壳摆差异面板。
+  StartupSyncRequest? pendingServerSync;
+
+  /// 自动同步在跑（防重入）。
+  bool _serverSyncInFlight = false;
+
+  /// 长轮询循环是否活着。
+  bool _serverWatchRunning = false;
+
+  /// 应用是否在前台（退到后台就停掉等待与轮询，回来再续上）。
+  bool _appInForeground = true;
+
+  /// 旧服务端没有 `/v1/backup/watch` ⇒ 降级成定时轮询。
+  bool _serverWatchUnsupported = false;
+
+  /// 服务器有新版本，但刚才正在编辑页 / 输入框里 ⇒ 回到列表后补拉。
+  bool _serverSyncDeferred = false;
+
+  Timer? _serverPollTimer;
+  Timer? _serverAutoHideTimer;
+
+  /// 服务器配置 + Token 的会话缓存（长轮询每 25 秒一轮，不能每轮都打安全存储）。
+  ({ServerBackupConfig config, String token})? _serverConfigCache;
+
   /// `done` 那颗绿胶囊自己收场的计时器（需求②：停 2 秒再按动画收掉）。
   Timer? _autoHideTimer;
 
@@ -1620,11 +1677,35 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 服务器那条的指示器状态（与 GitHub 那条各自计时、各自收场）。
+  void _setServerAutoSync(AutoSyncState next) {
+    if (next == serverAutoSync) return;
+    _serverAutoHideTimer?.cancel();
+    _serverAutoHideTimer = null;
+    serverAutoSync = next;
+    if (next.phase == AutoSyncPhase.done) {
+      _serverAutoHideTimer = Timer(autoSyncDoneLinger, _hideServerAutoSyncDone);
+    }
+    notifyListeners();
+  }
+
+  void _hideServerAutoSyncDone() {
+    _serverAutoHideTimer = null;
+    if (serverAutoSync.phase != AutoSyncPhase.done) return;
+    serverAutoSync = const AutoSyncState.idle();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     // 计时器到点还会摸一次 notifyListeners：不在这里掐掉，退出界面之后就会炸。
     _autoHideTimer?.cancel();
     _autoHideTimer = null;
+    _serverAutoHideTimer?.cancel();
+    _serverAutoHideTimer = null;
+    _serverPollTimer?.cancel();
+    _serverPollTimer = null;
+    _serverWatchRunning = false;
     super.dispose();
   }
 
@@ -1663,6 +1744,8 @@ class AppController extends ChangeNotifier {
     storage.endEditSession();
     if (!edited) return;
     await _autoSyncOnce(announce: true);
+    // 两条互斥：另一条没开时这一步只读一次偏好就返回，不联网。
+    await _serverAutoSyncOnce(announce: true);
   }
 
   /// 每次进软件跑一次**静默比对**（需求⑤）：不转圈，只看要不要摆差异面板。
@@ -2253,6 +2336,8 @@ class AppController extends ChangeNotifier {
       workspace.updatePrefs(
         prefs.copyWith(
           serverSyncEnabled: cleaned.enabled,
+          // 两条同步只能开一条：开这条就把 GitHub 那条关掉（仓库、Token、记账都保留）。
+          githubBackupEnabled: cleaned.enabled ? false : prefs.githubBackupEnabled,
           serverSyncBaseUrl: cleaned.baseUrl,
           serverSyncFingerprint: cleaned.fingerprint,
         ),
@@ -2264,6 +2349,14 @@ class AppController extends ChangeNotifier {
         await serverStore.writeToken(trimmed);
       }
       if (moved) storage.clearServerSyncRecord();
+      _serverConfigCache = null;
+      if (cleaned.enabled) {
+        // 开服务器这条 ⇒ GitHub 那条必须停。
+        _stopGitHubAutoSync();
+        unawaited(startServerAutoSync());
+      } else {
+        _stopServerAutoSync();
+      }
       notifyListeners();
       return null;
     } catch (error) {
@@ -2467,15 +2560,35 @@ class AppController extends ChangeNotifier {
     }
 
     final remote = preview.remote!;
-    final store = remote.payload!.store;
-    final count = liveRecordCount(store);
-    final error = applyImport(store);
-    if (error != null) return (ok: false, message: '拉取失败：$error');
+    final count = liveRecordCount(remote.payload!.store);
+    final applied = _applyServerRemote(remote);
+    if (!applied.ok) return (ok: false, message: '拉取失败：${applied.message}');
+    return (
+      ok: true,
+      message: '已拉取服务器备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
+          '服务器上的上传编号：${remote.commitSha}\n'
+          '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
+    );
+  }
 
-    final now = Ids.nowMillis();
+  /// 把服务器上的那一份覆盖到本机（自动拉取与手动拉取共用这一条）。
+  ///
+  /// `applyImport` 会先强制轮转本地备份，所以"拉错了"还能从备份退回来。
+  ({bool ok, String message}) _applyServerRemote(RemoteBackup remote) {
+    final store = remote.payload?.store;
+    if (store == null) {
+      return (ok: false, message: '服务器上的备份读不出 Guide Line 数据');
+    }
+    final count = liveRecordCount(store);
+    if (count == 0) {
+      return (ok: false, message: '服务器上的备份是 0 条记录，不算可用备份');
+    }
+    final error = applyImport(store);
+    if (error != null) return (ok: false, message: error);
+
     storage.writeServerSyncRecord(
       SyncRecord(
-        syncedAt: now,
+        syncedAt: Ids.nowMillis(),
         remoteSha: remote.sha,
         recordCount: count,
         commitSha: remote.commitSha,
@@ -2484,12 +2597,470 @@ class AppController extends ChangeNotifier {
       ),
     );
     notifyListeners();
-    return (
-      ok: true,
-      message: '已拉取服务器备份：$count 条记录 · ${formatStamp(remote.savedAt)}\n'
-          '服务器上的上传编号：${remote.commitSha}\n'
-          '拉取之前的本地数据已先轮转进备份，可在「备份与恢复」里退回。',
+    return (ok: true, message: '已刷新：$count 条记录');
+  }
+
+  /// 服务器上的内容与上次同步时一模一样（只是被重新上传了一次）：只对齐记账。
+  void _rememberServerSynced(ServerMeta meta) {
+    storage.writeServerSyncRecord(
+      SyncRecord(
+        syncedAt: Ids.nowMillis(),
+        remoteSha: meta.sha256,
+        recordCount: meta.recordCount,
+        commitSha: '${meta.revision}',
+        localSha: workspace.localContentSha(),
+        localCommitSha: '${meta.revision}',
+      ),
     );
+    notifyListeners();
+  }
+
+  /// 启动服务器自动同步：先静默比对一次，再挂上长轮询。
+  ///
+  /// 只在"启用服务器同步"时联网；GitHub 那条开着时这里只读一次偏好就返回。
+  Future<void> startServerAutoSync() async {
+    if (!prefs.serverSyncEnabled || _serverWatchRunning) return;
+    await _serverAutoSyncOnce(announce: false);
+    if (!prefs.serverSyncEnabled || !_appInForeground) return;
+    if (_serverWatchUnsupported) {
+      _scheduleServerPoll();
+      return;
+    }
+    unawaited(_runServerWatchLoop());
+  }
+
+  /// 立刻比对一次（回到前台、编辑页退出后的补看、测试都用它）。
+  Future<void> serverAutoSyncNow({bool announce = false}) =>
+      _serverAutoSyncOnce(announce: announce);
+
+  /// 前后台切换：退到后台就停掉长轮询与定时器，回来再续上。
+  void setServerAutoSyncForeground(bool foreground) {
+    if (_appInForeground == foreground) return;
+    _appInForeground = foreground;
+    if (!foreground) {
+      _serverWatchRunning = false;
+      _serverPollTimer?.cancel();
+      _serverPollTimer = null;
+      return;
+    }
+    if (!prefs.serverSyncEnabled) return;
+    unawaited(startServerAutoSync());
+  }
+
+  /// 服务器配置 + Token：**一次会话只读一次安全存储**，配置变了就作废。
+  Future<({ServerBackupConfig config, String token})?> _autoServerConfig() async {
+    if (!prefs.serverSyncEnabled) return null;
+    final cache = _serverConfigCache;
+    if (cache != null &&
+        cache.config.baseUrl == prefs.serverSyncBaseUrl &&
+        cache.config.fingerprint == prefs.serverSyncFingerprint) {
+      return cache;
+    }
+    final loaded = await readServerBackupConfig();
+    if (loaded.token.isEmpty) return null;
+    _serverConfigCache = loaded;
+    return loaded;
+  }
+
+  /// 长轮询循环：服务器一改就回来比对一次；旧服务端则降级成轮询。
+  Future<void> _runServerWatchLoop() async {
+    if (_serverWatchRunning) return;
+    _serverWatchRunning = true;
+    try {
+      while (_serverWatchRunning && _appInForeground) {
+        final saved = await _autoServerConfig();
+        if (saved == null) break;
+        final record = storage.readServerSyncRecord();
+        final since = int.tryParse(record?.commitSha ?? '') ?? 0;
+        try {
+          final meta = await server.watchMeta(
+            config: saved.config,
+            token: saved.token,
+            since: since,
+          );
+          if (!_serverWatchRunning || !_appInForeground) break;
+          if (meta != null) {
+            await _serverAutoSyncOnce(announce: true);
+            // 被"正在输入 / 编辑页"挡下时服务端的版本一直比 since 新，
+            // 不隔一下就会变成忙等。
+            await Future<void>.delayed(const Duration(seconds: 4));
+          }
+        } on ServerWatchUnsupported {
+          _serverWatchUnsupported = true;
+          break;
+        } on ServerBackupException catch (error) {
+          if (!_appInForeground) break;
+          _setServerAutoSync(
+            error.network
+                ? AutoSyncState.offline(error.message)
+                : AutoSyncState.failed(error.message),
+          );
+          await Future<void>.delayed(const Duration(seconds: 10));
+        } catch (error) {
+          if (!_appInForeground) break;
+          _setServerAutoSync(AutoSyncState.failed('服务器同步失败：$error'));
+          await Future<void>.delayed(const Duration(seconds: 10));
+        }
+      }
+    } finally {
+      _serverWatchRunning = false;
+      if (_serverWatchUnsupported &&
+          _appInForeground &&
+          prefs.serverSyncEnabled) {
+        _scheduleServerPoll();
+      }
+    }
+  }
+
+  /// 旧服务端的降级路径：每 60 秒读一次元信息（不下载整份数据）。
+  void _scheduleServerPoll([Duration delay = const Duration(seconds: 60)]) {
+    _serverPollTimer?.cancel();
+    _serverPollTimer = Timer(delay, () {
+      _serverPollTimer = null;
+      if (!_appInForeground || !prefs.serverSyncEnabled) return;
+      unawaited(_pollServerOnce());
+    });
+  }
+
+  Future<void> _pollServerOnce() async {
+    await _serverAutoSyncOnce(announce: true);
+    if (_appInForeground && prefs.serverSyncEnabled) _scheduleServerPoll();
+  }
+
+  /// 一次性补看（被"正在输入"挡下之后用）。
+  void _scheduleServerRetry([Duration delay = const Duration(seconds: 10)]) {
+    _serverPollTimer?.cancel();
+    _serverPollTimer = Timer(delay, () {
+      _serverPollTimer = null;
+      if (!_appInForeground || !prefs.serverSyncEnabled) return;
+      unawaited(_serverAutoSyncOnce(announce: false));
+    });
+  }
+
+  /// 比对一次并按判定行事。与 GitHub 那条同一条防重入闸。
+  Future<void> _serverAutoSyncOnce({required bool announce}) async {
+    if (_serverSyncInFlight) return;
+    _serverSyncInFlight = true;
+    try {
+      final saved = await _autoServerConfig();
+      if (saved == null) return;
+      if (announce) _setServerAutoSync(const AutoSyncState.running());
+      await _serverSyncLocked(saved);
+    } finally {
+      _serverSyncInFlight = false;
+    }
+  }
+
+  Future<void> _serverSyncLocked(
+    ({ServerBackupConfig config, String token}) saved,
+  ) async {
+    final ServerMeta? meta;
+    try {
+      meta = await server.readMeta(config: saved.config, token: saved.token);
+    } on ServerBackupException catch (error) {
+      _setServerAutoSync(
+        error.network
+            ? AutoSyncState.offline(error.message)
+            : AutoSyncState.failed(error.message),
+      );
+      return;
+    }
+
+    final record = storage.readServerSyncRecord();
+    final local = workspace.buildStoreFile();
+    final localCount = liveRecordCount(local);
+    final localSha = workspace.localContentSha();
+
+    if (localCount == 0) {
+      if (meta != null && meta.recordCount > 0) {
+        await _offerServerPullOnly(saved, meta);
+      } else {
+        _setServerAutoSync(const AutoSyncState.idle());
+      }
+      return;
+    }
+
+    // 服务器上还没有备份（或只有 0 条）：本机有数据就直接建一份。
+    if (meta == null || meta.recordCount == 0) {
+      await _pushServerAuto(saved);
+      return;
+    }
+
+    final recordedRevision = int.tryParse(record?.commitSha ?? '') ?? 0;
+    final remoteChanged = record == null || meta.revision != recordedRevision;
+
+    if (record == null) {
+      // 第一次配这条：先看服务器那份与本机是不是同一份，不同才让人选。
+      final remote = await server.readBackup(
+        config: saved.config,
+        token: saved.token,
+      );
+      final remoteStore = remote?.payload?.store;
+      if (remoteStore == null) {
+        _setServerAutoSync(
+          const AutoSyncState.failed('服务器上有备份，但读不出内容，这次没有动本机'),
+        );
+        return;
+      }
+      if (!diffStores(base: remoteStore, target: local).hasChanges) {
+        _rememberServerSynced(meta);
+        _setServerAutoSync(const AutoSyncState.idle());
+        return;
+      }
+      await _offerServerConflict(saved, meta, remote: remote);
+      return;
+    }
+
+    final localChanged = record.localSha.isEmpty || record.localSha != localSha;
+
+    if (!remoteChanged) {
+      if (!localChanged) {
+        _setServerAutoSync(const AutoSyncState.idle());
+        return;
+      }
+      await _pushServerAuto(saved);
+      return;
+    }
+
+    // 服务器版本变了，但内容与上次同步时一模一样（另一台设备推了同一份）：
+    // 只把记账对齐，不下载、不覆盖。
+    if (record.remoteSha.isNotEmpty && record.remoteSha == meta.sha256) {
+      _rememberServerSynced(meta);
+      _setServerAutoSync(const AutoSyncState.idle());
+      return;
+    }
+
+    if (localChanged) {
+      await _offerServerConflict(saved, meta);
+      return;
+    }
+
+    // 本机没改过：拉取不会丢掉任何内容。但先避开"手上还有一页 / 正在输入"，
+    // 那一下会整份重载工作区。
+    if (_editingPageOpen || _isTextEditing || !_appInForeground) {
+      _deferServerRefresh();
+      return;
+    }
+    await _pullServerAuto(saved);
+  }
+
+  Future<void> _pushServerAuto(
+    ({ServerBackupConfig config, String token}) saved,
+  ) async {
+    _setServerAutoSync(const AutoSyncState.running());
+    final result = await pushServerBackup(saved.config, saved.token);
+    _reportServerPush(result);
+  }
+
+  Future<void> _pullServerAuto(
+    ({ServerBackupConfig config, String token}) saved,
+  ) async {
+    _setServerAutoSync(const AutoSyncState.running());
+    final RemoteBackup? remote;
+    try {
+      remote = await server.readBackup(
+        config: saved.config,
+        token: saved.token,
+      );
+    } on ServerBackupException catch (error) {
+      _setServerAutoSync(AutoSyncState.failed(error.message));
+      return;
+    }
+    if (remote == null) {
+      _setServerAutoSync(const AutoSyncState.idle());
+      return;
+    }
+    final applied = _applyServerRemote(remote);
+    if (!applied.ok) {
+      _setServerAutoSync(AutoSyncState.failed(applied.message));
+      return;
+    }
+    _setServerAutoSync(AutoSyncState.done(remote.commitSha));
+  }
+
+  void _reportServerPush(PushOutcome result) {
+    if (!result.ok) {
+      if (result.message.contains('覆盖服务器')) {
+        _setServerAutoSync(
+          AutoSyncState.blocked(
+            label: '服务器有更新',
+            reason: result.message,
+          ),
+        );
+      } else {
+        _setServerAutoSync(AutoSyncState.failed(result.message));
+      }
+      return;
+    }
+    if (!result.wrote) {
+      _setServerAutoSync(const AutoSyncState.idle());
+      return;
+    }
+    _setServerAutoSync(AutoSyncState.done(result.commitSha));
+  }
+
+  /// 本机 0 条、服务器有数据：只给「使用服务器数据」一个按钮（与 GitHub 同口径）。
+  Future<void> _offerServerPullOnly(
+    ({ServerBackupConfig config, String token}) saved,
+    ServerMeta meta,
+  ) async {
+    final remote = await server.readBackup(
+      config: saved.config,
+      token: saved.token,
+    );
+    final remoteStore = remote?.payload?.store;
+    if (remoteStore == null) {
+      _setServerAutoSync(
+        const AutoSyncState.failed('服务器上有备份，但读不出内容，这次没有动本机'),
+      );
+      return;
+    }
+    final local = workspace.buildStoreFile();
+    pendingServerSync = StartupSyncRequest(
+      diff: diffStores(base: remoteStore, target: local),
+      message: '服务器上有 ${liveRecordCount(remoteStore)} 条记录，'
+          '这台设备上一个字都还没有。可以先把服务器那份取回来。',
+      pullOnly: true,
+      cloudStore: remoteStore,
+      localStore: local,
+      cloudCommit: '${meta.revision}',
+      localCommit: storage.readServerSyncRecord()?.commitSha ?? '',
+    );
+    _setServerAutoSync(
+      const AutoSyncState.blocked(
+        label: '没有可上传的记录',
+        reason: '这台设备还没有记录；服务器上有一份可以取回。',
+      ),
+    );
+    notifyListeners();
+  }
+
+  Future<void> _offerServerConflict(
+    ({ServerBackupConfig config, String token}) saved,
+    ServerMeta meta, {
+    RemoteBackup? remote,
+  }) async {
+    final fetched = remote ??
+        await server.readBackup(config: saved.config, token: saved.token);
+    final remoteStore = fetched?.payload?.store;
+    if (remoteStore == null) {
+      _setServerAutoSync(
+        const AutoSyncState.failed('服务器上有新版本，但读不出内容，这次没有动本机'),
+      );
+      return;
+    }
+    final local = workspace.buildStoreFile();
+    pendingServerSync = StartupSyncRequest(
+      diff: diffStores(base: remoteStore, target: local),
+      message: '服务器和这台设备都改过，请选择保留哪一边的数据。',
+      cloudStore: remoteStore,
+      localStore: local,
+      cloudCommit: '${meta.revision}',
+      localCommit: storage.readServerSyncRecord()?.commitSha ?? '',
+    );
+    _setServerAutoSync(
+      const AutoSyncState.blocked(
+        label: '服务器有更新',
+        reason: '服务器和这台设备都改过；看过差异再选保留哪一边。',
+      ),
+    );
+    notifyListeners();
+  }
+
+  /// 服务器有新版本，但本机正在编辑页 / 输入框里：先挡住，回到列表再补拉。
+  void _deferServerRefresh() {
+    _serverSyncDeferred = true;
+    _setServerAutoSync(
+      const AutoSyncState.blocked(
+        label: '服务器有更新',
+        reason: '服务器上有新版本；先完成手上的输入，回到列表后会自动刷新。',
+      ),
+    );
+    _scheduleServerRetry();
+  }
+
+  /// 用户在差异面板上点了「覆盖服务器数据」。
+  Future<void> acceptServerStartupPush() async {
+    if (pendingServerSync == null) return;
+    pendingServerSync = null;
+    _serverSyncDeferred = false;
+    _setServerAutoSync(const AutoSyncState.running());
+    final saved = await _autoServerConfig() ?? await readServerBackupConfig();
+    final result = await pushServerBackup(
+      saved.config,
+      saved.token,
+      overrideRemoteChanges: true,
+    );
+    _reportServerPush(result);
+  }
+
+  /// 用户在差异面板上点了「使用服务器数据」。
+  Future<void> acceptServerStartupPull() async {
+    if (pendingServerSync == null) return;
+    pendingServerSync = null;
+    _serverSyncDeferred = false;
+    final saved = await _autoServerConfig() ?? await readServerBackupConfig();
+    await _pullServerAuto(saved);
+  }
+
+  /// 面板被返回键 / 划走关掉：一个字节都没动，黄胶囊留着。
+  void dismissServerStartupSync() {
+    if (pendingServerSync == null) return;
+    pendingServerSync = null;
+    notifyListeners();
+  }
+
+  /// 停掉服务器自动同步（关开关、或改开 GitHub 那条时用）。
+  void _stopServerAutoSync() {
+    _serverWatchRunning = false;
+    _serverPollTimer?.cancel();
+    _serverPollTimer = null;
+    _serverSyncDeferred = false;
+    _serverConfigCache = null;
+    pendingServerSync = null;
+    if (serverAutoSync.phase != AutoSyncPhase.idle) {
+      _setServerAutoSync(const AutoSyncState.idle());
+    }
+  }
+
+  /// 停掉 GitHub 自动同步（改开服务器那条时用）。
+  void _stopGitHubAutoSync() {
+    pendingAutoPushDiff = null;
+    _pendingAutoPushMeta = null;
+    pendingStartupSync = null;
+    pendingStartupOfflineWarning = null;
+    if (autoSync.phase != AutoSyncPhase.idle) {
+      _setAutoSync(const AutoSyncState.idle());
+    }
+  }
+
+  /// 两条同步只能开一条：旧版本两条都开着时，保留"最近同步过"的那条。
+  ///
+  /// 都从没同步过就保留 GitHub（它是先有的那条），服务器那条关掉 ——
+  /// 想用服务器就再打开，届时 GitHub 那条会自动关。配置 / Token / 记账都不清。
+  void _normalizeSyncPipelines() {
+    if (!prefs.githubBackupEnabled || !prefs.serverSyncEnabled) return;
+    final githubAt = storage.readSyncRecord()?.syncedAt ?? 0;
+    final serverAt = storage.readServerSyncRecord()?.syncedAt ?? 0;
+    final keepServer = serverAt > githubAt;
+    workspace.updatePrefs(
+      prefs.copyWith(
+        githubBackupEnabled: !keepServer,
+        serverSyncEnabled: keepServer,
+      ),
+    );
+  }
+
+  /// 焦点是不是落在某个输入框里（自动拉取要避开"正在打字"）。
+  bool get _isTextEditing {
+    try {
+      final focusContext = FocusManager.instance.primaryFocus?.context;
+      if (focusContext == null) return false;
+      return focusContext.findAncestorStateOfType<EditableTextState>() != null;
+    } catch (_) {
+      // 纯逻辑测试里没有 WidgetsBinding：没有界面就没有"正在输入"。
+      return false;
+    }
   }
 
   /// 灵感箱空态那句轮换文案：**每次启动抽一次**，种子落进偏好（ADR-084）。

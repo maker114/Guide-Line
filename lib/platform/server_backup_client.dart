@@ -27,6 +27,14 @@ class ServerBackupException implements Exception {
   String toString() => message;
 }
 
+/// 旧服务端还没有 `GET /v1/backup/watch`（长轮询）时抛这个。
+///
+/// 它不是错误，而是一条**能力探测结果**：调用方收到它就降级成定时轮询，
+/// 不该把它显示成"同步失败"。
+class ServerWatchUnsupported implements Exception {
+  const ServerWatchUnsupported();
+}
+
 /// 服务器上那一份备份的元信息（不含内容）。
 class ServerMeta {
   const ServerMeta({
@@ -77,6 +85,17 @@ abstract interface class ServerBackupGateway {
   Future<ServerMeta?> readMeta({
     required ServerBackupConfig config,
     required String token,
+  });
+
+  /// 长轮询：等到上传编号大于 [since]，或 [timeout] 到期。
+  ///
+  /// 返回 `null` = 这段时间服务器上没有新版本（不是错误）。
+  /// 旧服务端没有这个接口时抛 [ServerWatchUnsupported]，调用方降级成定时轮询。
+  Future<ServerMeta?> watchMeta({
+    required ServerBackupConfig config,
+    required String token,
+    required int since,
+    Duration timeout = const Duration(seconds: 25),
   });
 
   /// 覆盖写远程那一份。
@@ -159,6 +178,43 @@ class HttpServerBackupGateway implements ServerBackupGateway {
   }
 
   @override
+  Future<ServerMeta?> watchMeta({
+    required ServerBackupConfig config,
+    required String token,
+    required int since,
+    Duration timeout = const Duration(seconds: 25),
+  }) async {
+    final cleaned = _checked(config);
+    if (since < 0) {
+      throw const ServerBackupException('上传编号不能为负');
+    }
+    final seconds = timeout.inSeconds.clamp(1, 50);
+    final response = await _send(
+      cleaned,
+      token,
+      (client) => client.get(
+        _uri(cleaned, '/v1/backup/watch?since=$since&timeout=$seconds'),
+        headers: _headers(token),
+      ),
+      // 服务端最多挂 50 秒；客户端留出余量，别把"等得久"当成"网络不好"。
+      requestTimeout: Duration(seconds: seconds + 15),
+    );
+    // 204 = 这段时间没有新版本（长轮询正常到期）。
+    if (response.statusCode == 204) return null;
+    if (response.statusCode == 404) {
+      final body = _tryDecodeObject(response);
+      // 旧服务端没有这个路由：这是能力探测结果，不是同步失败。
+      if (body == null || body['error'] == 'not_found') {
+        throw const ServerWatchUnsupported();
+      }
+      // "还没有备份"不算新版本。
+      return null;
+    }
+    if (response.statusCode >= 400) _throwFor(response);
+    return _metaFrom(_decodedObject(response));
+  }
+
+  @override
   Future<RemoteBackup> writeBackup({
     required ServerBackupConfig config,
     required String token,
@@ -232,13 +288,15 @@ class HttpServerBackupGateway implements ServerBackupGateway {
     String token,
     Future<http.Response> Function(http.Client client) request, {
     bool auth = true,
+    Duration? requestTimeout,
   }) async {
     if (auth && token.trim().isEmpty) {
       throw const ServerBackupException('还没填服务器 Token');
     }
+    final effectiveTimeout = requestTimeout ?? timeout;
     final client = _clientFactory(config);
     try {
-      return await request(client).timeout(timeout);
+      return await request(client).timeout(effectiveTimeout);
     } on SocketException catch (error) {
       throw ServerBackupException(
         '连不上 ${config.displayHost}：${error.osError?.message ?? error.message}\n'
@@ -247,8 +305,15 @@ class HttpServerBackupGateway implements ServerBackupGateway {
       );
     } on TimeoutException {
       throw ServerBackupException(
-        '请求超过 ${timeout.inSeconds} 秒未完成，请稍后再试',
+        '请求超过 ${effectiveTimeout.inSeconds} 秒未完成，请稍后再试',
         network: true,
+      );
+    } on HandshakeException {
+      // 自签证书 + 指纹固定：对不上时握手在到达 HTTP 层之前就失败了，
+      // 不接住会漏出英文的 `CERTIFICATE_VERIFY_FAILED`。
+      throw const ServerBackupException(
+        'TLS 握手失败：服务器证书与填进来的指纹对不上。\n'
+        '请到服务器上重新读一次证书指纹，或确认地址没有被别的服务顶替。',
       );
     } on http.ClientException catch (error) {
       throw ServerBackupException(_clientFailure(error.message), network: true);
@@ -284,6 +349,16 @@ class HttpServerBackupGateway implements ServerBackupGateway {
       throw ServerBackupException('服务器返回的不是 JSON 对象（HTTP ${response.statusCode}）');
     }
     return Map<String, dynamic>.from(root);
+  }
+
+  Map<String, dynamic>? _tryDecodeObject(http.Response response) {
+    try {
+      final root = jsonDecode(utf8.decode(response.bodyBytes));
+      if (root is Map) return Map<String, dynamic>.from(root);
+    } catch (_) {
+      // 404 的正文不是 JSON 也不影响判断（下面按"旧服务端"处理）。
+    }
+    return null;
   }
 
   ServerMeta _metaFrom(Map<String, dynamic> body) {

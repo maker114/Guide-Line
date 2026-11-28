@@ -9,7 +9,7 @@ import logging
 import re
 from http.server import BaseHTTPRequestHandler
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .config import Settings
 from .store import BackupMeta, BackupStore, VersionConflict
@@ -124,6 +124,13 @@ class GuidelineSyncHandler(BaseHTTPRequestHandler):
             self._unauthorized()
             return
 
+        if path == "/v1/backup/watch":
+            if method in ("GET", "HEAD"):
+                self._get_backup_watch()
+            else:
+                self._method_not_allowed("GET, HEAD")
+            return
+
         if path == "/v1/backup":
             if method in ("GET", "HEAD"):
                 self._get_backup()
@@ -183,6 +190,52 @@ class GuidelineSyncHandler(BaseHTTPRequestHandler):
             self._empty_backup()
             return
         self._send_json(200, meta.to_dict())
+
+    def _get_backup_watch(self) -> None:
+        """长轮询：等到上传编号大于 ``since``，或 ``timeout`` 秒到期。
+
+        客户端开着的时候靠它做"服务器一改、这边就刷新"；没有改动时这条请求
+        只是安静地挂着，不会反复读盘，也不会反复下载整份备份。
+        """
+        query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+        since = self._query_uint(query, "since", required=True)
+        if since is None:
+            return
+        timeout = self._query_uint(
+            query, "timeout", required=False, default=25, maximum=50
+        )
+        if timeout is None:
+            return
+
+        meta = self.store.wait_for_revision(since, float(timeout))
+        if meta is None:
+            self._send_no_content()
+            return
+        self._send_json(200, meta.to_dict())
+
+    def _query_uint(
+        self,
+        query: dict[str, list[str]],
+        name: str,
+        *,
+        required: bool,
+        default: int = 0,
+        maximum: int | None = None,
+    ) -> int | None:
+        values = query.get(name)
+        if not values or not values[0].strip():
+            if required:
+                self._bad_request(f"缺少 {name} 查询参数")
+                return None
+            return default
+        text = values[0].strip()
+        if not _UINT.match(text):
+            self._bad_request(f"{name} 必须是非负整数")
+            return None
+        value = int(text)
+        if maximum is not None and value > maximum:
+            value = maximum
+        return value
 
     def _get_history(self) -> None:
         items = [meta.to_dict() for meta in self.store.history()]
@@ -370,6 +423,12 @@ class GuidelineSyncHandler(BaseHTTPRequestHandler):
 
     def _empty_backup(self) -> None:
         self._error(404, "empty", "还没有备份")
+
+    def _send_no_content(self) -> None:
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+        self._responded = True
 
     def _not_found(self) -> None:
         close = self.command in ("PUT", "POST", "PATCH")
